@@ -11,9 +11,9 @@ qt_standard_project_setup()
 qt_add_executable(BalatroQt
     WIN32 MACOSX_BUNDLE
     main.cpp
-    mainwindow.cpp
-    mainwindow.h
-    mainwindow.ui
+    src/ui/mainwindow.cpp
+    src/ui/mainwindow.h
+    src/ui/mainwindow.ui
 )
 
 target_link_libraries(BalatroQt
