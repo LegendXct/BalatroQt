@@ -12,15 +12,12 @@ qt_standard_project_setup()
 qt_add_executable(BalatroQt
     WIN32 MACOSX_BUNDLE
     main.cpp
-    src/ui/mainwindow.cpp
-    src/ui/mainwindow.h
-    src/ui/mainwindow.ui
+    src/ui/mainwindow.cpp src/ui/mainwindow.h src/ui/mainwindow.ui
     src/utils/constants.h
     src/card/carddata.h src/card/carddata.cpp
     src/card/joker.h src/card/joker.cpp
     src/game/deck.h src/game/deck.cpp
     src/game/handevaluator.h src/game/handevaluator.cpp
-    src/card/jokereffect.h src/card/jokereffect.cpp
     src/game/gamestate.h src/game/gamestate.cpp
 )
 

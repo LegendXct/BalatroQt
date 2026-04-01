@@ -90,6 +90,16 @@ void GameState::discardCards(const QVector<int> &indices) {
 void GameState::enterShop() {
     mPhase = GamePhase::Shop;
     mGold += mHandsLeft * Constants::HAND_GOLD;
+
+    HandResult dummy{};
+    TriggerContext ctx{
+        dummy, *this, mHand, mHand, nullptr
+    };
+    for (const Joker &j : mJokers) {
+        if (!j.isDebuffed && j.timing == TriggerTiming::OnRoundEnd)
+            j.effect(ctx);
+    }
+
     int interest = qMin(mGold / 5, Constants::INTEREST_MAX);
     mGold += interest;
     emit goldChanged();
@@ -160,8 +170,26 @@ void GameState::applyCardEnhancements(HandResult &result) {
 }
 
 void GameState::applyJokerEffects(HandResult &result) {
-    // 小丑效果留给 joker.h 实现后补充
-    Q_UNUSED(result);
+    TriggerContext ctx{
+        result, *this, mHand, result.scoringCards, nullptr
+    };
+
+    for (const Joker &j : mJokers) {
+        if (j.isDebuffed) continue;
+
+        if (j.timing == TriggerTiming::Passive ||
+            j.timing == TriggerTiming::OnPlayedHand) {
+            j.effect(ctx);
+        }
+
+        if (j.timing == TriggerTiming::OnScoringCard) {
+            for (const CardData &card : result.scoringCards) {
+                ctx.currentCard = &card;
+                j.effect(ctx);
+            }
+            ctx.currentCard = nullptr;
+        }
+    }
 }
 
 void GameState::checkGameOver() {
