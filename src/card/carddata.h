@@ -25,7 +25,7 @@ enum class Enhancement {
     Wild, // 可充当任意花色
     Glass, // ×2 倍率，1/4 概率破碎
     Steel, // 持有时 ×1.5 倍率
-    Stone, // +50 筹码，无点数
+    Stone, // +50 筹码，无花色，无点数
     Gold, // 回合结束 +3 金币
     Lucky // 1/5概率 +20 倍率，1/15概率 +20 金币
 };
