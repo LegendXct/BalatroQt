@@ -2,6 +2,9 @@
 #define MAINWINDOW_H
 
 #include <QMainWindow>
+#include <QGraphicsScene>
+#include <QGraphicsView>
+#include "../card/carditem.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -19,5 +22,10 @@ public:
 
 private:
     Ui::MainWindow *ui;
+    QGraphicsScene *mScene = nullptr;
+    QGraphicsView *mView = nullptr;
+
+    void setupScene();
+    void addTestCards();
 };
 #endif // MAINWINDOW_H

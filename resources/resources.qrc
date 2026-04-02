@@ -1,0 +1,7 @@
+<RCC>
+    <qresource prefix="/textures">
+        <file>images/8BitDeck.png</file>
+        <file>images/Enhancers.png</file>
+        <file>images/Jokers.png</file>
+    </qresource>
+</RCC>

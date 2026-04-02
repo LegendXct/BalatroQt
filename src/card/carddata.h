@@ -1,5 +1,5 @@
-#ifndef CARDITEM_H
-#define CARDITEM_H
+#ifndef CARDDATA_H
+#define CARDDATA_H
 
 #include <QString>
 
@@ -74,4 +74,4 @@ public:
     }
 };
 
-#endif // CARDITEM_H
+#endif // CARDDATA_H

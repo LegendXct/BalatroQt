@@ -43,6 +43,7 @@ public:
     int jokerSlots() const;
     BlindType blindType() const {return mBlindType;}
     GamePhase phase() const {return mPhase;}
+    void addGold(int amount) {mGold += amount; emit goldChanged();}
 signals:
     void handChanged();
     void scoreChanged();
