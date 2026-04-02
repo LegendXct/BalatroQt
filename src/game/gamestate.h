@@ -44,11 +44,13 @@ public:
     BlindType blindType() const {return mBlindType;}
     GamePhase phase() const {return mPhase;}
     void addGold(int amount) {mGold += amount; emit goldChanged();}
+    const HandResult &lastResult() const{return mLastResult;}
 signals:
     void handChanged();
     void scoreChanged();
     void goldChanged();
     void gameOver(bool won);
+    void handPlayed();
 private:
     Deck mDeck;
     QVector<CardData> mHand;
@@ -61,6 +63,7 @@ private:
     int mAnte;
     BlindType mBlindType;
     GamePhase mPhase;
+    HandResult mLastResult;
 
     void dealCards(); // 补牌到满
     int calcTargetScore() const;

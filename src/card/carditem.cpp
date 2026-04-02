@@ -109,8 +109,6 @@ void CardItem::setCardData(const CardData &data) {
 
 void CardItem::setCardSelected(bool selected) {
     mSelected = selected;
-    setY(selected ? -30 : 0);
-    update();
 }
 
 void CardItem::moveTo(const QPointF &target, int durationMs) {
@@ -144,19 +142,19 @@ void CardItem::flip() {
 }
 
 void CardItem::mousePressEvent(QGraphicsSceneMouseEvent *event) {
-    if (event->button() == Qt::LeftButton)
+    if (event->button() == Qt::LeftButton) {
         emit clicked(this);
-    QGraphicsObject::mousePressEvent(event);
+        event->accept();
+    }
+    else QGraphicsObject::mousePressEvent(event);
 }
 
 void CardItem::hoverEnterEvent(QGraphicsSceneHoverEvent *event) {
     mHovered = true;
-    update();
     QGraphicsObject::hoverEnterEvent(event);
 }
 
 void CardItem::hoverLeaveEvent(QGraphicsSceneHoverEvent *event) {
     mHovered = false;
-    update();
     QGraphicsObject::hoverLeaveEvent(event);
 }

@@ -46,6 +46,9 @@ void GameState::playCards(const QVector<int> &indices) {
     applyCardEnhancements(result);
     applyJokerEffects(result);
 
+    mLastResult = result;
+    emit handPlayed();
+
     int gained = result.chips * result.mult;
     mScore += gained;
     mHandsLeft--;
