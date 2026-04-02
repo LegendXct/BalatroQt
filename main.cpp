@@ -1,5 +1,5 @@
-#include "src/ui/mainwindow.h"
 #include "src/card/carditem.h"
+#include "src/ui/mainwindow.h"
 
 #include <QApplication>
 
