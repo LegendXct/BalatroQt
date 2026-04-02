@@ -1,5 +1,5 @@
-#ifndef JOKER_H
-#define JOKER_H
+#ifndef JOKER_HH
+#define JOKER_HH
 
 #include <QString>
 #include <functional>
@@ -64,4 +64,4 @@ public:
 
 Joker createJoker(JokerType type);
 
-#endif // JOKER_H
+#endif // JOKER_HH
