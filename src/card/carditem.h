@@ -57,9 +57,6 @@ private:
 
     void paintFront(QPainter *painter);
     void paintBack(QPainter *painter);
-    void paintOverlays(QPainter *painter);
-    void paintHover(QPainter *painter);
-    void paintSelect(QPainter *painter);
 
     static QPixmap *sDeckSheet;
     static QPixmap *sEnhSheet;

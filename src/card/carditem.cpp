@@ -65,7 +65,7 @@ QRect CardItem::enhanceSrcRect() const {
     case Enhancement::Steel: return QRect(6 * WIDTH, 1 * HEIGHT, WIDTH, HEIGHT);
     case Enhancement::Stone: return QRect(5 * WIDTH, 0 * HEIGHT, WIDTH, HEIGHT);
     case Enhancement::Gold: return QRect(6 * WIDTH, 0 * HEIGHT, WIDTH, HEIGHT);
-    default: return QRect();
+    default: return whiteBaseSrcRect();
     }
 }
 
@@ -82,11 +82,17 @@ QRect CardItem::sealSrcRect() const {
 void CardItem::paintFront(QPainter *painter) {
     QRect dst(0, 0, WIDTH, HEIGHT);
 
-    painter->drawPixmap(dst, *sEnhSheet, whiteBaseSrcRect());
-    painter->drawPixmap(dst, *sDeckSheet, deckSrcRect());
-    paintOverlays(painter);
-    paintHover(painter);
-    paintSelect(painter);
+    // 绘制牌底（依据增强）
+    QRect enh = enhanceSrcRect();
+    if (!enh.isNull()) painter->drawPixmap(dst, *sEnhSheet, enh);
+
+    // 绘制牌面（依据点数）
+    if (mData.enhancement != Enhancement::Stone)
+        painter->drawPixmap(dst, *sDeckSheet, deckSrcRect());
+
+    // 绘制拉封
+    QRect seal = sealSrcRect();
+    if (!seal.isNull()) painter->drawPixmap(dst, *sEnhSheet, seal);
 }
 
 void CardItem::paintBack(QPainter *painter) {
@@ -94,23 +100,6 @@ void CardItem::paintBack(QPainter *painter) {
 
     QRect backSrc(0 * WIDTH, 0 * HEIGHT, WIDTH, HEIGHT);
     painter->drawPixmap(dst, *sEnhSheet, backSrc);
-    paintSelect(painter);
-}
-
-void CardItem::paintOverlays(QPainter *painter) {
-    QRect dst(0, 0, WIDTH, HEIGHT);
-    QRect seal = sealSrcRect();
-    if (!seal.isNull()) painter->drawPixmap(dst, *sEnhSheet, seal);
-    QRect enh = enhanceSrcRect();
-    if (!enh.isNull()) painter->drawPixmap(dst, *sEnhSheet, enh);
-}
-
-void CardItem::paintHover(QPainter *painter) {
-    if (!mHovered) return;
-}
-
-void CardItem::paintSelect(QPainter *painter) {
-    if (!mSelected) return;
 }
 
 void CardItem::setCardData(const CardData &data) {
