@@ -24,10 +24,10 @@ enum class HandType {
 };
 
 struct HandResult {
-    HandType type;
+    HandType type = HandType::HighCard;
     QVector<CardData> scoringCards; // 参与计分的牌
-    int chips; // 基础筹码
-    int mult; // 基础倍率
+    int chips = 0; // 基础筹码
+    int mult = 0; // 基础倍率
     QString name; // 牌型名称，用于UI显示
 };
 

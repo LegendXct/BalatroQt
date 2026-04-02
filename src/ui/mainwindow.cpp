@@ -220,6 +220,20 @@ void MainWindow::setupScene() {
         QPen(QColor(255, 255, 255, 30), 1),
         QBrush(QColor(0, 0, 0, 30)));
 
+    // 牌型名称标签
+    mHandTypeLabel = mScene->addText("");
+    mHandTypeLabel->setDefaultTextColor(QColor("#f0e060"));
+    mHandTypeLabel->setFont(QFont("Arial", 22, QFont::Bold));
+    mHandTypeLabel->setPos(0, PLAY_Y - 40);
+    mHandTypeLabel->setZValue(30);
+
+    // 本次得分标签
+    mHandScoreLabel = mScene->addText("");
+    mHandScoreLabel->setDefaultTextColor(QColor("#ffffff"));
+    mHandScoreLabel->setFont(QFont("Arial", 14));
+    mHandScoreLabel->setPos(0, PLAY_Y - 18);
+    mHandScoreLabel->setZValue(30);
+
     // 牌堆（用牌背展示）
     CardData backData;
     backData.faceUp = false;
@@ -241,6 +255,7 @@ void MainWindow::setupConnections() {
     connect(mGameState, &GameState::handChanged, this, &MainWindow::refreshHand);
     connect(mGameState, &GameState::scoreChanged, this, &MainWindow::refreshScore);
     connect(mGameState, &GameState::goldChanged, this, &MainWindow::refreshGold);
+    connect(mGameState, &GameState::handPlayed, this, &MainWindow::onHandPlayed);
 }
 
 void MainWindow::refreshHand() {
@@ -312,9 +327,6 @@ void MainWindow::layoutPlayedCards() {
 void MainWindow::refreshScore() {
     mLblScore->setText(QString("✳ %1").arg(mGameState->score()));
     mLblTarget->setText(QString("✳ %1").arg(mGameState->targetScore()));
-    // 筹码和倍率暂时先用当前分数简单显示，等 HandResult 暴露接口后再细化
-    mLblChips->setText(QString::number(mGameState->score()));
-    mLblMult->setText("×1");
 }
 
 // 金币刷新
@@ -382,4 +394,25 @@ void MainWindow::onDiscardClicked() {
     clearPlayedCards();
     mGameState->discardCards(mSelected);
     mSelected.clear();
+}
+
+void MainWindow::onHandPlayed() {
+    const HandResult &r = mGameState->lastResult();
+
+    // 更新筹码×倍率
+    mLblChips->setText(QString::number(r.chips));
+    mLblMult->setText(QString("×%1").arg(r.mult));
+
+    // 显示牌型名称，居中
+    mHandTypeLabel->setPlainText(r.name);
+    QRectF tb = mHandTypeLabel->boundingRect();
+    mHandTypeLabel->setPos((SCENE_W - tb.width()) / 2, PLAY_Y - 44);
+
+    // 显示本次得分
+    int score = r.chips * r.mult;
+    mHandScoreLabel->setPlainText(
+        QString("筹码 %1  ×  倍率 %2  =  %3")
+            .arg(r.chips).arg(r.mult).arg(score));
+    QRectF sb = mHandScoreLabel->boundingRect();
+    mHandScoreLabel->setPos((SCENE_W - sb.width()) / 2, PLAY_Y - 20);
 }

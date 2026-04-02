@@ -35,6 +35,8 @@ private:
     GameState *mGameState = nullptr;
     QWidget *mLeftPanel = nullptr;
     QLabel *mLblScore = nullptr; // 回合分数
+    QGraphicsTextItem* mHandTypeLabel = nullptr; // 牌型名称
+    QGraphicsTextItem *mHandScoreLabel = nullptr; // 本次得分
     QLabel *mLblChips = nullptr; // 筹码值
     QLabel *mLblMult = nullptr; // 倍率值
     QLabel *mLblHands = nullptr; // 剩余出牌次数
@@ -78,5 +80,6 @@ private:
     void onCardClicked(CardItem *card);
     void onPlayClicked();
     void onDiscardClicked();
+    void onHandPlayed();
 };
 #endif // MAINWINDOW_H
