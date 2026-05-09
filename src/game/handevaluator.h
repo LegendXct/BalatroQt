@@ -28,6 +28,7 @@ struct HandResult {
     QVector<CardData> scoringCards; // 参与计分的牌
     int chips = 0; // 基础筹码
     int mult = 0; // 基础倍率
+    int level = 1; // 牌型等级
     QString name; // 牌型名称，用于UI显示
 };
 

@@ -93,6 +93,13 @@ void CardItem::paintFront(QPainter *painter) {
     // 绘制拉封
     QRect seal = sealSrcRect();
     if (!seal.isNull()) painter->drawPixmap(dst, *sEnhSheet, seal);
+
+    if (mData.isDebuffed) {
+        painter->fillRect(0, 0, WIDTH, HEIGHT, QColor(0, 0, 0, 130));
+        painter->setPen(QPen(QColor(255, 80, 80), 3));
+        painter->drawLine(8, 8, WIDTH - 8, HEIGHT - 8);
+        painter->drawLine(WIDTH - 8, 8, 8, HEIGHT - 8);
+    }
 }
 
 void CardItem::paintBack(QPainter *painter) {
