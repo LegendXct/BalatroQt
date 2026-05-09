@@ -4,4 +4,8 @@
         <file>images/Enhancers.png</file>
         <file>images/Jokers.png</file>
     </qresource>
+    <qresource prefix="/fonts">
+        <file>fonts/m6x11plus.ttf</file>
+        <file>fonts/NotoSansSC-Bold.ttf</file>
+    </qresource>
 </RCC>

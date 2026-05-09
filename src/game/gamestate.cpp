@@ -12,7 +12,9 @@ void GameState::startGame() {
     mScore = 0;
     mPhase = GamePhase::Blind;
     mJokers.clear();
+    mShop = Shop();
     startBlind(BlindType::Small);
+    emit jokersChanged();
 }
 
 void GameState::startBlind(BlindType type) {
@@ -65,12 +67,36 @@ void GameState::playCards(const QVector<int> &indices) {
     emit goldChanged();
 
     if (mScore >= mTargetScore) {
-        mGold += Constants::WIN_GOLD;
-        enterShop();
+        // ── 通关：发奖、触发 OnRoundEnd 小丑、初始化商店 ──
+        int blindReward = 0;
+        switch (mBlindType) {
+        case BlindType::Small: blindReward = 3; break;
+        case BlindType::Big:   blindReward = 4; break;
+        case BlindType::Boss:  blindReward = 5; break;
+        }
+        int handBonus = mHandsLeft * Constants::HAND_GOLD;
+
+        mGold += blindReward + handBonus;
+
+        // 触发 OnRoundEnd 类小丑（黄金小丑 +4 之类）
+        HandResult dummy{};
+        TriggerContext ctx{ dummy, *this, mHand, mHand, nullptr };
+        for (const Joker &j : mJokers) {
+            if (!j.isDebuffed && j.timing == TriggerTiming::OnRoundEnd)
+                j.effect(ctx);
+        }
+
+        int interest = qMin(mGold / 5, Constants::INTEREST_MAX);
+        mGold += interest;
+
+        mPhase = GamePhase::Shop;
+        mShop.roll();                                 // ← 阶段 2：初始化商店
+        emit goldChanged();
+        emit roundWon(blindReward, handBonus, interest);
+        return;                                       // ← 关键：必须 return
     }
-    else {
-        checkGameOver();
-    }
+
+    checkGameOver();   // 失败检测，只在没通关时执行一次
 }
 
 void GameState::discardCards(const QVector<int> &indices) {
@@ -88,24 +114,6 @@ void GameState::discardCards(const QVector<int> &indices) {
     dealCards();
 
     emit handChanged();
-}
-
-void GameState::enterShop() {
-    mPhase = GamePhase::Shop;
-    mGold += mHandsLeft * Constants::HAND_GOLD;
-
-    HandResult dummy{};
-    TriggerContext ctx{
-        dummy, *this, mHand, mHand, nullptr
-    };
-    for (const Joker &j : mJokers) {
-        if (!j.isDebuffed && j.timing == TriggerTiming::OnRoundEnd)
-            j.effect(ctx);
-    }
-
-    int interest = qMin(mGold / 5, Constants::INTEREST_MAX);
-    mGold += interest;
-    emit goldChanged();
 }
 
 void GameState::nextBlind() {
@@ -196,8 +204,72 @@ void GameState::applyJokerEffects(HandResult &result) {
 }
 
 void GameState::checkGameOver() {
+    if (mPhase != GamePhase::Blind) return;       // ← 新增：不在打盲注阶段就不判断
     if (mHandsLeft <= 0 && mScore < mTargetScore) {
         mPhase = GamePhase::GameOver;
         emit gameOver(false);
     }
+}
+void GameState::sortHandByRank() {
+    std::sort(mHand.begin(), mHand.end(),
+              [](const CardData &a, const CardData &b){
+                  return static_cast<int>(a.rank) > static_cast<int>(b.rank);
+              });
+    emit handChanged();
+}
+
+void GameState::sortHandBySuit() {
+    std::sort(mHand.begin(), mHand.end(),
+              [](const CardData &a, const CardData &b){
+                  if (a.suit != b.suit)
+                      return static_cast<int>(a.suit) < static_cast<int>(b.suit);
+                  return static_cast<int>(a.rank) > static_cast<int>(b.rank);
+              });
+    emit handChanged();
+}
+
+int GameState::roundReward() const {
+    int base = 0;
+    switch (mBlindType) {
+    case BlindType::Small: base = 3; break;
+    case BlindType::Big: base = 4; break;
+    case BlindType::Boss: base = 5; break;
+    }
+    int handBonus = mHandsLeft * Constants::HAND_GOLD;
+    int interest = qMin(mGold / 5, Constants::INTEREST_MAX);
+    return base + handBonus + interest;
+}
+
+bool GameState::buyJoker(int idx) {
+    if (mPhase != GamePhase::Shop) return false;
+    if (!mShop.canBuy(idx, mGold)) return false;
+    if (!canAddJoker()) return false;
+
+    ShopOffer o = mShop.takeOffer(idx);
+    mGold -= o.cost;
+    mJokers.append(createJoker(o.type));
+
+    emit goldChanged();
+    emit jokersChanged();
+    emit shopChanged();
+    return true;
+}
+
+void GameState::rerollShop() {
+    if (mPhase != GamePhase::Shop) return;
+    int cost = mShop.rerollCost();
+    if (mGold < cost) return;
+
+    mGold -= cost;
+    mShop.onReroll();
+    mShop.roll();
+
+    emit goldChanged();
+    emit shopChanged();
+}
+
+void GameState::leaveShop() {
+    if (mPhase != GamePhase::Shop) return;
+    mShop.resetForNewBlind();
+    nextBlind();   // 内部会发 handChanged
 }

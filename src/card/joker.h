@@ -32,7 +32,7 @@ enum class JokerType {
     CrazyJoker, // 出顺子 +12 倍率
     DrollJoker, // 出同花 +10 倍率
     // 金币类
-    GoldTicket, // 回合结束 +4 金币
+    GoldenJoker, // 回合结束 +4 金币
     ToDoList, // 出指定牌型 +4 金币
     // 可扩展...
 };

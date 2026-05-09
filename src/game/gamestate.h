@@ -8,6 +8,7 @@
 #include "../card/carddata.h"
 #include "../card/joker.h"
 #include "../utils/constants.h"
+#include "shop.h"
 
 enum class BlindType {
     Small,
@@ -30,7 +31,6 @@ public:
     void startBlind(BlindType type);
     void playCards(const QVector<int> &indices);
     void discardCards(const QVector<int> &indices);
-    void enterShop();
     void nextBlind();
     const QVector<CardData> &hand() const {return mHand;}
     const QVector<Joker> &jokers() const {return mJokers;}
@@ -45,12 +45,26 @@ public:
     GamePhase phase() const {return mPhase;}
     void addGold(int amount) {mGold += amount; emit goldChanged();}
     const HandResult &lastResult() const{return mLastResult;}
+    void sortHandByRank();
+    void sortHandBySuit();
+    int deckRemaining() const {return mDeck.remaining();}
+
+    // 商店相关
+    Shop &shop() { return mShop; }
+    bool buyJoker(int offerIdx);     // 商店第 idx 个
+    void rerollShop();
+    void leaveShop();                // 离开商店 → 进入下一盲注
+    bool canAddJoker() const { return mJokers.size() < jokerSlots(); }
 signals:
     void handChanged();
     void scoreChanged();
     void goldChanged();
+    void roundWon(int blindReward, int handBonus, int interest);
     void gameOver(bool won);
     void handPlayed();
+    void blindStarted();
+    void jokersChanged();
+    void shopChanged();
 private:
     Deck mDeck;
     QVector<CardData> mHand;
@@ -64,12 +78,14 @@ private:
     BlindType mBlindType;
     GamePhase mPhase;
     HandResult mLastResult;
+    Shop mShop;
 
     void dealCards(); // 补牌到满
     int calcTargetScore() const;
     void applyCardEnhancements(HandResult &result);
     void applyJokerEffects(HandResult &result);
     void checkGameOver();
+    int roundReward() const;
 };
 
 #endif // GAMESTATE_H

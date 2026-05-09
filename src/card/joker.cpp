@@ -18,7 +18,7 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::GreedyJoker:
-        j.name = "贪心小丑";
+        j.name = "贪婪小丑";
         j.description = "每张♦计分牌 +3 倍率";
         j.timing = TriggerTiming::OnScoringCard;
         j.effect = [](TriggerContext &ctx) {
@@ -66,7 +66,7 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::HalfJoker:
-        j.name = "半个小丑";
+        j.name = "半张小丑";
         j.description = "出牌≤3张时 +20 倍率";
         j.timing = TriggerTiming::OnPlayedHand;
         j.effect = [](TriggerContext &ctx) {
@@ -76,7 +76,7 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::JollyJoker:
-        j.name = "欢乐小丑";
+        j.name = "开心小丑";
         j.description = "出对子 +8 倍率";
         j.timing = TriggerTiming::OnPlayedHand;
         j.effect = [](TriggerContext &ctx) {
@@ -86,7 +86,7 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::ZanyJoker:
-        j.name = "疯狂小丑";
+        j.name = "古怪小丑";
         j.description = "出三条 +12 倍率";
         j.timing = TriggerTiming::OnPlayedHand;
         j.effect = [](TriggerContext &ctx) {
@@ -96,7 +96,7 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::MadJoker:
-        j.name = "愤怒小丑";
+        j.name = "疯狂小丑";
         j.description = "出两对 +10 倍率";
         j.timing = TriggerTiming::OnPlayedHand;
         j.effect = [](TriggerContext &ctx) {
@@ -106,7 +106,7 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::CrazyJoker:
-        j.name = "疯癫小丑";
+        j.name = "狂野小丑";
         j.description = "出顺子 +12 倍率";
         j.timing = TriggerTiming::OnPlayedHand;
         j.effect = [](TriggerContext &ctx) {
@@ -125,14 +125,12 @@ Joker createJoker(JokerType type) {
         };
         break;
 
-    case JokerType::GoldTicket:
-        j.name = "金票";
+    case JokerType::GoldenJoker:
+        j.name = "黄金小丑";
         j.description = "回合结束 +4 金币";
         j.timing = TriggerTiming::OnRoundEnd;
         j.effect = [](TriggerContext &ctx) {
-            // 金币修改通过 GameState 接口处理
-            // 在 GameState::enterShop 里遍历调用
-            Q_UNUSED(ctx);
+            ctx.state.addGold(4);
         };
         break;
 
