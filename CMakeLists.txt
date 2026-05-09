@@ -5,6 +5,9 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Core)
+find_package(Qt6 REQUIRED COMPONENTS Widgets)
 
 qt_standard_project_setup()
 
@@ -19,6 +22,10 @@ qt_add_executable(BalatroQt
     src/game/handevaluator.h src/game/handevaluator.cpp
     src/game/gamestate.h src/game/gamestate.cpp
     src/card/carditem.h src/card/carditem.cpp
+    src/ui/roundendoverlay.h src/ui/roundendoverlay.cpp
+    src/card/jokeritem.h src/card/jokeritem.cpp
+    src/game/shop.h src/game/shop.cpp
+    src/ui/shopwidget.h src/ui/shopwidget.cpp
 )
 
 target_include_directories(BalatroQt
@@ -33,6 +40,9 @@ target_link_libraries(BalatroQt
         Qt6::Core
         Qt6::Widgets
 )
+target_link_libraries(BalatroQt PRIVATE Qt6::Widgets)
+target_link_libraries(BalatroQt PRIVATE Qt6::Core)
+target_link_libraries(BalatroQt PRIVATE Qt6::Widgets)
 
 qt_add_resources(BalatroQt "textures"
     PREFIX "/textures"
@@ -41,6 +51,14 @@ qt_add_resources(BalatroQt "textures"
         resources/images/8BitDeck.png
         resources/images/Enhancers.png
         resources/images/Jokers.png
+)
+
+qt_add_resources(BalatroQt "fonts"
+    PREFIX "/fonts"
+    BASE "resources"
+    FILES
+        resources/fonts/m6x11plus.ttf
+        resources/fonts/NotoSansSC-Bold.ttf
 )
 
 include(GNUInstallDirs)

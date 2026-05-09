@@ -3,11 +3,13 @@
 
 #include <QApplication>
 
+
 int main(int argc, char *argv[])
 {
     QApplication a(argc, argv);
     CardItem::loadResources();
+    JokerItem::loadResources();
     MainWindow w;
-    w.show();
+    w.showFullScreen();
     return a.exec();
 }
