@@ -4,7 +4,10 @@
 #include <QWidget>
 #include <QLabel>
 #include <QPushButton>
+#include <QPainter>
 #include "../game/gamestate.h"
+#include "../card/consumable.h"
+
 
 class ShopWidget : public QWidget
 {
@@ -18,6 +21,7 @@ public:
 
 signals:
     void leaveClicked();
+    void packBuyRequested(int slot);
 
 protected:
     void resizeEvent(QResizeEvent *e) override;
@@ -47,7 +51,7 @@ private:
 
     void buildUi();
     void layoutPanel();
-    QPixmap jokerPixmap(JokerType t) const;
+    QPixmap offerPixmap(const ShopOffer &) const;
 };
 
 #endif

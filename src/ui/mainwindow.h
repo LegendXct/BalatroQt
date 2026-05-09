@@ -17,6 +17,10 @@
 #include <QMessageBox>
 #include "shopwidget.h"
 #include "../card/jokeritem.h"
+#include "../card/consumableitem.h"
+#include "packopenwidget.h"
+#include "blindselectwidget.h"
+#include <QStackedWidget>
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -34,7 +38,7 @@ public:
 
 private:
     Ui::MainWindow *ui;
-    QGraphicsScene *mScene = nullptr;
+    QGraphicsScene *mScene = new QGraphicsScene;
     QGraphicsView *mView = nullptr;
     GameState *mGameState = nullptr;
 
@@ -89,6 +93,39 @@ private:
 
     bool mGameOverHandled = false;
 
+    QVector<ConsumableItem*> mConsumableItems;
+
+    PackOpenWidget *mPackOpenWidget = nullptr;
+    PackContent     mPendingPack;        // 当前正在打开的包
+
+    QGraphicsTextItem *mConsCountLabel = nullptr;
+    QGraphicsRectItem *mPlayBgRect     = nullptr;
+    QVector<QGraphicsRectItem*> mJokerSlotRects;
+    QVector<QGraphicsRectItem*> mConsumableSlotRects;
+    CardItem          *mDeckBackCard   = nullptr;
+
+    QGraphicsProxyWidget *mPlayProxy    = nullptr;
+    QGraphicsProxyWidget *mSortProxy    = nullptr;
+    QGraphicsProxyWidget *mDiscardProxy = nullptr;
+
+    QLabel *mBlindChipLbl = nullptr;
+
+    // 上下文区(BlindSelect / Blind / Shop 三态)
+    QStackedWidget *mContextArea  = nullptr;
+    QWidget *mCtxBlindSelect      = nullptr;
+    QWidget *mCtxBlind            = nullptr;
+    QWidget *mCtxShop             = nullptr;
+    QLabel  *mCtxBlindChipImg     = nullptr;
+
+    void setContextPage(int page);
+    void onSkipBlind(int idx);
+
+    void onPackBuyRequested(int slot);
+    void onPackChoiceMade(int chosenIdx);
+
+    void refreshConsumableSlots();
+    void onConsumableClicked(ConsumableItem *item, Qt::MouseButton btn);
+
     void loadFonts();
     void setupLeftPanel();
     void setupScene();
@@ -114,11 +151,20 @@ private:
     void onNextBlindClicked();
     void onGameOver(bool won);
 
-    ShopWidget *mShopOverlay = nullptr;
+    ShopWidget *mShopWidget = nullptr;
     QVector<JokerItem*> mJokerItems;     // 主场景上已持有的小丑视图
+
+    QWidget           *mPlayPage          = nullptr;     // 对局页（包 mLeftPanel + mView）
+    BlindSelectWidget *mBlindSelectWidget = nullptr;
+
+    void onBlindSelectEntered();
+    void onBlindStarted();
+    void onSelectBlindClicked();
 
     void onLeaveShopClicked();
     void refreshJokerSlots();
+
+    bool eventFilter(QObject *obj, QEvent *ev) override;
 
 protected:
     void resizeEvent(QResizeEvent *event) override;

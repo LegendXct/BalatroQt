@@ -79,20 +79,46 @@ QRect CardItem::sealSrcRect() const {
     }
 }
 
-void CardItem::paintFront(QPainter *painter) {
+void CardItem::paintFront(QPainter *painter)
+{
     QRect dst(0, 0, WIDTH, HEIGHT);
 
-    // 绘制牌底（依据增强）
     QRect enh = enhanceSrcRect();
     if (!enh.isNull()) painter->drawPixmap(dst, *sEnhSheet, enh);
 
-    // 绘制牌面（依据点数）
     if (mData.enhancement != Enhancement::Stone)
         painter->drawPixmap(dst, *sDeckSheet, deckSrcRect());
 
-    // 绘制拉封
     QRect seal = sealSrcRect();
     if (!seal.isNull()) painter->drawPixmap(dst, *sEnhSheet, seal);
+
+    // ── edition 视觉 ──
+    painter->setBrush(Qt::NoBrush);
+    switch (mData.edition) {
+    case Edition::Foil:
+        painter->setPen(QPen(QColor(120, 200, 255, 200), 4));
+        painter->drawRoundedRect(2, 2, WIDTH - 4, HEIGHT - 4, 8, 8);
+        break;
+    case Edition::Holographic:
+        painter->setPen(QPen(QColor(255, 100, 200, 200), 4));
+        painter->drawRoundedRect(2, 2, WIDTH - 4, HEIGHT - 4, 8, 8);
+        break;
+    case Edition::Polychrome: {
+        QLinearGradient g(0, 0, WIDTH, HEIGHT);
+        g.setColorAt(0,    QColor(255, 100, 100, 220));
+        g.setColorAt(0.5,  QColor(100, 255, 100, 220));
+        g.setColorAt(1,    QColor(100, 100, 255, 220));
+        painter->setPen(QPen(QBrush(g), 4));
+        painter->drawRoundedRect(2, 2, WIDTH - 4, HEIGHT - 4, 8, 8);
+        break;
+    }
+    case Edition::Negative:
+        painter->fillRect(0, 0, WIDTH, HEIGHT, QColor(40, 0, 60, 120));
+        painter->setPen(QPen(QColor(180, 100, 255, 200), 4));
+        painter->drawRoundedRect(2, 2, WIDTH - 4, HEIGHT - 4, 8, 8);
+        break;
+    default: break;
+    }
 
     if (mData.isDebuffed) {
         painter->fillRect(0, 0, WIDTH, HEIGHT, QColor(0, 0, 0, 130));

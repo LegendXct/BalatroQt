@@ -195,7 +195,7 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::MysticSummit:
-        j.name = "神秘之巅"; j.description = "0 弃牌时 +15 倍率";
+        j.name = "神秘之峰"; j.description = "0 弃牌时 +15 倍率";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &ctx) {
             if (ctx.state.discardLeft() == 0) ctx.result.mult += 15;
@@ -203,7 +203,7 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::Misprint:
-        j.name = "错印"; j.description = "+0~23 随机倍率";
+        j.name = "印错小丑"; j.description = "+0~23 随机倍率";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &ctx) {
             ctx.result.mult += QRandomGenerator::global()->bounded(24);

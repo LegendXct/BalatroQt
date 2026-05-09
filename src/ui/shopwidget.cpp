@@ -1,4 +1,5 @@
 #include "shopwidget.h"
+#include "../card/consumableitem.h"
 #include "../card/jokeritem.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -10,8 +11,7 @@ ShopWidget::ShopWidget(GameState *gs,
     : QWidget(parent), mGS(gs), mCNFont(cnFont), mPixelFont(pixelFont)
 {
     setAttribute(Qt::WA_StyledBackground, true);
-    setStyleSheet("background: rgba(0, 0, 0, 160);");
-    hide();
+    setStyleSheet("background: rgba(0, 0, 0, 100);");   // ← 半透明
     buildUi();
 }
 
@@ -145,21 +145,31 @@ void ShopWidget::refresh()
     for (int i = 0; i < mOfferUi.size(); ++i) {
         OfferUi &ou = mOfferUi[i];
         if (i >= offers.size()) { ou.card->hide(); continue; }
-
         const ShopOffer &o = offers[i];
-        if (o.sold) {
-            ou.card->setVisible(false);
-            continue;
-        }
+        if (o.sold) { ou.card->setVisible(false); continue; }
         ou.card->setVisible(true);
 
-        Joker tmp = createJoker(o.type);          // 取名字和描述
-        ou.nameLbl->setText(tmp.name);
-        ou.descLbl->setText(tmp.description);
-        ou.imageLbl->setPixmap(jokerPixmap(o.type));
+        QString name, desc;
+        bool slotOk = true;
+        if (o.kind == OfferKind::Joker) {
+            Joker tmp = createJoker(o.joker);
+            name = tmp.name; desc = tmp.description;
+            slotOk = mGS->canAddJoker();
+        } else if (o.kind == OfferKind::Pack) {
+            name = packDisplayName(o.pack);
+            desc = "打开后从中选 1 个";
+            slotOk = true;
+        } else {
+            Consumable tmp = createConsumable(o.consumable);
+            name = tmp.name; desc = tmp.description;
+            slotOk = mGS->canAddConsumable();
+        }
+
+        ou.nameLbl->setText(name);
+        ou.descLbl->setText(desc);
+        ou.imageLbl->setPixmap(offerPixmap(o));
         ou.buyBtn->setText(QString("$%1 购买").arg(o.cost));
-        ou.buyBtn->setEnabled(
-            mGS->shop().canBuy(i, mGS->gold()) && mGS->canAddJoker());
+        ou.buyBtn->setEnabled(mGS->shop().canBuy(i, mGS->gold()) && slotOk);
     }
 
     int rcost = mGS->shop().rerollCost();
@@ -167,17 +177,53 @@ void ShopWidget::refresh()
     mBtnReroll->setEnabled(mGS->gold() >= rcost);
 }
 
-QPixmap ShopWidget::jokerPixmap(JokerType t) const
+QPixmap ShopWidget::offerPixmap(const ShopOffer &o) const
 {
-    QPixmap sheet(":/textures/images/Jokers.png");
-    if (sheet.isNull()) return QPixmap();
-    QPoint c = JokerItem::spritePos(t);
-    return sheet.copy(c.x() * JokerItem::WIDTH,
-                      c.y() * JokerItem::HEIGHT,
-                      JokerItem::WIDTH, JokerItem::HEIGHT);
+    if (o.kind == OfferKind::Joker) {
+        QPixmap sheet(":/textures/images/Jokers.png");
+        if (sheet.isNull()) return QPixmap();
+        QPoint c = JokerItem::spritePos(o.joker);
+        return sheet.copy(c.x() * JokerItem::WIDTH, c.y() * JokerItem::HEIGHT,
+                          JokerItem::WIDTH, JokerItem::HEIGHT);
+    }
+
+    if (o.kind == OfferKind::Tarot || o.kind == OfferKind::Planet) {
+        QPixmap sheet(":/textures/images/Tarots.png");
+        if (sheet.isNull()) return QPixmap();
+        QPoint c = ConsumableItem::spritePos(o.consumable);
+        return sheet.copy(c.x() * ConsumableItem::WIDTH,
+                          c.y() * ConsumableItem::HEIGHT,
+                          ConsumableItem::WIDTH, ConsumableItem::HEIGHT);
+    }
+
+    if (o.kind == OfferKind::Pack) {
+        QPixmap sheet(":/textures/images/boosters.png");
+        if (sheet.isNull()) return QPixmap();
+        // 我们目前只用 normal 版,固定 x=0
+        // 行号: Standard=6, Arcana=0, Celestial=1, Buffoon=8
+        int row = 0;
+        switch (o.pack) {
+        case PackKind::Standard:  row = 6; break;
+        case PackKind::Arcana:    row = 0; break;
+        case PackKind::Celestial: row = 1; break;
+        case PackKind::Buffoon:   row = 8; break;
+        }
+        return sheet.copy(0, row * ConsumableItem::HEIGHT,
+                          ConsumableItem::WIDTH, ConsumableItem::HEIGHT);
+    }
+    return QPixmap();
 }
 
-void ShopWidget::onBuy(int slot)   { if (mGS->buyJoker(slot)) refresh(); }
+void ShopWidget::onBuy(int slot) {
+    const auto &offers = mGS->shop().offers();
+    if (slot >= offers.size()) return;
+    if (offers[slot].kind == OfferKind::Pack) {
+        emit packBuyRequested(slot);    // 交给 MainWindow 唤起开包界面
+    } else {
+        if (mGS->buyOffer(slot)) refresh();
+    }
+}
+
 void ShopWidget::onReroll()        { mGS->rerollShop(); refresh(); }
 
 void ShopWidget::resizeEvent(QResizeEvent *e)

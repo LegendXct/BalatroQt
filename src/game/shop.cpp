@@ -3,12 +3,7 @@
 
 void Shop::roll() {
     mOffers.clear();
-    for (int i = 0; i < 2; ++i) {
-        ShopOffer o;
-        o.type = randomJokerType();
-        o.cost = costFor(o.type);
-        mOffers.append(o);
-    }
+    for (int i = 0; i < 2; ++i) mOffers.append(randomOffer());
 }
 
 bool Shop::canBuy(int idx, int gold) const {
@@ -23,12 +18,35 @@ ShopOffer Shop::takeOffer(int idx) {
     return o;
 }
 
-void Shop::onReroll() {
-    if (mRerollCost < 10) ++mRerollCost;
-}
+void Shop::onReroll()         { if (mRerollCost < 10) ++mRerollCost; }
+void Shop::resetForNewBlind() { mRerollCost = 5; }
 
-void Shop::resetForNewBlind() {
-    mRerollCost = 5;
+ShopOffer Shop::randomOffer() {
+    int roll = QRandomGenerator::global()->bounded(100);
+    ShopOffer o;
+    if (roll < 40) {
+        o.kind = OfferKind::Joker;
+        o.joker = randomJokerType();
+        o.cost = costFor(o.joker);
+    } else if (roll < 60) {
+        o.kind = OfferKind::Tarot;
+        o.consumable = randomTarotType();
+        o.cost = 3;
+    } else if (roll < 80) {
+        o.kind = OfferKind::Planet;
+        o.consumable = randomPlanetType();
+        o.cost = 3;
+    } else {
+        constexpr PackKind packs[] = {
+            PackKind::Standard, PackKind::Arcana,
+            PackKind::Celestial, PackKind::Buffoon,
+        };
+        int n = int(sizeof(packs)/sizeof(*packs));
+        o.kind = OfferKind::Pack;
+        o.pack = packs[QRandomGenerator::global()->bounded(n)];
+        o.cost = 4;
+    }
+    return o;
 }
 
 JokerType Shop::randomJokerType() {

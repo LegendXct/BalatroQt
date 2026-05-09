@@ -3,6 +3,14 @@
         <file>images/8BitDeck.png</file>
         <file>images/Enhancers.png</file>
         <file>images/Jokers.png</file>
+        <file>images/Tarots.png</file>
+        <file>images/boosters.png</file>
+        <file>images/BlindChips.png</file>
+        <file>images/chips.png</file>
+        <file>images/tags.png</file>
+        <file>images/ui_assets.png</file>
+        <file>images/icons.png</file>
+        <file>images/balatro.png</file>
     </qresource>
     <qresource prefix="/fonts">
         <file>fonts/m6x11plus.ttf</file>
