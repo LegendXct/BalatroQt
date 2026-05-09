@@ -39,7 +39,15 @@ JokerType Shop::randomJokerType() {
         JokerType::HalfJoker,      JokerType::JollyJoker,
         JokerType::ZanyJoker,      JokerType::MadJoker,
         JokerType::CrazyJoker,     JokerType::DrollJoker,
-        JokerType::GoldenJoker,     JokerType::ToDoList,
+        JokerType::GoldenJoker,    JokerType::ToDoList,
+        JokerType::SlyJoker,       JokerType::WilyJoker,
+        JokerType::CleverJoker,    JokerType::DeviousJoker,
+        JokerType::CraftyJoker,    JokerType::Banner,
+        JokerType::MysticSummit,   JokerType::Misprint,
+        JokerType::RaisedFist,     JokerType::Fibonacci,
+        JokerType::EvenSteven,     JokerType::OddTodd,
+        JokerType::Scholar,        JokerType::Bull,
+        JokerType::Bootstraps,
     };
     int n = int(sizeof(pool) / sizeof(pool[0]));
     return pool[QRandomGenerator::global()->bounded(n)];
@@ -48,18 +56,33 @@ JokerType Shop::randomJokerType() {
 int Shop::costFor(JokerType t) {
     switch (t) {
     case JokerType::Joker:           return 2;
-    case JokerType::JollyJoker:      return 3;
+    case JokerType::JollyJoker:
+    case JokerType::SlyJoker:        return 3;
+    case JokerType::ZanyJoker:
+    case JokerType::MadJoker:
+    case JokerType::CrazyJoker:
+    case JokerType::DrollJoker:
+    case JokerType::WilyJoker:
+    case JokerType::CleverJoker:
+    case JokerType::DeviousJoker:
+    case JokerType::CraftyJoker:
+    case JokerType::Misprint:
+    case JokerType::ToDoList:
+    case JokerType::EvenSteven:
+    case JokerType::OddTodd:
+    case JokerType::Scholar:         return 4;
     case JokerType::GreedyJoker:
     case JokerType::LustyJoker:
     case JokerType::WrathfulJoker:
     case JokerType::GluttonousJoker:
     case JokerType::HalfJoker:
-    case JokerType::GoldenJoker:     return 6;
-    case JokerType::ZanyJoker:
-    case JokerType::MadJoker:
-    case JokerType::CrazyJoker:
-    case JokerType::DrollJoker:
-    case JokerType::ToDoList:        return 4;
+    case JokerType::Banner:
+    case JokerType::MysticSummit:
+    case JokerType::RaisedFist:      return 5;
+    case JokerType::GoldenJoker:
+    case JokerType::Bull:            return 6;
+    case JokerType::Bootstraps:      return 7;
+    case JokerType::Fibonacci:       return 8;
     }
     return 4;
 }

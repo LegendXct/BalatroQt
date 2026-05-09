@@ -27,6 +27,21 @@ QPoint JokerItem::spritePos(JokerType t) {
     case JokerType::GluttonousJoker: return {9, 1};
     case JokerType::GoldenJoker:     return {9, 2};
     case JokerType::ToDoList:        return {4, 11};
+    case JokerType::SlyJoker:        return {0, 14};
+    case JokerType::WilyJoker:       return {1, 14};
+    case JokerType::CleverJoker:     return {2, 14};
+    case JokerType::DeviousJoker:    return {3, 14};
+    case JokerType::CraftyJoker:     return {4, 14};
+    case JokerType::Banner:          return {1,  2};
+    case JokerType::MysticSummit:    return {2,  2};
+    case JokerType::Misprint:        return {6,  2};
+    case JokerType::RaisedFist:      return {8,  2};
+    case JokerType::Fibonacci:       return {1,  5};
+    case JokerType::EvenSteven:      return {8,  3};
+    case JokerType::OddTodd:         return {9,  3};
+    case JokerType::Scholar:         return {0,  4};
+    case JokerType::Bull:            return {7, 14};
+    case JokerType::Bootstraps:      return {9,  8};
     }
     return {0, 0};
 }

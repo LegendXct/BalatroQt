@@ -26,6 +26,7 @@ qt_add_executable(BalatroQt
     src/card/jokeritem.h src/card/jokeritem.cpp
     src/game/shop.h src/game/shop.cpp
     src/ui/shopwidget.h src/ui/shopwidget.cpp
+    src/game/bossblind.h src/game/bossblind.cpp
 )
 
 target_include_directories(BalatroQt

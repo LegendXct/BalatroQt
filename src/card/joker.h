@@ -18,23 +18,13 @@ enum class TriggerTiming {
 };
 
 enum class JokerType {
-    // 常驻倍率
-    Joker, // +4 倍率
-    GreedyJoker, // 每张♦计分牌 +3 倍率
-    LustyJoker, // 每张♥计分牌 +3 倍率
-    WrathfulJoker, // 每张♠计分牌 +3 倍率
-    GluttonousJoker, // 每张♣计分牌 +3 倍率
-    HalfJoker, // 出牌≤3张 +20 倍率
-    // 筹码类
-    JollyJoker, // 出对子 +8 倍率
-    ZanyJoker, // 出三条 +12 倍率
-    MadJoker, // 出两对 +10 倍率
-    CrazyJoker, // 出顺子 +12 倍率
-    DrollJoker, // 出同花 +10 倍率
-    // 金币类
-    GoldenJoker, // 回合结束 +4 金币
-    ToDoList, // 出指定牌型 +4 金币
-    // 可扩展...
+    Joker, GreedyJoker, LustyJoker, WrathfulJoker, GluttonousJoker,
+    HalfJoker, JollyJoker, ZanyJoker, MadJoker, CrazyJoker, DrollJoker,
+    GoldenJoker, ToDoList,
+    SlyJoker, WilyJoker, CleverJoker, DeviousJoker, CraftyJoker,  // 牌型筹码
+    Banner, MysticSummit, Misprint, RaisedFist,                    // 杂项倍率
+    Fibonacci, EvenSteven, OddTodd, Scholar,                       // 计分牌触发
+    Bull, Bootstraps,                                              // 经济联动
 };
 
 // 触发上下文，打包所有触发时可访问的数据

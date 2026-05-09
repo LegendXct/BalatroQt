@@ -1,9 +1,40 @@
 #include "gamestate.h"
+#include <QRandomGenerator>
 
 GameState::GameState(QObject *parent)
     : QObject{parent}
 {
     startGame();
+}
+
+QPair<int, int> GameState::handLevelDelta(HandType t) {
+    switch (t) {
+    case HandType::HighCard:      return { 10, 1 };
+    case HandType::Pair:          return { 15, 1 };
+    case HandType::TwoPair:       return { 20, 1 };
+    case HandType::ThreeOfAKind:  return { 20, 2 };
+    case HandType::Straight:      return { 30, 3 };
+    case HandType::Flush:         return { 15, 2 };
+    case HandType::FullHouse:     return { 25, 2 };
+    case HandType::FourOfAKind:   return { 30, 3 };
+    case HandType::StraightFlush: return { 40, 4 };
+    case HandType::RoyalFlush:    return { 40, 4 };
+    case HandType::FiveOfAKind:   return { 35, 3 };
+    case HandType::FlushHouse:    return { 40, 4 };
+    case HandType::FlushFive:     return { 50, 3 };
+    }
+    return { 0, 0 };
+}
+
+void GameState::levelUpHand(HandType t, int times) {
+    HandLevel &lv = mHandLevels[t];
+    auto d = handLevelDelta(t);
+    for (int i = 0; i < times; ++i) {
+        lv.level++;
+        lv.chipsBonus += d.first;
+        lv.multBonus  += d.second;
+    }
+    emit handLevelsChanged();
 }
 
 void GameState::startGame() {
@@ -13,6 +44,7 @@ void GameState::startGame() {
     mPhase = GamePhase::Blind;
     mJokers.clear();
     mShop = Shop();
+    mHandLevels.clear();
     startBlind(BlindType::Small);
     emit jokersChanged();
 }
@@ -22,12 +54,25 @@ void GameState::startBlind(BlindType type) {
     mScore = 0;
     mHandsLeft = Constants::INITIAL_HANDS;
     mDiscardLeft = Constants::INITIAL_DISCARDS;
-    mTargetScore = calcTargetScore();
+
+    // ── Boss 选定 ──
+    if (type == BlindType::Boss) {
+        mBossEffect = randomBossEffect();
+        if (mBossEffect == BossEffect::TheNeedle)
+            mHandsLeft = 1;
+    } else {
+        mBossEffect = BossEffect::None;
+    }
+
+    mTargetScore = calcTargetScore();   // The Wall ×2 在这里处理
     mPhase = GamePhase::Blind;
 
     mDeck.reset();
     mHand.clear();
     dealCards();
+
+    applyBossDebuffs();   // The Club / The Plant 给手牌打标记
+    emit handChanged();
 }
 
 void GameState::dealCards() {
@@ -45,6 +90,12 @@ void GameState::playCards(const QVector<int> &indices) {
 
     HandResult result = HandEvaluator::evaluate(played);
 
+    // ── 牌型等级加成 ──
+    HandLevel &lv = mHandLevels[result.type];
+    result.chips += lv.chipsBonus;
+    result.mult  += lv.multBonus;
+    result.level  = lv.level;
+
     applyCardEnhancements(result);
     applyJokerEffects(result);
 
@@ -55,6 +106,14 @@ void GameState::playCards(const QVector<int> &indices) {
     mScore += gained;
     mHandsLeft--;
 
+    // ── 升级该牌型 ──
+    auto delta = handLevelDelta(result.type);
+    lv.played++;
+    lv.level++;
+    lv.chipsBonus += delta.first;
+    lv.multBonus  += delta.second;
+    emit handLevelsChanged();
+
     QVector<int> sorted = indices;
     std::sort(sorted.begin(), sorted.end(), std::greater<int>());
     for (int i : sorted) {
@@ -62,7 +121,11 @@ void GameState::playCards(const QVector<int> &indices) {
         mHand.removeAt(i);
     }
 
-    dealCards();
+    // 出牌完成后、补牌前：
+    applyBossPostPlay();   // The Hook 在这里弃手牌
+    dealCards();           // 补到 8 张
+    applyBossDebuffs();    // 新摸的牌也要打 debuff 标记
+
     emit scoreChanged();
     emit goldChanged();
 
@@ -135,18 +198,16 @@ void GameState::nextBlind() {
 }
 
 int GameState::calcTargetScore() const {
-    // 基础目标分数随 ante 递增
-    const int baseScores[] = {
-        0, 300, 800, 2000, 5000,
-        11000, 20000, 35000, 50000
-    };
+    const int baseScores[] = { 0, 300, 800, 2000, 5000, 11000, 20000, 35000, 50000 };
     double mult = 1.0;
     switch (mBlindType) {
     case BlindType::Small: mult = Constants::SMALL_BLIND_MULT; break;
-    case BlindType::Big: mult = Constants::BIG_BLIND_MULT; break;
-    case BlindType::Boss: mult = Constants::BOSS_BLIND_MULT; break;
+    case BlindType::Big:   mult = Constants::BIG_BLIND_MULT;   break;
+    case BlindType::Boss:  mult = Constants::BOSS_BLIND_MULT;  break;
     }
-    return static_cast<int>(baseScores[mAnte] * mult);
+    int target = static_cast<int>(baseScores[mAnte] * mult);
+    if (mBossEffect == BossEffect::TheWall) target *= 2;   // ← 关键
+    return target;
 }
 
 int GameState::jokerSlots() const {
@@ -272,4 +333,26 @@ void GameState::leaveShop() {
     if (mPhase != GamePhase::Shop) return;
     mShop.resetForNewBlind();
     nextBlind();   // 内部会发 handChanged
+}
+
+void GameState::applyBossDebuffs() {
+    for (CardData &c : mHand) {
+        c.isDebuffed = false;   // 清掉旧标记
+        if (mBossEffect == BossEffect::TheClub  && c.suit == Suit::Clubs)
+            c.isDebuffed = true;
+        if (mBossEffect == BossEffect::ThePlant
+            && (c.rank == Rank::Jack || c.rank == Rank::Queen || c.rank == Rank::King))
+            c.isDebuffed = true;
+    }
+}
+
+void GameState::applyBossPostPlay() {
+    if (mBossEffect == BossEffect::TheHook && mHand.size() >= 2) {
+        // 随机弃 2 张
+        for (int i = 0; i < 2 && !mHand.isEmpty(); ++i) {
+            int idx = QRandomGenerator::global()->bounded(mHand.size());
+            mDeck.discard(mHand[idx]);
+            mHand.removeAt(idx);
+        }
+    }
 }

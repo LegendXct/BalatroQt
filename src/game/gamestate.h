@@ -3,12 +3,21 @@
 
 #include <QObject>
 #include <QVector>
+#include <QHash>
 #include "deck.h"
 #include "handevaluator.h"
 #include "../card/carddata.h"
 #include "../card/joker.h"
 #include "../utils/constants.h"
 #include "shop.h"
+#include "bossblind.h"
+
+struct HandLevel {
+    int level = 1;
+    int played = 0;
+    int chipsBonus = 0;
+    int multBonus = 0;
+};
 
 enum class BlindType {
     Small,
@@ -55,6 +64,12 @@ public:
     void rerollShop();
     void leaveShop();                // 离开商店 → 进入下一盲注
     bool canAddJoker() const { return mJokers.size() < jokerSlots(); }
+
+    const QHash<HandType, HandLevel> &handLevels() const { return mHandLevels; }
+    void levelUpHand(HandType t, int times = 1);   // 行星牌用
+
+    BossEffect bossEffect() const { return mBossEffect; }
+    BossInfo currentBossInfo() const { return bossInfo(mBossEffect); }
 signals:
     void handChanged();
     void scoreChanged();
@@ -65,6 +80,7 @@ signals:
     void blindStarted();
     void jokersChanged();
     void shopChanged();
+    void handLevelsChanged();
 private:
     Deck mDeck;
     QVector<CardData> mHand;
@@ -79,6 +95,7 @@ private:
     GamePhase mPhase;
     HandResult mLastResult;
     Shop mShop;
+    QHash<HandType, HandLevel> mHandLevels;
 
     void dealCards(); // 补牌到满
     int calcTargetScore() const;
@@ -86,6 +103,11 @@ private:
     void applyJokerEffects(HandResult &result);
     void checkGameOver();
     int roundReward() const;
+    static QPair<int, int> handLevelDelta(HandType t);   // {chipsΔ, multΔ}
+
+    BossEffect mBossEffect = BossEffect::None;
+    void applyBossDebuffs();   // 给手牌打 debuff 标记
+    void applyBossPostPlay();  // 出牌后 The Hook 等
 };
 
 #endif // GAMESTATE_H

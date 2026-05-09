@@ -490,8 +490,13 @@ void MainWindow::refreshCounters() {
     // 盲注名称
     switch (mGameState->blindType()) {
     case BlindType::Small: mLblBlind->setText("小盲注"); break;
-    case BlindType::Big: mLblBlind->setText("大盲注"); break;
-    case BlindType::Boss: mLblBlind->setText("Boss 盲注"); break;
+    case BlindType::Big:   mLblBlind->setText("大盲注"); break;
+    case BlindType::Boss: {
+        auto info = mGameState->currentBossInfo();
+        mLblBlind->setText(QString("Boss · %1").arg(info.name));
+        mLblBlind->setToolTip(info.description);   // 鼠标悬停看效果
+        break;
+    }
     }
 
     bool hasSelected = !mSelected.isEmpty();
@@ -562,7 +567,7 @@ void MainWindow::onHandPlayed() {
     mLblMult->setText(QString::number(r.mult));
 
     // 显示牌型名称，居中
-    mHandTypeLabel->setPlainText(r.name);
+    mHandTypeLabel->setPlainText(QString("%1 lv.%2").arg(r.name).arg(r.level));
     QRectF tb = mHandTypeLabel->boundingRect();
     mHandTypeLabel->setPos((mSceneW - tb.width()) / 2, PLAY_Y + 10);
 
