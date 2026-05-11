@@ -9,6 +9,9 @@
 #include <QScreen>
 #include <QMenuBar>
 #include <QStatusBar>
+#include <QPauseAnimation>
+#include <QSequentialAnimationGroup>
+#include "shopsignwidget.h"
 
 void MainWindow::loadFonts() {
     int pid = QFontDatabase::addApplicationFont(":/fonts/fonts/m6x11plus.ttf");
@@ -81,8 +84,10 @@ MainWindow::MainWindow(QWidget *parent)
 
     // ── 整体 central:左面板 + 右半边,横向并列 ──
     auto *container = new QWidget;
+    container->setAttribute(Qt::WA_StyledBackground, true);
+    container->setStyleSheet("background: #1a2024;");        // ← 整个窗口最外层底色
     auto *cl = new QHBoxLayout(container);
-    cl->setContentsMargins(0, 0, 0, 0);
+    cl->setContentsMargins(8, 8, 0, 8);                       // ← 左 8 上 8 下 8
     cl->setSpacing(0);
     cl->addWidget(mLeftPanel);
     cl->addWidget(mPlayPage, 1);
@@ -119,7 +124,11 @@ MainWindow::~MainWindow()
 void MainWindow::setupLeftPanel() {
     mLeftPanel = new QWidget;
     mLeftPanel->setFixedWidth(mLeftW);
-    mLeftPanel->setStyleSheet("background: #1e2230;");
+    mLeftPanel->setAttribute(Qt::WA_StyledBackground, true);
+    mLeftPanel->setStyleSheet(
+        "background: #2a3035;"                        // 比 #2c3439 偏中性灰
+        "border-radius: 12px;"
+        );
 
     QVBoxLayout *layout = new QVBoxLayout(mLeftPanel);
     layout->setContentsMargins(10, 10, 10, 10);
@@ -127,7 +136,7 @@ void MainWindow::setupLeftPanel() {
 
     // ── 上下文区(固定高度 200px,3 态切换) ──
     mContextArea = new QStackedWidget(mLeftPanel);
-    mContextArea->setFixedHeight(200);
+    mContextArea->setFixedHeight(160);
     mContextArea->setStyleSheet("background:transparent;");
 
     // 页面 0: BlindSelect
@@ -158,7 +167,7 @@ void MainWindow::setupLeftPanel() {
     // 页面 1: Blind (对局阶段)
     mCtxBlind = new QWidget;
     mCtxBlind->setAttribute(Qt::WA_StyledBackground, true);
-    mCtxBlind->setStyleSheet("background:#161b28; border-radius:8px;");
+    mCtxBlind->setStyleSheet("background:#374244; border-radius:8px;");
     {
         auto *hbl = new QHBoxLayout(mCtxBlind);
         hbl->setContentsMargins(10, 8, 10, 8);
@@ -179,7 +188,7 @@ void MainWindow::setupLeftPanel() {
         mLblBlind->setFont(nbf);
         mLblBlind->setAlignment(Qt::AlignCenter);
         mLblBlind->setStyleSheet(
-            "color:white; background:#3d70b8;"
+            "color:white; background:#1679b4;"   // ← #3d70b8 → #1679b4
             "border-radius:6px; padding:3px 8px;");
         mLblBlind->setFixedHeight(28);
         vbl->addWidget(mLblBlind);
@@ -187,21 +196,21 @@ void MainWindow::setupLeftPanel() {
         QLabel *tt = new QLabel("至少得分", mCtxBlind);
         QFont ttf = mCNFont; ttf.setPixelSize(11);
         tt->setFont(ttf);
-        tt->setStyleSheet("color:#888; background:transparent;");
+        tt->setStyleSheet("color:white; background:transparent;");
         tt->setAlignment(Qt::AlignCenter);
         vbl->addWidget(tt);
 
         mLblTarget = new QLabel("✳ 300", mCtxBlind);
         QFont tf = mPixelFont; tf.setPixelSize(24);
         mLblTarget->setFont(tf);
-        mLblTarget->setStyleSheet("color:#e04040; background:transparent;");
+        mLblTarget->setStyleSheet("color:#fe5f55; background:transparent;");
         mLblTarget->setAlignment(Qt::AlignCenter);
         vbl->addWidget(mLblTarget);
 
         mLblReward = new QLabel("奖励 $$$", mCtxBlind);
         QFont rf = mCNFont; rf.setPixelSize(12);
         mLblReward->setFont(rf);
-        mLblReward->setStyleSheet("color:#f0c040; background:transparent;");
+        mLblReward->setStyleSheet("color:#f3b958; background:transparent;");
         mLblReward->setAlignment(Qt::AlignCenter);
         vbl->addWidget(mLblReward);
 
@@ -211,24 +220,20 @@ void MainWindow::setupLeftPanel() {
 
     // 页面 2: Shop
     mCtxShop = new QWidget;
-    mCtxShop->setAttribute(Qt::WA_StyledBackground, true);
-    mCtxShop->setStyleSheet("background:#161b28; border:2px solid #c03030; border-radius:8px;");
+    mCtxShop->setStyleSheet("background:transparent;");
     {
         auto *vl = new QVBoxLayout(mCtxShop);
         vl->setContentsMargins(0, 0, 0, 0);
+        vl->setSpacing(0);
         vl->setAlignment(Qt::AlignCenter);
 
-        QLabel *shopLbl = new QLabel("SHOP", mCtxShop);
-        QFont sf = mPixelFont; sf.setPixelSize(64); sf.setBold(true);
-        shopLbl->setFont(sf);
-        shopLbl->setStyleSheet("color:#f0c040; background:transparent; border:none;");
-        shopLbl->setAlignment(Qt::AlignCenter);
-        vl->addWidget(shopLbl);
+        auto *sign = new ShopSignWidget(mCtxShop);
+        vl->addWidget(sign, 0, Qt::AlignCenter);
 
         QLabel *sub = new QLabel("来变强吧!", mCtxShop);
         QFont subf = mCNFont; subf.setPixelSize(13);
         sub->setFont(subf);
-        sub->setStyleSheet("color:white; background:transparent; border:none;");
+        sub->setStyleSheet("color:white; background:transparent;");
         sub->setAlignment(Qt::AlignCenter);
         vl->addWidget(sub);
     }
@@ -236,19 +241,72 @@ void MainWindow::setupLeftPanel() {
 
     layout->addWidget(mContextArea);
 
-    // 回合得分
+    // ── 回合分数(横排:标题 + 芯片 + 数字) ──
     QWidget *scoreBox = new QWidget(mLeftPanel);
-    scoreBox->setStyleSheet("background:#161b28; border-radius:8px;");
-    QHBoxLayout *sbl = new QHBoxLayout(scoreBox);
-    sbl->setContentsMargins(8, 4, 8, 4);
-    QLabel *sTitle = makeLabel("回合\n分数", 12, "#aaa", mCNFont, scoreBox);
-    mLblScore = makeLabel("✳ 0", 20, "#ffffff", mPixelFont, scoreBox);
+    scoreBox->setFixedHeight(48);
+    scoreBox->setAttribute(Qt::WA_StyledBackground, true);
+    scoreBox->setStyleSheet("background:#374244; border-radius:8px;");
+    auto *sbl = new QHBoxLayout(scoreBox);
+    sbl->setContentsMargins(10, 6, 10, 6);
+    sbl->setSpacing(6);
+
+    QLabel *sTitle = new QLabel("回合\n分数", scoreBox);
+    QFont stf = mCNFont; stf.setPixelSize(12);
+    sTitle->setFont(stf);
+    sTitle->setStyleSheet("color:white; background:transparent;");
+    sTitle->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     sbl->addWidget(sTitle);
+
+    sbl->addStretch();
+
+    // 紫芯片图标
+    QLabel *scoreChip = new QLabel(scoreBox);
+    {
+        QPixmap chipsSheet(":/textures/images/chips.png");
+        if (!chipsSheet.isNull()) {
+            QPixmap pix = chipsSheet.copy(0, 0, 58, 58);
+            scoreChip->setPixmap(pix.scaled(28, 28, Qt::KeepAspectRatio,
+                                            Qt::SmoothTransformation));
+        }
+    }
+    scoreChip->setFixedSize(28, 28);
+    scoreChip->setStyleSheet("background:transparent;");
+    sbl->addWidget(scoreChip);
+
+    mLblScore = new QLabel("0", scoreBox);
+    QFont smf = mPixelFont; smf.setPixelSize(28);
+    mLblScore->setFont(smf);
+    mLblScore->setStyleSheet("color:white; background:transparent;");
     sbl->addWidget(mLblScore);
+
     layout->addWidget(scoreBox);
+
+    // 牌型名行
+    QWidget *handNameBox = new QWidget(mLeftPanel);
+    handNameBox->setFixedHeight(40);
+    auto *hnl = new QHBoxLayout(handNameBox);
+    hnl->setContentsMargins(0, 0, 0, 0);
+    hnl->setSpacing(6);
+    hnl->setAlignment(Qt::AlignCenter);
+
+    mLblHandName = new QLabel("", handNameBox);
+    QFont hnf = mCNFont; hnf.setPixelSize(22); hnf.setBold(true);
+    mLblHandName->setFont(hnf);
+    mLblHandName->setStyleSheet("color:white; background:transparent;");
+    mLblHandName->setAlignment(Qt::AlignCenter);
+    hnl->addWidget(mLblHandName);
+
+    mLblHandLevel = new QLabel("", handNameBox);
+    QFont hlf = mCNFont; hlf.setPixelSize(14);
+    mLblHandLevel->setFont(hlf);
+    mLblHandLevel->setStyleSheet("color:#ff9a00; background:transparent;");
+    hnl->addWidget(mLblHandLevel);
+
+    layout->addWidget(handNameBox);
 
     // 筹码 × 倍率
     QWidget *chipsRow = new QWidget(mLeftPanel);
+    chipsRow->setFixedHeight(56);
     QHBoxLayout *chipsLayout = new QHBoxLayout(chipsRow);
     chipsLayout->setContentsMargins(0, 0, 0, 0);
     chipsLayout->setSpacing(4);
@@ -258,7 +316,7 @@ void MainWindow::setupLeftPanel() {
     QFont cf = mPixelFont; cf.setPixelSize(30);
     mLblChips->setFont(cf);
     mLblChips->setStyleSheet(
-        "background: #3060c0; color: white;"
+        "background: #009dff; color: white;"
         "border-radius: 8px; padding: 4px 8px;"
         );
 
@@ -273,7 +331,7 @@ void MainWindow::setupLeftPanel() {
     mLblMult->setAlignment(Qt::AlignCenter);
     mLblMult->setFont(cf);
     mLblMult->setStyleSheet(
-        "background:#c03030; color:white;"
+        "background:#fe5f55; color:white;"
         "border-radius:8px; padding:4px 8px;"
         );
 
@@ -282,102 +340,118 @@ void MainWindow::setupLeftPanel() {
     chipsLayout->addWidget(mLblMult);
     layout->addWidget(chipsRow);
 
-    // 比赛信息 + 出牌/弃牌次数
-    QWidget *infoRow = new QWidget(mLeftPanel);
-    QHBoxLayout *ibl = new QHBoxLayout(infoRow);
-    ibl->setContentsMargins(0, 0, 0, 0);
-    ibl->setSpacing(6);
+    QWidget *bottomRow = new QWidget(mLeftPanel);
+    auto *brl = new QHBoxLayout(bottomRow);
+    brl->setContentsMargins(0, 0, 0, 0);
+    brl->setSpacing(8);
 
-    QPushButton *btnInfo = makeBtn("比赛\n信息", "#c03030", "#a02020", mCNFont, infoRow, 64);
-    btnInfo->setFixedWidth(70);
+    // 左列:两个按钮竖排
+    QWidget *btnCol = new QWidget(bottomRow);
+    auto *btnVbl = new QVBoxLayout(btnCol);
+    btnVbl->setContentsMargins(0, 0, 0, 0);
+    btnVbl->setSpacing(6);
 
-    QWidget *countersBox = new QWidget(infoRow);
-    QVBoxLayout *cbv = new QVBoxLayout(countersBox);
-    cbv->setContentsMargins(0, 0, 0, 0);
-    cbv->setSpacing(2);
+    QPushButton *btnInfo = makeBtn("比赛\n信息", "#fe5f55", "#ff7066", mCNFont, btnCol, 70);
+    btnInfo->setFixedWidth(76);
+    btnVbl->addWidget(btnInfo);
 
-    QWidget *hRow = new QWidget(countersBox);
-    QHBoxLayout *hbl = new QHBoxLayout(hRow);
-    hbl->setContentsMargins(0, 0, 0, 0);
-    QLabel *hTitle = makeLabel("出牌", 12, "#aaa", mCNFont, hRow);
-    mLblHands = makeLabel("4", 20, "#4a90d9", mPixelFont, hRow);
-    hbl->addWidget(hTitle);
-    hbl->addWidget(mLblHands);
+    QPushButton *btnOptions = makeBtn("选项", "#fda200", "#ffb730", mCNFont, btnCol, 70);
+    btnOptions->setFixedWidth(76);
+    btnVbl->addWidget(btnOptions);
 
-    QWidget *dRow = new QWidget(countersBox);
-    QHBoxLayout *dbl = new QHBoxLayout(dRow);
-    dbl->setContentsMargins(0, 0, 0, 0);
-    QLabel *dTitle = makeLabel("弃牌", 12, "#aaa", mCNFont, dRow);
-    mLblDiscards = makeLabel("3", 20, "#e07030", mPixelFont, dRow);
-    dbl->addWidget(dTitle);
-    dbl->addWidget(mLblDiscards);
+    brl->addWidget(btnCol);
 
-    cbv->addWidget(hRow);
-    cbv->addWidget(dRow);
+    // 右列:出牌/弃牌、金币、底注/回合 全部堆在这里
+    QWidget *rightCol = new QWidget(bottomRow);
+    auto *rcvbl = new QVBoxLayout(rightCol);
+    rcvbl->setContentsMargins(0, 0, 0, 0);
+    rcvbl->setSpacing(6);
 
-    ibl->addWidget(btnInfo);
-    ibl->addWidget(countersBox);
-    layout->addWidget(infoRow);
+    // 出牌 / 弃牌 (横排)
+    QWidget *handsRow = new QWidget(rightCol);
+    handsRow->setFixedHeight(56);
+    handsRow->setAttribute(Qt::WA_StyledBackground, true);
+    handsRow->setStyleSheet("background:#374244; border-radius:8px;");
+    auto *hrl = new QHBoxLayout(handsRow);
+    hrl->setContentsMargins(8, 4, 8, 4);
+    hrl->setSpacing(4);
 
-    layout->addSpacing(4);
+    // "出牌" 标题 + 数字
+    QWidget *hCell = new QWidget(handsRow);
+    auto *hcv = new QVBoxLayout(hCell);
+    hcv->setContentsMargins(0, 0, 0, 0);
+    hcv->setSpacing(0);
+    hcv->setAlignment(Qt::AlignCenter);
+    hcv->addWidget(makeLabel("出牌", 11, "white", mCNFont, hCell));
+    mLblHands = makeLabel("4", 22, "#009dff", mPixelFont, hCell);
+    hcv->addWidget(mLblHands);
+    hrl->addWidget(hCell);
 
-    // ── 金币（图标 + 文字一行）──
-    QWidget *goldRow = new QWidget(mLeftPanel);
-    goldRow->setStyleSheet("background:#161b28; border-radius:8px;");
+    // "弃牌" 同结构
+    QWidget *dCell = new QWidget(handsRow);
+    auto *dcv = new QVBoxLayout(dCell);
+    dcv->setContentsMargins(0, 0, 0, 0);
+    dcv->setSpacing(0);
+    dcv->setAlignment(Qt::AlignCenter);
+    dcv->addWidget(makeLabel("弃牌", 11, "white", mCNFont, dCell));
+    mLblDiscards = makeLabel("3", 22, "#fe5f55", mPixelFont, dCell);
+    dcv->addWidget(mLblDiscards);
+    hrl->addWidget(dCell);
+
+    rcvbl->addWidget(handsRow);
+
+    // 金币(长横盒)
+    QWidget *goldRow = new QWidget(rightCol);
+    goldRow->setFixedHeight(36);
+    goldRow->setAttribute(Qt::WA_StyledBackground, true);
+    goldRow->setStyleSheet("background:#374244; border-radius:8px;");
     auto *gbl = new QHBoxLayout(goldRow);
-    gbl->addStretch();
     gbl->setContentsMargins(10, 4, 10, 4);
     gbl->setSpacing(8);
+    gbl->setAlignment(Qt::AlignCenter);
 
-    QPixmap chipsSheet(":/textures/images/chips.png");
-    if (!chipsSheet.isNull()) {
-        // chips.png 第一格通常是金色筹码,如果不是请告诉我准确位置
-        QPixmap goldIcon = chipsSheet.copy(0, 0, 58, 58);
-        auto *iconLbl = new QLabel(goldRow);
-        iconLbl->setPixmap(goldIcon.scaled(28, 28, Qt::KeepAspectRatio, Qt::SmoothTransformation));
-        iconLbl->setFixedSize(28, 28);
-        iconLbl->setStyleSheet("background: transparent;");
-        gbl->addWidget(iconLbl);
-    }
-
-    mLblGold = makeLabel("4", 28, "#f0c040", mPixelFont, goldRow);
-    mLblGold->setStyleSheet("color:#f0c040; background:transparent;");
+    mLblGold = makeLabel("$4", 24, "#f3b958", mPixelFont, goldRow);
     gbl->addWidget(mLblGold);
-    gbl->addStretch();
-
-    layout->addWidget(goldRow);
-
-    // 选项按钮
-    auto *btnOptions = makeBtn("选项", "#c07820", "#a06010", mCNFont, mLeftPanel, 44);
-    layout->addWidget(btnOptions);
-
-    layout->addStretch();
+    rcvbl->addWidget(goldRow);
 
     // 底注 / 回合
-    auto *anteRow = new QWidget(mLeftPanel);
-    auto *abl = new QHBoxLayout(anteRow);
-    abl->setContentsMargins(0, 0, 0, 0);
-    abl->setSpacing(8);
+    QWidget *anteRow2 = new QWidget(rightCol);
+    auto *arl = new QHBoxLayout(anteRow2);
+    arl->setContentsMargins(0, 0, 0, 0);
+    arl->setSpacing(4);
 
-    auto *anteBox = new QWidget(anteRow);
-    anteBox->setStyleSheet("background:#161b28; border-radius:6px;");
+    QWidget *anteBox = new QWidget(anteRow2);
+    anteBox->setFixedHeight(44);
+    anteBox->setAttribute(Qt::WA_StyledBackground, true);
+    anteBox->setStyleSheet("background:#374244; border-radius:8px;");
     auto *avbl = new QVBoxLayout(anteBox);
     avbl->setContentsMargins(6, 3, 6, 3);
-    avbl->addWidget(makeLabel("底注", 11, "#888", mCNFont, anteBox));
-    mLblAnte = makeLabel("1/8", 16, "#fff", mPixelFont, anteBox);
+    avbl->setSpacing(0);
+    avbl->setAlignment(Qt::AlignCenter);
+    avbl->addWidget(makeLabel("底注", 11, "white", mCNFont, anteBox));
+    mLblAnte = makeLabel("1<font color='white'>/8</font>", 16, "#ff9a00", mPixelFont, anteBox);
+    mLblAnte->setTextFormat(Qt::RichText);     // ← 加这行,启用 HTML
     avbl->addWidget(mLblAnte);
+    arl->addWidget(anteBox);
 
-    auto *roundBox = new QWidget(anteRow);
-    roundBox->setStyleSheet("background:#161b28; border-radius:6px;");
+    QWidget *roundBox = new QWidget(anteRow2);
+    roundBox->setFixedHeight(44);
+    roundBox->setAttribute(Qt::WA_StyledBackground, true);
+    roundBox->setStyleSheet("background:#374244; border-radius:8px;");
     auto *rvbl = new QVBoxLayout(roundBox);
     rvbl->setContentsMargins(6, 3, 6, 3);
-    rvbl->addWidget(makeLabel("回合", 11, "#888", mCNFont, roundBox));
-    mLblRound = makeLabel("1", 16, "#fff", mPixelFont, roundBox);
+    rvbl->setSpacing(0);
+    rvbl->setAlignment(Qt::AlignCenter);
+    rvbl->addWidget(makeLabel("回合", 11, "white", mCNFont, roundBox));
+    mLblRound = makeLabel("1", 16, "#ff9a00", mPixelFont, roundBox);
     rvbl->addWidget(mLblRound);
+    arl->addWidget(roundBox);
 
-    abl->addWidget(anteBox);
-    abl->addWidget(roundBox);
-    layout->addWidget(anteRow);
+    rcvbl->addWidget(anteRow2);
+
+    brl->addWidget(rightCol, 1);
+    layout->addStretch();
+    layout->addWidget(bottomRow);
 }
 
 void MainWindow::setupScene() {
@@ -417,20 +491,6 @@ void MainWindow::setupScene() {
     mPlayBgRect = mScene->addRect(10, PLAY_Y, mSceneW - 16, PLAY_H,
                                   QPen(QColor(0, 0, 0, 0)), QBrush(QColor(0, 0, 0, 25)));
 
-    // 牌型名称标签
-    mHandTypeLabel = mScene->addText("");
-    QFont htf = mPixelFont; htf.setPixelSize(26);
-    mHandTypeLabel->setFont(htf);
-    mHandTypeLabel->setDefaultTextColor(QColor("#f0e060"));
-    mHandTypeLabel->setZValue(30);
-
-    // 本次得分标签
-    mHandScoreLabel = mScene->addText("");
-    QFont hsf = mCNFont; hsf.setPixelSize(14);
-    mHandScoreLabel->setFont(hsf);
-    mHandScoreLabel->setDefaultTextColor(QColor("#cccccc"));
-    mHandScoreLabel->setZValue(30);
-
     // 手牌计数
     mHandCountLabel = mScene->addText("8/8");
     QFont hcf = mCNFont; hcf.setPixelSize(13);
@@ -453,8 +513,8 @@ void MainWindow::setupScene() {
     mDeckLabel->setPos(mSceneW - CARD_W - 6, mSceneH - 28);
     mDeckLabel->setZValue(2);
 
-    mBtnY  = PLAY_Y + PLAY_H + 30;        // 出牌区下方留 30px
-    mHandY = mBtnY + 70;                  // 按钮下方
+    mHandY = PLAY_Y + PLAY_H + 30;         // 出牌区下方留 30px
+    mBtnY  = mHandY + CARD_H + 24;                  // 按钮下方
 
     mDeckLabel->setPos(mSceneW - CARD_W - 6, mSceneH - 28);
 }
@@ -468,43 +528,54 @@ void MainWindow::setupSceneButtons() {
     int y = mBtnY;
 
     // 出牌
-    mBtnPlay = makeBtn("出牌", "#555", "#444", mCNFont, nullptr, btnH);
+    mBtnPlay = makeBtn("出牌", "#009dff", "#33b0ff", mCNFont, nullptr, btnH);
     mBtnPlay->setFixedWidth(btnW);
-    auto *proxyPlay = mScene->addWidget(mBtnPlay);
-    proxyPlay->setPos(startX, y);
-    proxyPlay->setZValue(50);
+    mPlayProxy = mScene->addWidget(mBtnPlay);          // ← auto *proxyPlay = ... 改成 mPlayProxy =
+    mPlayProxy->setPos(startX, y);
+    mPlayProxy->setZValue(50);
 
-    // 理牌（带子按钮）
+    // 理牌(白色方框 + label + 点数/花色 两子按钮)
     auto *sortContainer = new QWidget;
     sortContainer->setFixedSize(btnW, btnH);
-    sortContainer->setStyleSheet("background:transparent;");
+    sortContainer->setAttribute(Qt::WA_StyledBackground, true);
+    sortContainer->setStyleSheet(
+        "background: white;"
+        "border-radius: 8px;"
+        );
     auto *scbl = new QVBoxLayout(sortContainer);
-    scbl->setContentsMargins(0, 0, 0, 0);
-    scbl->setSpacing(3);
+    scbl->setContentsMargins(4, 2, 4, 4);
+    scbl->setSpacing(2);
+    scbl->setAlignment(Qt::AlignCenter);
 
-    mBtnSort = makeBtn("理牌", "#c07820", "#a06010", mCNFont, sortContainer, 24);
+    // "理牌" 是 label,不是 button
+    QLabel *sortLbl = new QLabel("理牌", sortContainer);
+    QFont slf = mCNFont; slf.setPixelSize(14); slf.setBold(true);
+    sortLbl->setFont(slf);
+    sortLbl->setAlignment(Qt::AlignCenter);
+    sortLbl->setStyleSheet("color:#374244; background:transparent;");
+    scbl->addWidget(sortLbl);
+
+    // 子按钮行
     auto *subRow = new QWidget(sortContainer);
+    subRow->setStyleSheet("background:transparent;");
     auto *subl = new QHBoxLayout(subRow);
     subl->setContentsMargins(0, 0, 0, 0);
-    subl->setSpacing(3);
-    mBtnSortNum  = makeBtn("点数", "#555", "#777", mCNFont, subRow, 22);
-    mBtnSortSuit = makeBtn("花色", "#555", "#777", mCNFont, subRow, 22);
+    subl->setSpacing(4);
+    mBtnSortNum  = makeBtn("点数", "#fda200", "#ffb730", mCNFont, subRow, 22);
+    mBtnSortSuit = makeBtn("花色", "#fda200", "#ffb730", mCNFont, subRow, 22);
     subl->addWidget(mBtnSortNum);
     subl->addWidget(mBtnSortSuit);
-
-    scbl->addWidget(mBtnSort);
     scbl->addWidget(subRow);
 
-    auto *proxySort = mScene->addWidget(sortContainer);
-    proxySort->setPos(startX + btnW + gap, y);
-    proxySort->setZValue(50);
-
+    mSortProxy = mScene->addWidget(sortContainer);
+    mSortProxy->setPos(startX + btnW + gap, y);
+    mSortProxy->setZValue(50);
     // 弃牌
-    mBtnDiscard = makeBtn("弃牌", "#555", "#444", mCNFont, nullptr, btnH);
+    mBtnDiscard = makeBtn("弃牌", "#fe5f55", "#ff7066", mCNFont, nullptr, btnH);
     mBtnDiscard->setFixedWidth(btnW);
-    auto *proxyDiscard = mScene->addWidget(mBtnDiscard);
-    proxyDiscard->setPos(startX + (btnW + gap) * 2, y);
-    proxyDiscard->setZValue(50);
+    mDiscardProxy = mScene->addWidget(mBtnDiscard);    // ← 同理
+    mDiscardProxy->setPos(startX + (btnW + gap) * 2, y);
+    mDiscardProxy->setZValue(50);
 }
 
 void MainWindow::setupConnections() {
@@ -540,38 +611,81 @@ void MainWindow::setupConnections() {
 }
 
 void MainWindow::refreshHand() {
-    // 移除旧手牌
-    for (auto *c : mHandCards) {
-        mScene->removeItem(c);
-        delete c;
-    }
-    mHandCards.clear();
-    mSelected.clear();
-
     const auto &hand = mGameState->hand();
-    for (int i = 0; i < hand.size(); ++i) {
-        auto *card = new CardItem(hand[i]);
-        card->setZValue(10 + i);
-        mScene->addItem(card);
-        mHandCards.append(card);
 
-        connect(card, &CardItem::clicked,
-            this, &MainWindow::onCardClicked);
+    auto matches = [](const CardData &a, const CardData &b) {
+        return a.rank == b.rank && a.suit == b.suit
+               && a.enhancement == b.enhancement && a.seal == b.seal
+               && a.edition == b.edition;
+    };
+
+    // 记录"哪些 CardData 当前是选中状态"
+    QVector<CardData> selectedData;
+    for (int i : mSelected)
+        if (i >= 0 && i < mHandCards.size())
+            selectedData.append(mHandCards[i]->cardData());
+
+    // ...原有的删除+重排逻辑...
+    for (int i = mHandCards.size() - 1; i >= 0; --i) {
+        const CardData &d = mHandCards[i]->cardData();
+        bool found = false;
+        for (const auto &hc : hand) if (matches(hc, d)) { found = true; break; }
+        if (!found) {
+            mScene->removeItem(mHandCards[i]);
+            mHandCards[i]->deleteLater();
+            mHandCards.removeAt(i);
+        }
+    }
+
+    QPointF deckPos(mSceneW - CARD_W - 10, mSceneH - CARD_H - 36);
+    QVector<CardItem*> reordered;
+    QVector<CardItem*> remaining = mHandCards;
+    for (const auto &hc : hand) {
+        CardItem *match = nullptr;
+        for (int k = 0; k < remaining.size(); ++k) {
+            if (matches(remaining[k]->cardData(), hc)) {
+                match = remaining[k];
+                remaining.removeAt(k);
+                break;
+            }
+        }
+        if (!match) {
+            match = new CardItem(hc);
+            match->setPos(deckPos);
+            match->setZValue(10);
+            mScene->addItem(match);
+            connect(match, &CardItem::clicked,
+                    this, &MainWindow::onCardClicked);
+        }
+        reordered.append(match);
+    }
+    mHandCards = reordered;
+
+    // 按身份恢复选中状态
+    mSelected.clear();
+    for (int i = 0; i < mHandCards.size(); ++i) {
+        const CardData &d = mHandCards[i]->cardData();
+        bool wasSelected = false;
+        for (const auto &sd : selectedData) {
+            if (matches(sd, d)) { wasSelected = true; break; }
+        }
+        mHandCards[i]->setCardSelected(wasSelected);
+        if (wasSelected) mSelected.append(i);
     }
 
     layoutHandCards();
     refreshCounters();
+    updateHandPreview();
 }
 
 void MainWindow::layoutHandCards() {
     int n = mHandCards.size();
     if (n == 0) return;
 
-    // 手牌计数
     mHandCountLabel->setPlainText(
         QString("%1/%2").arg(n).arg(Constants::HAND_SIZE));
     QRectF hcr = mHandCountLabel->boundingRect();
-    mHandCountLabel->setPos((mSceneW - hcr.width()) / 2, mBtnY - 22);
+    mHandCountLabel->setPos((mSceneW - hcr.width()) / 2, mHandY - 22);
 
     int available = mSceneW - 80;
     int step = (n > 1) ? (available - CARD_W) / (n - 1) : 0;
@@ -581,10 +695,16 @@ void MainWindow::layoutHandCards() {
 
     for (int i = 0; i < n; ++i) {
         bool sel = mSelected.contains(i);
+
+        double t = (-n / 2.0 - 0.5 + (i + 1)) / n;
+        double angleDeg = 0.2 * t * 180.0 / M_PI;
+
         int x = startX + i * step;
-        int y = sel ? mHandY - 30 : mHandY;
-        mHandCards[i]->setZValue(sel ? 50 + i : 10 + i);
-        mHandCards[i]->setPos(x, y);
+        int y = mHandY + (sel ? -50 : 0);
+
+        mHandCards[i]->setBaseRotation(angleDeg);
+        mHandCards[i]->setZValue(i);
+        mHandCards[i]->moveTo(QPointF(x, y), 220);
     }
 }
 
@@ -611,20 +731,21 @@ void MainWindow::layoutPlayedCards() {
 
 // 分数刷新
 void MainWindow::refreshScore() {
-    mLblScore->setText(QString("✳ %1").arg(mGameState->score()));
-    mLblTarget->setText(QString("✳ %1").arg(mGameState->targetScore()));
+    mLblScore->setText(QString::number(mGameState->score()));
+    mLblTarget->setText(QString::number(mGameState->targetScore()));
 }
 
 // 金币刷新
 void MainWindow::refreshGold() {
-    mLblGold->setText(QString("%1").arg(mGameState->gold()));
+    mLblGold->setText(QString("$%1").arg(mGameState->gold()));
 }
 
 // 出牌/弃牌次数刷新
 void MainWindow::refreshCounters() {
     mLblHands->setText(QString::number(mGameState->handsLeft()));
     mLblDiscards->setText(QString::number(mGameState->discardLeft()));
-    mLblAnte->setText(QString("%1/8").arg(mGameState->ante()));
+    mLblAnte->setText(QString("%1<font color='white'>/8</font>")
+                          .arg(mGameState->ante()));
     mLblRound->setText(QString::number(
         static_cast<int>(mGameState->blindType()) + 1));
 
@@ -635,16 +756,25 @@ void MainWindow::refreshCounters() {
     switch (mGameState->blindType()) {
     case BlindType::Small:
         mLblBlind->setText("小盲注");
-        applyBlindStyle("#3d70b8");
+        applyBlindStyle("#1679b4");
         break;
     case BlindType::Big:
         mLblBlind->setText("大盲注");
-        applyBlindStyle("#c07820");
+        applyBlindStyle("#ae7b1b");
         break;
     case BlindType::Boss: {
         auto info = mGameState->currentBossInfo();
         mLblBlind->setText(QString("Boss · %1").arg(info.name));
-        applyBlindStyle("#a02020");
+        QString col;
+        switch (mGameState->bossEffect()) {
+        case BossEffect::TheHook:   col = "#a84024"; break;
+        case BossEffect::TheClub:   col = "#b9cb92"; break;
+        case BossEffect::TheWall:   col = "#8a59a5"; break;
+        case BossEffect::ThePlant:  col = "#709284"; break;
+        case BossEffect::TheNeedle: col = "#5c6e31"; break;
+        default:                    col = "#a84024"; break;
+        }
+        applyBlindStyle(col);
         mLblBlind->setToolTip(info.description);
         break;
     }
@@ -678,24 +808,6 @@ void MainWindow::refreshCounters() {
     // 刷新左面板芯片图
     if (mBlindChipLbl) {
         QPixmap sheet(":/textures/images/BlindChips.png");
-        if (!sheet.isNull()) {
-            int row = 0;
-            if (mGameState->blindType() == BlindType::Small) row = 0;
-            else if (mGameState->blindType() == BlindType::Big) row = 1;
-            else {
-                switch (mGameState->bossEffect()) {
-                case BossEffect::TheHook:   row = 7;  break;
-                case BossEffect::TheClub:   row = 4;  break;
-                case BossEffect::TheWall:   row = 9;  break;
-                case BossEffect::ThePlant:  row = 19; break;
-                case BossEffect::TheNeedle: row = 20; break;
-                default: row = 7; break;
-                }
-            }
-            QPixmap pix = sheet.copy(0, row * 68, 68, 68);
-            mBlindChipLbl->setPixmap(pix.scaled(64, 64, Qt::KeepAspectRatio,
-                                                Qt::SmoothTransformation));
-        }
     }
 
     bool hasSelected = !mSelected.isEmpty();
@@ -725,60 +837,115 @@ void MainWindow::onCardClicked(CardItem *card) {
 
     layoutHandCards();
     refreshCounters();
+    updateHandPreview();
 }
 
 // 出牌
 void MainWindow::onPlayClicked() {
     if (mSelected.isEmpty()) return;
 
-    // 把选中的牌移到出牌区显示
-    clearPlayedCards();
     QVector<int> sortedIdx = mSelected;
     std::sort(sortedIdx.begin(), sortedIdx.end());
 
-    for (int idx : sortedIdx) {
-        CardData d = mHandCards[idx]->cardData();
-        auto *c = new CardItem(d);
-        c->setZValue(20);
-        mScene->addItem(c);
-        mPlayedCards.append(c);
-    }
-    layoutPlayedCards();
-
-    // 通知 GameState
-    mGameState->playCards(mSelected);
     mSelected.clear();
+
+    clearPlayedCards();
+    QVector<CardItem*> playedCards;
+    for (int i = sortedIdx.size() - 1; i >= 0; --i) {
+        int idx = sortedIdx[i];
+        CardItem *c = mHandCards.takeAt(idx);
+        c->setCardSelected(false);
+        c->setZValue(20);
+        playedCards.prepend(c);
+    }
+    mPlayedCards = playedCards;
+
+    layoutHandCards();
+
+    int n = mPlayedCards.size();
+    int totalW = n * CARD_W + (n - 1) * 10;
+    int startX = (mSceneW - totalW) / 2;
+    int y = PLAY_Y + (PLAY_H - CARD_H) / 2;
+    for (int i = 0; i < n; ++i) {
+        QPointF target(startX + i * (CARD_W + 10), y);
+        mPlayedCards[i]->moveTo(target, 280);
+    }
+
+    mGameState->playCards(sortedIdx);   // ← 改用 sortedIdx,不是 mSelected
 }
 
 // 弃牌
 void MainWindow::onDiscardClicked() {
     if (mSelected.isEmpty()) return;
-    clearPlayedCards();
-    mGameState->discardCards(mSelected);
+
+    QVector<int> sortedIdx = mSelected;
+    std::sort(sortedIdx.begin(), sortedIdx.end());
     mSelected.clear();
+
+    // 把选中的卡从 mHandCards 抽出来,做"飞出屏幕底 + 淡出"动画
+    for (int i = sortedIdx.size() - 1; i >= 0; --i) {
+        int idx = sortedIdx[i];
+        CardItem *c = mHandCards.takeAt(idx);
+        c->setCardSelected(false);
+        c->setZValue(5);   // 低 z,新摸的牌覆盖在上面
+
+        // 同时做两个动画:下移 + 淡出
+        QPointF target(mSceneW + CARD_W, c->pos().y());   // ← 飞出屏幕右
+        c->moveTo(target, 350);
+
+        auto *fade = new QPropertyAnimation(c, "opacity", this);
+        fade->setDuration(350);
+        fade->setStartValue(1.0);
+        fade->setEndValue(0.0);
+        fade->setEasingCurve(QEasingCurve::InQuad);
+        // 动画结束后销毁 item
+        connect(fade, &QPropertyAnimation::finished, c, [this, c]() {
+            mScene->removeItem(c);
+            c->deleteLater();
+        });
+        fade->start(QAbstractAnimation::DeleteWhenStopped);
+    }
+
+    layoutHandCards();          // 剩余卡合拢
+    mGameState->discardCards(sortedIdx);
 }
 
 void MainWindow::onHandPlayed()
 {
     const HandResult &r = mGameState->lastResult();
 
-    mLblChips->setText(QString::number(r.chips));
-    mLblMult->setText(QString::number(r.mult));
+    mLblHandName ->setText(r.name);
+    mLblHandLevel->setText(QString("等级%1").arg(r.level));
 
-    mHandTypeLabel->setPlainText(QString("%1 lv.%2").arg(r.name).arg(r.level));
-    QRectF tb = mHandTypeLabel->boundingRect();
-    mHandTypeLabel->setPos((mSceneW - tb.width()) / 2, PLAY_Y + 10);
+    // 起步值
+    mDisplayedChips = r.baseChips;
+    mDisplayedMult  = r.baseMult;
+    double displayedXmult = 1.0;
+    mLblChips->setText(QString::number(mDisplayedChips));
+    mLblMult ->setText(QString::number(mDisplayedMult));
 
-    int total = static_cast<int>(r.chips * r.mult * r.xmult);
-    QString line = (qAbs(r.xmult - 1.0) < 1e-6)
-                       ? QString("%1  ×  %2  =  %3").arg(r.chips).arg(r.mult).arg(total)
-                       : QString("%1  ×  %2  ×  %3  =  %4")
-                             .arg(r.chips).arg(r.mult)
-                             .arg(QString::number(r.xmult, 'g', 3))
-                             .arg(total);
-    mHandScoreLabel->setPlainText(line);
-    QRectF sb = mHandScoreLabel->boundingRect();
-    mHandScoreLabel->setPos((mSceneW - sb.width()) / 2, PLAY_Y + 46);
+    int delayBase = 350;
+    int delayStep = 220;
+
+    // mPlayedCards 顺序对应 scoringCards 的 played 下标(sortedIdx 顺序)
+    // 但 ScoreEvent::sourceCardIdx 是 played 数组的下标,要映射到 mPlayedCards 视图
+
+    // 简化:按事件出现顺序依次播放
+    for (int ei = 0; ei < r.events.size(); ++ei) {
+        const ScoreEvent &ev = r.events[ei];
+        int delay = delayBase + ei * delayStep;
+
+        QTimer::singleShot(delay, this, [this, ev]() {
+            playScoreEvent(ev);
+        });
+    }
+
+    // 校正到最终值
+    int finalDelay = delayBase + r.events.size() * delayStep + 250;
+    QTimer::singleShot(finalDelay, this, [this, r]() {
+        mLblChips->setText(QString::number(r.chips));
+        mLblMult ->setText(QString::number(r.mult));
+    });
 }
 
 void MainWindow::onSortByNum() {
@@ -812,6 +979,7 @@ void MainWindow::onGameOver(bool won)
     if (box.exec() == QMessageBox::Yes) {
         mGameState->startGame();   // 会触发 blindSelectEntered → 切到选择页
         mGameOverHandled = false;
+        clearObtainedTags();
         refreshGold();
         refreshCounters();
         refreshJokerSlots();
@@ -940,23 +1108,32 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev)
 
 void MainWindow::onBlindSelectEntered()
 {
-    setContextPage(0);   // ← 切到 BlindSelect 文案
+    setContextPage(0);
+    setPlayPhaseVisible(false);       // ← 隐藏对局元素
+    clearPlayedCards();                // ← 清上轮出牌
     mBlindSelectWidget->refresh();
     mBlindSelectWidget->raise();
     mBlindSelectWidget->show();
-    QTimer::singleShot(0, this, [this]() {
-        if (mBlindSelectWidget && mPlayPage)
+
+    bool skipped = mGameState->justSkipped();
+    QTimer::singleShot(0, this, [this, skipped]() {
+        if (mBlindSelectWidget && mPlayPage
+            && mBlindSelectWidget->geometry() != mPlayPage->rect())
+        {
             mBlindSelectWidget->setGeometry(mPlayPage->rect());
-        mBlindSelectWidget->playEnterAnimation();   // ← 浮入动画
+        }
+        mBlindSelectWidget->arrangeCards(!skipped);
     });
 }
 
 void MainWindow::onBlindStarted()
 {
+    clearFloatingScores();
     mBlindSelectWidget->hide();
     mShopWidget->hide();
     mRoundEndOverlay->hide();
-    setContextPage(1);   // ← 切到对局信息
+    setContextPage(1);
+    setPlayPhaseVisible(true);        // ← 显示对局元素
 
     refreshHand();
     refreshScore();
@@ -965,19 +1142,20 @@ void MainWindow::onBlindStarted()
     refreshJokerSlots();
     refreshConsumableSlots();
     clearPlayedCards();
-    if (mHandTypeLabel)  mHandTypeLabel ->setPlainText("");
-    if (mHandScoreLabel) mHandScoreLabel->setPlainText("");
     mLblChips->setText("0");
     mLblMult ->setText("0");
 }
 
 void MainWindow::onNextBlindClicked()
 {
+    clearFloatingScores();
     mRoundEndOverlay->hide();
     mShopWidget->refresh();
     mShopWidget->raise();
     mShopWidget->show();
-    setContextPage(2);   // ← 切到 SHOP 标识
+    setContextPage(2);
+    setPlayPhaseVisible(false);       // ← 隐藏对局元素
+    clearPlayedCards();                // ← 清出牌
     QTimer::singleShot(0, this, [this]() {
         if (mShopWidget && mPlayPage)
             mShopWidget->setGeometry(mPlayPage->rect());
@@ -986,22 +1164,40 @@ void MainWindow::onNextBlindClicked()
 
 void MainWindow::onRoundWon(int blindReward, int handBonus, int interest)
 {
-    QString blindName;
-    switch (mGameState->blindType()) {
-    case BlindType::Small: blindName = "小盲注";    break;
-    case BlindType::Big:   blindName = "大盲注";    break;
-    case BlindType::Boss:  blindName = "Boss 盲注"; break;
-    }
     refreshGold();
-    mRoundEndOverlay->setData(blindName,
-                              mGameState->score(),
-                              mGameState->targetScore(),
-                              blindReward, handBonus, interest);
-    mRoundEndOverlay->raise();
-    mRoundEndOverlay->show();
-    QTimer::singleShot(0, this, [this]() {
-        if (mRoundEndOverlay && mPlayPage)
-            mRoundEndOverlay->setGeometry(mPlayPage->rect());
+
+    // 计算 blind chip row 用于显示
+    int chipRow = 0;
+    switch (mGameState->blindType()) {
+    case BlindType::Small: chipRow = 0; break;
+    case BlindType::Big:   chipRow = 1; break;
+    case BlindType::Boss:
+        switch (mGameState->bossEffect()) {
+        case BossEffect::TheHook:   chipRow = 7;  break;
+        case BossEffect::TheClub:   chipRow = 4;  break;
+        case BossEffect::TheWall:   chipRow = 9;  break;
+        case BossEffect::ThePlant:  chipRow = 19; break;
+        case BossEffect::TheNeedle: chipRow = 20; break;
+        default: chipRow = 7; break;
+        }
+        break;
+    }
+
+    mRoundEndOverlay->setData(
+        chipRow,
+        mGameState->targetScore(),
+        blindReward,
+        mGameState->handsLeft(),  handBonus,
+        interest
+        );
+
+    // 延迟弹出(等浮动分跑完)
+    int eventCount = mGameState->lastResult().events.size();
+    int delay = 350 + eventCount * 220 + 900 + 300;
+    QTimer::singleShot(delay, this, [this]() {
+        mRoundEndOverlay->raise();
+        mRoundEndOverlay->show();
+        if (mPlayPage) mRoundEndOverlay->setGeometry(mPlayPage->rect());
     });
 }
 
@@ -1025,4 +1221,169 @@ void MainWindow::setContextPage(int page)
 void MainWindow::onSkipBlind(int /*idx*/)
 {
     mGameState->skipCurrentBlind();
+    addObtainedTag(0, 3);    // tag_skip 坐标 (col=0, row=3)
+}
+void MainWindow::addObtainedTag(int tagCol, int tagRow)
+{
+    QPixmap sheet(":/textures/images/tags.png");
+    if (sheet.isNull()) return;
+
+    QPixmap pix = sheet.copy(tagCol * 68, tagRow * 68, 68, 68)
+                      .scaled(48, 48, Qt::KeepAspectRatio,
+                              Qt::SmoothTransformation);
+
+    auto *item = new QGraphicsPixmapItem(pix);
+    // 排在牌堆左边,从右往左累积
+    int idx = mObtainedTagIcons.size();
+    int x = mSceneW - CARD_W - 10 - 60 - idx * 56;   // 牌堆 x - 间距 - 累积偏移
+    int y = mSceneH - CARD_H - 36 + (CARD_H - 48) / 2;   // 跟牌堆中线对齐
+    item->setPos(x, y);
+    item->setZValue(5);
+    mScene->addItem(item);
+    mObtainedTagIcons.append(item);
+}
+
+void MainWindow::clearObtainedTags()
+{
+    for (auto *it : mObtainedTagIcons) {
+        mScene->removeItem(it);
+        delete it;
+    }
+    mObtainedTagIcons.clear();
+}
+
+void MainWindow::setPlayPhaseVisible(bool v)
+{
+    if (mPlayProxy)      mPlayProxy->setVisible(v);
+    if (mSortProxy)      mSortProxy->setVisible(v);
+    if (mDiscardProxy)   mDiscardProxy->setVisible(v);
+    if (mHandCountLabel) mHandCountLabel->setVisible(v);
+    for (auto *c : mHandCards)   c->setVisible(v);
+    for (auto *c : mPlayedCards) c->setVisible(v);
+}
+
+void MainWindow::spawnFloatingText(const QPointF &nearPos, const QString &text, const QColor &color)
+{
+    auto *fs = new FloatingScore(text, color, mPixelFont);
+    fs->setZValue(100);
+    // 卡片顶部中央正上方一点点(不浮动,位置静止)
+    QPointF center = nearPos + QPointF(CARD_W / 2, -20);
+    fs->setPos(center);
+    mScene->addItem(fs);
+
+    // hold 600ms + fade 300ms
+    auto *pause = new QPauseAnimation(600);
+    auto *fade  = new QPropertyAnimation(fs, "opacity");
+    fade->setDuration(300);
+    fade->setStartValue(1.0);
+    fade->setEndValue(0.0);
+    fade->setEasingCurve(QEasingCurve::InQuad);
+
+    auto *seq = new QSequentialAnimationGroup(this);
+    seq->addAnimation(pause);
+    seq->addAnimation(fade);
+    pause->setParent(seq);
+    fade->setParent(seq);
+
+    connect(seq, &QAbstractAnimation::finished, fs, [this, fs]() {
+        if (fs->scene()) mScene->removeItem(fs);
+        fs->deleteLater();
+    });
+    seq->start(QAbstractAnimation::DeleteWhenStopped);
+
+    mFloatingScores.append(fs);
+    connect(fs, &QObject::destroyed, this, [this, fs]() {
+        mFloatingScores.removeAll(fs);
+    });
+}
+
+void MainWindow::clearFloatingScores()
+{
+    for (auto *fs : mFloatingScores) {
+        if (fs->scene()) mScene->removeItem(fs);
+        fs->deleteLater();
+    }
+    mFloatingScores.clear();
+}
+
+void MainWindow::updateHandPreview()
+{
+    if (mSelected.isEmpty()) {
+        mLblHandName ->setText("");
+        mLblHandLevel->setText("");
+        mLblChips->setText("0");
+        mLblMult ->setText("0");
+        return;
+    }
+    HandResult r = mGameState->previewSelection(mSelected);
+    mLblHandName ->setText(r.name);
+    mLblHandLevel->setText(QString("等级%1").arg(r.level));
+    mLblChips->setText(QString::number(r.chips));
+    mLblMult ->setText(QString::number(r.mult));
+}
+
+void MainWindow::playScoreEvent(const ScoreEvent &ev)
+{
+    // 找到事件来源的视觉目标(卡片或小丑)
+    CardItem *sourceCard = nullptr;
+    JokerItem *sourceJoker = nullptr;
+
+    if (ev.sourceCardIdx >= 0 && ev.sourceCardIdx < mPlayedCards.size())
+        sourceCard = mPlayedCards[ev.sourceCardIdx];
+    else if (ev.sourceHandIdx >= 0 && ev.sourceHandIdx < mHandCards.size())
+        sourceCard = mHandCards[ev.sourceHandIdx];
+
+    if (ev.sourceJokerIdx >= 0 && ev.sourceJokerIdx < mJokerItems.size())
+        sourceJoker = mJokerItems[ev.sourceJokerIdx];
+
+    // 浮动分位置
+    QPointF anchorPos;
+    if (sourceCard) anchorPos = sourceCard->pos();
+    else if (sourceJoker) anchorPos = sourceJoker->pos();
+    else anchorPos = QPointF(mSceneW / 2, mBtnY);   // 兜底:屏幕中央
+
+    // 颜色
+    QColor color;
+    QString text;
+    bool isXMult = false;
+
+    switch (ev.kind) {
+    case ScoreEventKind::ScoringCardChip:
+    case ScoreEventKind::EditionChip:
+    case ScoreEventKind::JokerChip:
+        color = QColor("#009dff");   // 蓝
+        text = QString("+%1").arg(ev.intValue);
+        mDisplayedChips += ev.intValue;
+        mLblChips->setText(QString::number(mDisplayedChips));
+        break;
+
+    case ScoreEventKind::EnhancementMult:
+    case ScoreEventKind::EditionMult:
+    case ScoreEventKind::JokerMult:
+        color = QColor("#fe5f55");   // 红
+        text = QString("+%1").arg(ev.intValue);
+        mDisplayedMult += ev.intValue;
+        mLblMult->setText(QString::number(mDisplayedMult));
+        break;
+
+    case ScoreEventKind::EnhancementXMult:
+    case ScoreEventKind::EditionXMult:
+    case ScoreEventKind::SteelXMult:
+    case ScoreEventKind::JokerXMult:
+        color = QColor("#fe5f55");   // 红
+        text = QString("×%1").arg(QString::number(ev.xmultValue, 'g', 3));
+        isXMult = true;
+        // xmult 不直接累加到 mLblMult,等最终校正
+        break;
+    }
+
+    // 来源 juice
+    if (sourceCard) sourceCard->juiceUp(1.15, 200);
+    if (sourceJoker) {
+        // JokerItem 需要也有 juiceUp,见后面 §6
+        sourceJoker->juiceUp(1.15, 200);
+    }
+
+    // 浮动分(目前 spawnFloatingScore 只接受 int,扩展支持文本)
+    spawnFloatingText(anchorPos, text, color);
 }

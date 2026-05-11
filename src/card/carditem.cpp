@@ -3,6 +3,7 @@
 #include <QGraphicsSceneMouseEvent>
 #include <QPropertyAnimation>
 #include <QCursor>
+#include <QSequentialAnimationGroup>
 
 QPixmap *CardItem::sDeckSheet = nullptr;
 QPixmap *CardItem::sEnhSheet = nullptr;
@@ -182,12 +183,92 @@ void CardItem::mousePressEvent(QGraphicsSceneMouseEvent *event) {
     else QGraphicsObject::mousePressEvent(event);
 }
 
+void CardItem::juiceUp(double scaleAmount, int durationMs)
+{
+    // 设变换原点为中心,避免缩放时位置漂移
+    setTransformOriginPoint(WIDTH / 2.0, HEIGHT / 2.0);
+
+    auto *up = new QPropertyAnimation(this, "scale");
+    up->setDuration(durationMs / 2);
+    up->setStartValue(1.0);
+    up->setEndValue(scaleAmount);
+    up->setEasingCurve(QEasingCurve::OutQuad);
+
+    auto *down = new QPropertyAnimation(this, "scale");
+    down->setDuration(durationMs / 2);
+    down->setStartValue(scaleAmount);
+    down->setEndValue(1.0);
+    down->setEasingCurve(QEasingCurve::InQuad);
+
+    auto *seq = new QSequentialAnimationGroup(this);
+    seq->addAnimation(up);
+    seq->addAnimation(down);
+    up->setParent(seq);
+    down->setParent(seq);
+    seq->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+void CardItem::applyTransform()
+{
+    // 中心点
+    qreal cx = WIDTH  / 2.0;
+    qreal cy = HEIGHT / 2.0;
+
+    // 透视参数:鼠标越往边缘,倾斜越大,深度感越明显
+    qreal tiltX = qDegreesToRadians(mHoverTiltX);
+    qreal tiltY = qDegreesToRadians(mHoverTiltY);
+    qreal zRot  = qDegreesToRadians(mBaseRotation);
+
+    // 步骤:平移到中心 → 绕 Y 倾斜 → 绕 X 倾斜 → 绕 Z 扇形 → 平移回去
+    QTransform t;
+    t.translate(cx, cy);
+
+    // 模拟绕 Y 轴旋转:左右两边远近不同 → 水平缩放 + 透视投影
+    // 简化:用 m11/m13 实现(perspective)
+    // y轴倾斜 = 水平倾斜效果(左右翻),用 shear + scale 近似
+    qreal cosY = std::cos(tiltY);
+    qreal cosX = std::cos(tiltX);
+    qreal sinY = std::sin(tiltY);
+    qreal sinX = std::sin(tiltX);
+
+    QTransform persp;
+    persp.setMatrix(
+        cosY,           sinY * sinX,    0.005 * sinY,
+        0,              cosX,           0.005 * sinX,
+        0,              0,              1
+        );
+    t = persp * t;
+
+    // 应用 Z 轴扇形旋转
+    t.rotateRadians(zRot);
+
+    t.translate(-cx, -cy);
+    setTransform(t);
+}
+
 void CardItem::hoverEnterEvent(QGraphicsSceneHoverEvent *event) {
     mHovered = true;
     QGraphicsObject::hoverEnterEvent(event);
 }
 
+void CardItem::hoverMoveEvent(QGraphicsSceneHoverEvent *event) {
+    if (!mHovered) return;
+    qreal lx = event->pos().x();
+    qreal ly = event->pos().y();
+    qreal nx = (lx / WIDTH)  - 0.5;     // [-0.5, 0.5]
+    qreal ny = (ly / HEIGHT) - 0.5;
+    // 鼠标在右半 → 卡片向右后倾(Y 轴倾斜)
+    mHoverTiltY = nx * 20.0;            // 最大 ±10°
+    // 鼠标在上半 → 卡片向上后倾(X 轴倾斜),负号让方向自然
+    mHoverTiltX = ny * 20.0;
+    applyTransform();
+    QGraphicsObject::hoverMoveEvent(event);
+}
+
 void CardItem::hoverLeaveEvent(QGraphicsSceneHoverEvent *event) {
     mHovered = false;
+    mHoverTiltX = 0;
+    mHoverTiltY = 0;
+    applyTransform();
     QGraphicsObject::hoverLeaveEvent(event);
 }

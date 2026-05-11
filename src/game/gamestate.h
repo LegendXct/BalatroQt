@@ -40,6 +40,11 @@ enum class GamePhase {
     GameOver
 };
 
+enum class HandSortMode {
+    ByRank,
+    BySuit
+};
+
 class GameState : public QObject
 {
     Q_OBJECT
@@ -65,6 +70,7 @@ public:
     const HandResult &lastResult() const{return mLastResult;}
     void sortHandByRank();
     void sortHandBySuit();
+    HandSortMode sortMode() const { return mSortMode; }
     int deckRemaining() const {return mDeck.remaining();}
     BlindState blindState(int idx) const { return mBlindStates[idx]; }
     void skipCurrentBlind();
@@ -92,13 +98,16 @@ public:
     bool sellConsumable(int idx);
 
     // 商店买入：扩展为支持 3 种 offer
-    bool buyOffer(int offerIdx);     // ← 替代旧的 buyJoker
+    bool buyShopOffer(int offerIdx);     // ← 替代旧的 buyJoker
     bool buyPack(int offerIdx, PackContent &outContent);
     void applyPackChoice(const PackContent &pack, int chosenIdx);
 
     int blindIdx() const { return mBlindIdx; }       // 当前 ante 内打到第几个 (0/1/2)
     BossEffect pendingBossEffect() const { return mPendingBossEffect; }
     void selectCurrentBlind();                       // 玩家从 BlindSelect 点"选择"
+    bool justSkipped() const { return mJustSkipped; }
+
+    HandResult previewSelection(const QVector<int> &indices) const;
 signals:
     void handChanged();
     void scoreChanged();
@@ -112,6 +121,7 @@ signals:
     void consumablesChanged();
     void blindSelectEntered();                       // 切到选择页
     void blindStarted();                             // 切到对局页
+
 private:
     Deck mDeck;
     QVector<CardData> mHand;
@@ -131,8 +141,12 @@ private:
         BlindState::Current, BlindState::Upcoming, BlindState::Upcoming
     };
 
+    bool mJustSkipped = false;
+
     int mBlindIdx = 0;
     BossEffect mPendingBossEffect = BossEffect::None;
+
+    HandSortMode mSortMode = HandSortMode::ByRank;   // 默认按点数
     void enterBlindSelect();
 
     void dealCards(); // 补牌到满
@@ -147,8 +161,10 @@ private:
     void applyBossDebuffs();   // 给手牌打 debuff 标记
     void applyBossPostPlay();  // 出牌后 The Hook 等
 
+    bool mFirstShop = true;
+
     QVector<Consumable> mConsumables;
-    void scoreCard(const CardData &card, HandResult &result);
+    void scoreCard(const CardData &card, HandResult &result, int playedIdx);
     static ConsumableType planetTypeFor(HandType t);
 };
 

@@ -34,6 +34,8 @@ qt_add_executable(BalatroQt
     src/game/boosterpack.h src/game/boosterpack.cpp
     src/ui/packopenwidget.h src/ui/packopenwidget.cpp
     src/ui/blindselectwidget.h src/ui/blindselectwidget.cpp
+    src/ui/floatingscore.h src/ui/floatingscore.cpp
+    src/ui/shopsignwidget.h src/ui/shopsignwidget.cpp
 )
 
 target_include_directories(BalatroQt
@@ -69,6 +71,7 @@ qt_add_resources(BalatroQt "textures"
         resources/images/ui_assets.png
         resources/images/icons.png
         resources/images/balatro.png
+        resources/images/ShopSignAnimation.png
 )
 
 qt_add_resources(BalatroQt "fonts"

@@ -38,9 +38,35 @@ void GameState::levelUpHand(HandType t, int times) {
     emit handLevelsChanged();
 }
 
+static auto rankComp = [](const CardData &a, const CardData &b) {
+    if (a.rank != b.rank) return static_cast<int>(a.rank) > static_cast<int>(b.rank);
+    return static_cast<int>(a.suit) < static_cast<int>(b.suit);
+};
+
+static auto suitComp = [](const CardData &a, const CardData &b) {
+    if (a.suit != b.suit) return static_cast<int>(a.suit) < static_cast<int>(b.suit);
+    return static_cast<int>(a.rank) > static_cast<int>(b.rank);
+};
+
+void GameState::sortHandByRank() {
+    mSortMode = HandSortMode::ByRank;
+    std::sort(mHand.begin(), mHand.end(), rankComp);
+    emit handChanged();
+}
+
+void GameState::sortHandBySuit() {
+    mSortMode = HandSortMode::BySuit;
+    std::sort(mHand.begin(), mHand.end(), suitComp);
+    emit handChanged();
+}
+
 void GameState::dealCards() {
     while (mHand.size() < Constants::HAND_SIZE && !mDeck.isEmpty())
         mHand.append(mDeck.draw());
+    if (mSortMode == HandSortMode::ByRank)
+        std::sort(mHand.begin(), mHand.end(), rankComp);
+    else
+        std::sort(mHand.begin(), mHand.end(), suitComp);
     emit handChanged();
 }
 
@@ -62,6 +88,9 @@ void GameState::playCards(const QVector<int> &indices) {
     result.level  = lv.level;
     result.xmult  = 1.0;
 
+    result.baseChips = result.chips;    // ← 缓存:基础 + 等级,没加 enhancement/joker
+    result.baseMult  = result.mult;
+
     // 找 scoringCards 在 played 中的下标（按字段全匹配，第一次未占用）
     QVector<int> scoringPlayedIdx;
     QSet<int> used;
@@ -79,6 +108,7 @@ void GameState::playCards(const QVector<int> &indices) {
             }
         }
     }
+    std::sort(scoringPlayedIdx.begin(), scoringPlayedIdx.end());
 
     // Glass 破碎标记（按 played 下标）
     QVector<bool> shattered(played.size(), false);
@@ -90,7 +120,7 @@ void GameState::playCards(const QVector<int> &indices) {
 
         int triggers = (card.seal == Seal::Red) ? 2 : 1;
         for (int t = 0; t < triggers; ++t)
-            scoreCard(card, result);
+            scoreCard(card, result, playedIdx);
 
         // Glass 破碎只判一次（不因 Red Seal 翻倍）
         if (card.enhancement == Enhancement::Glass
@@ -106,16 +136,40 @@ void GameState::playCards(const QVector<int> &indices) {
         if (scoringHandIdx.contains(i)) continue;
         const CardData &c = mHand[i];
         if (c.isDebuffed) continue;
-        if (c.enhancement == Enhancement::Steel) result.xmult *= 1.5;
+        if (c.enhancement == Enhancement::Steel) {
+            result.xmult *= 1.5;
+            result.events.append({ ScoreEventKind::SteelXMult, -1, i, -1, 0, 1.5 });
+        }
     }
 
-    // Passive / OnPlayedHand 小丑
-    TriggerContext ctx{ result, *this, mHand, result.scoringCards, nullptr };
-    for (const Joker &j : mJokers) {
-        if (j.isDebuffed) continue;
-        if (j.timing == TriggerTiming::Passive
-            || j.timing == TriggerTiming::OnPlayedHand)
+    {
+        int chipsBefore = result.chips, multBefore = result.mult;
+        double xmultBefore = result.xmult;
+
+        TriggerContext ctx{ result, *this, mHand, result.scoringCards, nullptr };
+        for (int ji = 0; ji < mJokers.size(); ++ji) {
+            const Joker &j = mJokers[ji];
+            if (j.isDebuffed) continue;
+            if (j.timing != TriggerTiming::Passive
+                && j.timing != TriggerTiming::OnPlayedHand) continue;
             j.effect(ctx);
+
+            if (result.chips != chipsBefore) {
+                result.events.append({ ScoreEventKind::JokerChip, -1, -1, ji,
+                                      result.chips - chipsBefore, 1.0 });
+                chipsBefore = result.chips;
+            }
+            if (result.mult != multBefore) {
+                result.events.append({ ScoreEventKind::JokerMult, -1, -1, ji,
+                                      result.mult - multBefore, 1.0 });
+                multBefore = result.mult;
+            }
+            if (qAbs(result.xmult - xmultBefore) > 1e-6) {
+                result.events.append({ ScoreEventKind::JokerXMult, -1, -1, ji,
+                                      0, result.xmult / xmultBefore });
+                xmultBefore = result.xmult;
+            }
+        }
     }
 
     // 最终得分
@@ -127,13 +181,7 @@ void GameState::playCards(const QVector<int> &indices) {
     mScore += gained;
     mHandsLeft--;
 
-    // 牌型升级
-    auto delta = handLevelDelta(result.type);
-    lv.level++;
     lv.played++;
-    lv.chipsBonus += delta.first;
-    lv.multBonus  += delta.second;
-    emit handLevelsChanged();
 
     // 移除手牌：破碎的不放回 deck
     QVector<QPair<int,int>> idxPairs;   // {handIdx, playedIdx}
@@ -189,6 +237,17 @@ void GameState::playCards(const QVector<int> &indices) {
 
         mPhase = GamePhase::Shop;
         mShop.roll();
+        if (mFirstShop) {
+            auto &b = mShop.boosterOffersMutable();
+            if (b.size() >= 1) {
+                ShopOffer &o = b[0];
+                o.kind = OfferKind::Pack;
+                o.pack = PackKind::Buffoon;
+                o.cost = 4;
+                o.sold = false;
+            }
+            mFirstShop = false;
+        }
         emit goldChanged();
         emit roundWon(blindReward, handBonus, interest);
         return;
@@ -307,23 +366,6 @@ void GameState::checkGameOver() {
         emit gameOver(false);
     }
 }
-void GameState::sortHandByRank() {
-    std::sort(mHand.begin(), mHand.end(),
-              [](const CardData &a, const CardData &b){
-                  return static_cast<int>(a.rank) > static_cast<int>(b.rank);
-              });
-    emit handChanged();
-}
-
-void GameState::sortHandBySuit() {
-    std::sort(mHand.begin(), mHand.end(),
-              [](const CardData &a, const CardData &b){
-                  if (a.suit != b.suit)
-                      return static_cast<int>(a.suit) < static_cast<int>(b.suit);
-                  return static_cast<int>(a.rank) > static_cast<int>(b.rank);
-              });
-    emit handChanged();
-}
 
 int GameState::roundReward() const {
     int base = 0;
@@ -344,7 +386,7 @@ void GameState::rerollShop() {
 
     mGold -= cost;
     mShop.onReroll();
-    mShop.roll();
+    mShop.rerollShopOnly();   // ← 只 reroll 商品区,不动 booster
 
     emit goldChanged();
     emit shopChanged();
@@ -410,22 +452,20 @@ bool GameState::sellConsumable(int idx) {
     return true;
 }
 
-// ── 替换原来的 buyJoker ──
-bool GameState::buyOffer(int idx) {
+bool GameState::buyShopOffer(int idx) {
     if (mPhase != GamePhase::Shop) return false;
-    if (!mShop.canBuy(idx, mGold)) return false;
-
-    const ShopOffer &o = mShop.offers()[idx];
+    if (!mShop.canBuyShop(idx, mGold)) return false;
+    const ShopOffer &o = mShop.shopOffers()[idx];
 
     if (o.kind == OfferKind::Joker) {
         if (!canAddJoker()) return false;
-        ShopOffer t = mShop.takeOffer(idx);
+        ShopOffer t = mShop.takeShopOffer(idx);
         mGold -= t.cost;
         mJokers.append(createJoker(t.joker));
         emit jokersChanged();
     } else {
         if (!canAddConsumable()) return false;
-        ShopOffer t = mShop.takeOffer(idx);
+        ShopOffer t = mShop.takeShopOffer(idx);
         mGold -= t.cost;
         mConsumables.append(createConsumable(t.consumable));
         emit consumablesChanged();
@@ -435,38 +475,91 @@ bool GameState::buyOffer(int idx) {
     return true;
 }
 
-void GameState::scoreCard(const CardData &card, HandResult &result)
+void GameState::scoreCard(const CardData &card, HandResult &result, int playedIdx)
 {
-    // 1) chip：Stone 牌不加点数 chip（只在 enhancement 分支里 +50）
-    if (card.enhancement != Enhancement::Stone)
-        result.chips += card.chipValue();
+    // 1) chip:Stone 不加点数 chip
+    if (card.enhancement != Enhancement::Stone) {
+        int v = card.chipValue();
+        if (v > 0) {
+            result.chips += v;
+            result.events.append({ ScoreEventKind::ScoringCardChip, playedIdx, -1, -1, v, 1.0 });
+        }
+    }
 
-    // 2) enhancement 自身效果
+    // 2) enhancement
     switch (card.enhancement) {
-    case Enhancement::Bonus: result.chips += 30;     break;
-    case Enhancement::Mult:  result.mult  += 4;      break;
-    case Enhancement::Glass: result.xmult *= 2.0;    break;
-    case Enhancement::Stone: result.chips += 50;     break;
+    case Enhancement::Bonus:
+        result.chips += 30;
+        result.events.append({ ScoreEventKind::ScoringCardChip, playedIdx, -1, -1, 30, 1.0 });
+        break;
+    case Enhancement::Mult:
+        result.mult += 4;
+        result.events.append({ ScoreEventKind::EnhancementMult, playedIdx, -1, -1, 4, 1.0 });
+        break;
+    case Enhancement::Glass:
+        result.xmult *= 2.0;
+        result.events.append({ ScoreEventKind::EnhancementXMult, playedIdx, -1, -1, 0, 2.0 });
+        break;
+    case Enhancement::Stone:
+        result.chips += 50;
+        result.events.append({ ScoreEventKind::ScoringCardChip, playedIdx, -1, -1, 50, 1.0 });
+        break;
     case Enhancement::Lucky:
-        if (QRandomGenerator::global()->bounded(5)  == 0) result.mult += 20;
+        if (QRandomGenerator::global()->bounded(5) == 0) {
+            result.mult += 20;
+            result.events.append({ ScoreEventKind::EnhancementMult, playedIdx, -1, -1, 20, 1.0 });
+        }
         if (QRandomGenerator::global()->bounded(15) == 0) addGold(20);
         break;
     default: break;
     }
 
-    // 3) edition 自身效果
+    // 3) edition
     switch (card.edition) {
-    case Edition::Foil:        result.chips += 50;   break;
-    case Edition::Holographic: result.mult  += 10;   break;
-    case Edition::Polychrome:  result.xmult *= 1.5;  break;
+    case Edition::Foil:
+        result.chips += 50;
+        result.events.append({ ScoreEventKind::EditionChip, playedIdx, -1, -1, 50, 1.0 });
+        break;
+    case Edition::Holographic:
+        result.mult += 10;
+        result.events.append({ ScoreEventKind::EditionMult, playedIdx, -1, -1, 10, 1.0 });
+        break;
+    case Edition::Polychrome:
+        result.xmult *= 1.5;
+        result.events.append({ ScoreEventKind::EditionXMult, playedIdx, -1, -1, 0, 1.5 });
+        break;
     default: break;
     }
 
-    // 4) OnScoringCard 小丑（每张牌都遍历所有小丑）
-    TriggerContext ctx{ result, *this, mHand, result.scoringCards, &card };
-    for (const Joker &j : mJokers) {
+    // 4) OnScoringCard 小丑:之前直接调 effect,现在需要在 ctx 里带 idx 让 effect 写事件
+    // 但 effect 是 lambda 修改 ctx.result,没法知道是哪个 joker。
+    // 简化做法:在 effect 调用前后比较 chips/mult 差值。
+    int chipsBefore = result.chips, multBefore = result.mult;
+    double xmultBefore = result.xmult;
+
+    for (int ji = 0; ji < mJokers.size(); ++ji) {
+        const Joker &j = mJokers[ji];
         if (j.isDebuffed) continue;
-        if (j.timing == TriggerTiming::OnScoringCard) j.effect(ctx);
+        if (j.timing != TriggerTiming::OnScoringCard) continue;
+
+        TriggerContext ctx{ result, *this, mHand, result.scoringCards, &card };
+        j.effect(ctx);
+
+        if (result.chips != chipsBefore) {
+            result.events.append({ ScoreEventKind::JokerChip, playedIdx, -1, ji,
+                                  result.chips - chipsBefore, 1.0 });
+            chipsBefore = result.chips;
+        }
+        if (result.mult != multBefore) {
+            result.events.append({ ScoreEventKind::JokerMult, playedIdx, -1, ji,
+                                  result.mult - multBefore, 1.0 });
+            multBefore = result.mult;
+        }
+        if (qAbs(result.xmult - xmultBefore) > 1e-6) {
+            result.events.append({ ScoreEventKind::JokerXMult, playedIdx, -1, ji,
+                                  0, result.xmult / xmultBefore });
+            xmultBefore = result.xmult;
+        }
     }
 
     // 5) Gold Seal +$3
@@ -496,12 +589,11 @@ ConsumableType GameState::planetTypeFor(HandType t)
 bool GameState::buyPack(int idx, PackContent &out)
 {
     if (mPhase != GamePhase::Shop) return false;
-    if (!mShop.canBuy(idx, mGold)) return false;
-
-    const ShopOffer &o = mShop.offers()[idx];
+    if (!mShop.canBuyBooster(idx, mGold)) return false;
+    const ShopOffer &o = mShop.boosterOffers()[idx];
     if (o.kind != OfferKind::Pack) return false;
 
-    ShopOffer t = mShop.takeOffer(idx);
+    ShopOffer t = mShop.takeBoosterOffer(idx);
     mGold -= t.cost;
     out = generatePackContent(t.pack);
 
@@ -546,21 +638,22 @@ void GameState::startGame()
     mConsumables.clear();
     mBlindIdx = 0;
     mPendingBossEffect = BossEffect::None;
+    mSortMode = HandSortMode::ByRank;
 
+    for (int i = 0; i < 3; ++i)
+        mBlindStates[i] = (i == 0) ? BlindState::Current : BlindState::Upcoming;
+
+    mFirstShop = true;
     enterBlindSelect();
 
     emit jokersChanged();
     emit consumablesChanged();
-
-    for (int i = 0; i < 3; ++i)
-        mBlindStates[i] = (i == 0) ? BlindState::Current : BlindState::Upcoming;
 }
 
-void GameState::enterBlindSelect()
-{
+void GameState::enterBlindSelect() {
     mPhase = GamePhase::BlindSelect;
-    mBlindType = static_cast<BlindType>(mBlindIdx);    // 0=Small, 1=Big, 2=Boss
-    if (mBlindIdx == 2 && mPendingBossEffect == BossEffect::None)
+    mBlindType = static_cast<BlindType>(mBlindIdx);
+    if (mPendingBossEffect == BossEffect::None)   // ← 去掉 mBlindIdx == 2 条件
         mPendingBossEffect = randomBossEffect();
     mTargetScore = calcTargetScore();
     emit blindSelectEntered();
@@ -605,16 +698,18 @@ void GameState::nextBlind()
     if (mBlindIdx > 2) {
         mBlindIdx = 0;
         mAnte++;
-        for (int i = 0; i < 3; ++i)
-            mBlindStates[i] = (i == 0) ? BlindState::Current : BlindState::Upcoming;
         mPendingBossEffect = BossEffect::None;
         if (mAnte > 8) {
             mPhase = GamePhase::GameOver;
             emit gameOver(true);
             return;
         }
-    } else {
-        mBlindStates[mBlindIdx] = BlindState::Current;
+    }
+    // 不论是新 ante 还是同 ante 内推进,都重算所有状态
+    for (int i = 0; i < 3; ++i) {
+        if (i < mBlindIdx)       mBlindStates[i] = BlindState::Defeated;
+        else if (i == mBlindIdx) mBlindStates[i] = BlindState::Current;
+        else                     mBlindStates[i] = BlindState::Upcoming;
     }
     enterBlindSelect();
 }
@@ -622,12 +717,15 @@ void GameState::nextBlind()
 void GameState::skipCurrentBlind()
 {
     if (mPhase != GamePhase::BlindSelect) return;
-    if (mBlindIdx >= 2) return;   // Boss 不能跳
+    if (mBlindIdx >= 2) return;
 
     mBlindStates[mBlindIdx] = BlindState::Skipped;
     mBlindIdx++;
     mBlindStates[mBlindIdx] = BlindState::Current;
-    enterBlindSelect();
+
+    mJustSkipped = true;        // ← 标记"这次进入是因跳过"
+    enterBlindSelect();          // 同步发 blindSelectEntered → onBlindSelectEntered 会读 justSkipped()
+    mJustSkipped = false;        // ← 信号处理完后立即复位
 }
 
 void GameState::leaveShop()
@@ -635,4 +733,22 @@ void GameState::leaveShop()
     if (mPhase != GamePhase::Shop) return;
     mShop.resetForNewBlind();
     nextBlind();
+}
+
+HandResult GameState::previewSelection(const QVector<int> &indices) const
+{
+    QVector<CardData> selected;
+    for (int i : indices) {
+        if (i >= 0 && i < mHand.size())
+            selected.append(mHand[i]);
+    }
+    HandResult r = HandEvaluator::preview(selected);
+    // 加上牌型升级加成(这部分玩家应该看到)
+    auto it = mHandLevels.find(r.type);
+    if (it != mHandLevels.end()) {
+        r.chips += it->chipsBonus;
+        r.mult  += it->multBonus;
+        r.level  = it->level;
+    }
+    return r;
 }

@@ -14,6 +14,8 @@ HandResult HandEvaluator::evaluate(const QVector<CardData> &cards) {
     for (auto &g : groups) counts.append(g.size());
     std::sort(counts.begin(), counts.end(), std::greater<int>());
 
+    while (counts.size() < 5) counts.append(0);
+
     HandType type;
     QVector<CardData> scoringCards;
 
@@ -192,4 +194,20 @@ QString HandEvaluator::handTypeName(HandType type) {
     case HandType::FlushFive:     return "同花五条";
     default:                      return "";
     }
+}
+
+HandResult HandEvaluator::preview(const QVector<CardData> &cards)
+{
+    if (cards.isEmpty()) {
+        HandResult r;
+        r.type = HandType::HighCard;
+        r.chips = 0;
+        r.mult  = 0;
+        r.name = "";
+        r.level = 1;
+        r.xmult = 1.0;
+        return r;
+    }
+    // 复用 evaluate 的牌型判定逻辑,只取基础部分
+    return evaluate(cards);
 }

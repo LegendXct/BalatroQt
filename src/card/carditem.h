@@ -39,16 +39,24 @@ public:
     bool isCardSelected() const {return mSelected;}
     void moveTo(const QPointF &target, int durationMs = 300);
     void flip();
+    void juiceUp(double scaleAmount = 1.2, int durationMs = 240);
+    void setBaseRotation(double deg) { mBaseRotation = deg; applyTransform(); }
 signals:
     void clicked(CardItem *card);
 protected:
     void mousePressEvent(QGraphicsSceneMouseEvent *event) override;
+    void hoverMoveEvent(QGraphicsSceneHoverEvent *event) override;
     void hoverEnterEvent(QGraphicsSceneHoverEvent  *event) override;
     void hoverLeaveEvent(QGraphicsSceneHoverEvent  *event) override;
 private:
     CardData mData;
     bool mSelected = false;
     bool mHovered = false;
+
+    double mBaseRotation = 0.0;       // Z 轴旋转(扇形)
+    double mHoverTiltX  = 0.0;        // 绕 X 轴倾斜(度,-25 ~ +25)
+    double mHoverTiltY  = 0.0;        // 绕 Y 轴倾斜
+    void applyTransform();
 
     QRect whiteBaseSrcRect() const; // 白色底片
     QRect deckSrcRect() const; // 牌面

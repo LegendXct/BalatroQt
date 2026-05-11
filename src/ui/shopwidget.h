@@ -4,10 +4,8 @@
 #include <QWidget>
 #include <QLabel>
 #include <QPushButton>
-#include <QPainter>
 #include "../game/gamestate.h"
 #include "../card/consumable.h"
-
 
 class ShopWidget : public QWidget
 {
@@ -16,8 +14,7 @@ public:
     explicit ShopWidget(GameState *gs,
                         const QFont &cnFont, const QFont &pixelFont,
                         QWidget *parent = nullptr);
-
-    void refresh();              // 用 GameState 当前数据刷 UI
+    void refresh();
 
 signals:
     void leaveClicked();
@@ -27,31 +24,36 @@ protected:
     void resizeEvent(QResizeEvent *e) override;
 
 private slots:
-    void onBuy(int slot);
     void onReroll();
 
 private:
+    struct OfferUi {
+        QWidget     *card     = nullptr;
+        QLabel      *imageLbl = nullptr;   // 当前 cpp 没用,保留以备拓展
+        QLabel      *nameLbl  = nullptr;
+        QLabel      *priceLbl = nullptr;
+        QPushButton *cardBtn  = nullptr;
+    };
+
+    void buildUi();
+    void layoutPanel();
+    OfferUi createOfferSlot(QWidget *parent, bool isBooster);
+    QPixmap offerPixmap(const ShopOffer &o) const;
+
+    void onBuyShop(int slot);
+    void onBuyBooster(int slot);
+
     GameState *mGS;
     QFont mCNFont;
     QFont mPixelFont;
 
-    QWidget     *mPanel     = nullptr;
-    QLabel      *mLblGold   = nullptr;
-    QPushButton *mBtnReroll = nullptr;
-    QPushButton *mBtnLeave  = nullptr;
+    QWidget     *mPanel        = nullptr;
+    QPushButton *mBtnNextRound = nullptr;
+    QPushButton *mBtnReroll    = nullptr;
+    QLabel      *mLblGold      = nullptr;
 
-    struct OfferUi {
-        QWidget     *card;
-        QLabel      *imageLbl;
-        QLabel      *nameLbl;
-        QLabel      *descLbl;
-        QPushButton *buyBtn;
-    };
-    QVector<OfferUi> mOfferUi;
-
-    void buildUi();
-    void layoutPanel();
-    QPixmap offerPixmap(const ShopOffer &) const;
+    QVector<OfferUi> mShopUi;
+    QVector<OfferUi> mBoosterUi;
 };
 
 #endif

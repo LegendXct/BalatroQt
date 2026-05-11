@@ -16,23 +16,35 @@ struct ShopOffer {
     int cost = 0;
     bool sold = false;
 };
-class Shop
-{
+
+class Shop {
 public:
     Shop() = default;
-    void roll();
-    bool canBuy(int idx, int gold) const;
-    ShopOffer takeOffer(int idx);
-    int rerollCost() const { return mRerollCost; }
+    void roll();              // 重 roll 上下两区
+    void rerollShopOnly();    // reroll 按钮:只重 roll 商品区
+
+    // 商品区(joker/tarot/planet)
+    const QVector<ShopOffer>& shopOffers() const { return mShopOffers; }
+    bool canBuyShop(int idx, int gold) const;
+    ShopOffer takeShopOffer(int idx);
+
+    // booster 区(pack)
+    const QVector<ShopOffer>& boosterOffers() const { return mBoosterOffers; }
+    QVector<ShopOffer>& boosterOffersMutable() { return mBoosterOffers; }
+    bool canBuyBooster(int idx, int gold) const;
+    ShopOffer takeBoosterOffer(int idx);
+
+    int  rerollCost() const { return mRerollCost; }
     void onReroll();
     void resetForNewBlind();
-    const QVector<ShopOffer> &offers() const { return mOffers; }
 
 private:
-    QVector<ShopOffer> mOffers;
+    QVector<ShopOffer> mShopOffers;
+    QVector<ShopOffer> mBoosterOffers;
     int mRerollCost = 5;
 
-    static ShopOffer randomOffer();
+    static ShopOffer randomShopOffer();
+    static ShopOffer randomBoosterOffer();
     static JokerType randomJokerType();
     static int costFor(JokerType t);
 };

@@ -23,6 +23,28 @@ enum class HandType {
     FlushFive // 同花五条
 };
 
+enum class ScoreEventKind {
+    ScoringCardChip,    // 计分牌的 chipValue + Bonus/Stone 增强(蓝)
+    EnhancementMult,    // 计分牌 Mult 增强 +4(红)
+    EnhancementXMult,   // 计分牌 Glass ×2(红 xmult)
+    EditionChip,        // Foil +50 chip(蓝)
+    EditionMult,        // Holographic +10 mult(红)
+    EditionXMult,       // Polychrome ×1.5(红 xmult)
+    SteelXMult,         // 手牌 Steel ×1.5(红 xmult)
+    JokerChip,          // 小丑加 chip(蓝)
+    JokerMult,          // 小丑加 mult(红)
+    JokerXMult,         // 小丑加 xmult(红)
+};
+
+struct ScoreEvent {
+    ScoreEventKind kind;
+    int    sourceCardIdx = -1;     // -1 表示不是 played 卡(比如 Steel 在手牌、joker 来源)
+    int    sourceHandIdx = -1;     // 手牌位置(Steel 用)
+    int    sourceJokerIdx = -1;    // 小丑位置(JokerXxx 用)
+    int    intValue   = 0;          // chip/mult 整数加值
+    double xmultValue = 1.0;        // xmult 倍率
+};
+
 struct HandResult {
     HandType type = HandType::HighCard;
     QVector<CardData> scoringCards; // 参与计分的牌
@@ -31,6 +53,9 @@ struct HandResult {
     double xmult = 1.0; // ×倍率，Glass/Polychrome/Steel用
     int level = 1; // 牌型等级
     QString name; // 牌型名称，用于UI显示
+    int baseChips = 0;
+    int baseMult  = 0;
+    QVector<ScoreEvent> events;
 };
 
 class HandEvaluator
@@ -41,6 +66,7 @@ class HandEvaluator
 public:
     static HandResult evaluate(const QVector<CardData> &cards);
     static QString handTypeName(HandType type);
+    static HandResult preview(const QVector<CardData> &cards);
 };
 
 #endif // HANDEVALUATOR_H
