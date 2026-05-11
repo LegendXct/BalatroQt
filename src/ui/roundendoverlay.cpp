@@ -1,166 +1,192 @@
 #include "roundendoverlay.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
-#include <QResizeEvent>
+#include <QPixmap>
 
-// 创建一个带颜色和字号的 QLabel
-static QLabel *makeRowLabel(const QString &text, int px, const QString &color,
-                            const QFont &font, QWidget *parent,
-                            Qt::Alignment align = Qt::AlignCenter) {
-    QLabel *l = new QLabel(text, parent);
-    l->setAlignment(align);
-    QFont f = font; f.setPixelSize(px);
-    l->setFont(f);
-    l->setStyleSheet(QString("color: %1;").arg(color));
-    return l;
-}
-
-RoundEndOverlay::RoundEndOverlay(const QFont &cnFont,
-                                 const QFont &pixelFont,
-                                 QWidget *parent)
-    : QWidget(parent)
-    , mCNFont(cnFont)
-    , mPixelFont(pixelFont)
+RoundEndOverlay::RoundEndOverlay(const QFont &cnFont, const QFont &pixelFont, QWidget *parent)
+    : QWidget(parent), mCNFont(cnFont), mPixelFont(pixelFont)
 {
-    // 半透明黑色蒙层
     setAttribute(Qt::WA_StyledBackground, true);
-    setStyleSheet("background: rgba(0, 0, 0, 160);");
-    hide();   // 默认不显示，只在过关时调用 show()
+    setStyleSheet("background: rgba(0, 0, 0, 100);");
     buildUi();
 }
 
 void RoundEndOverlay::buildUi()
 {
-    // ── 中央结算面板 ──
-    mPanel = new QWidget(this);
-    mPanel->setFixedSize(520, 460);
-    mPanel->setStyleSheet(
-        "background: #1e2230;"
-        "border: 3px solid #f0c040;"
-        "border-radius: 14px;"
+    // 主面板:#374244 圆角,居中
+    auto *panel = new QWidget(this);
+    panel->setAttribute(Qt::WA_StyledBackground, true);
+    panel->setObjectName("rePanel");
+    panel->setStyleSheet(
+        "QWidget#rePanel { background:#374244; border-radius:14px; "
+        "                  border: 2px solid #4f6367; }"
         );
+    panel->setFixedSize(560, 460);
 
-    auto *root = new QVBoxLayout(mPanel);
-    root->setContentsMargins(28, 24, 28, 24);
-    root->setSpacing(10);
+    // 居中 panel
+    auto *outer = new QVBoxLayout(this);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setAlignment(Qt::AlignCenter);
+    outer->addWidget(panel);
 
-    // ── 标题 ──
-    mLblTitle = makeRowLabel("胜利！", 36, "#f0c040", mCNFont, mPanel);
-    root->addWidget(mLblTitle);
+    auto *vbl = new QVBoxLayout(panel);
+    vbl->setContentsMargins(20, 18, 20, 18);
+    vbl->setSpacing(12);
 
-    mLblBlind = makeRowLabel("击败 小盲注", 18, "#cccccc", mCNFont, mPanel);
-    root->addWidget(mLblBlind);
+    // ── 顶部 cash out 按钮 ──
+    mCashOutBtn = new QPushButton("提现: $0", panel);
+    mCashOutBtn->setFixedHeight(60);
+    QFont btnF = mCNFont; btnF.setPixelSize(28); btnF.setBold(true);
+    mCashOutBtn->setFont(btnF);
+    mCashOutBtn->setCursor(Qt::PointingHandCursor);
+    mCashOutBtn->setStyleSheet(
+        "QPushButton { background:#fda200; color:white; border:none;"
+        "              border-radius: 10px; padding: 4px; }"
+        "QPushButton:hover { background:#ffb730; }"
+        );
+    connect(mCashOutBtn, &QPushButton::clicked, this, &RoundEndOverlay::nextClicked);
+    vbl->addWidget(mCashOutBtn);
 
-    root->addSpacing(8);
+    // 一个生成"明细行"的 lambda
+    auto makeRow = [&](QLabel **leftNumOut, const QString &numColor,
+                       const QString &desc, QLabel **rightSymOut) {
+        auto *row = new QWidget(panel);
+        auto *hbl = new QHBoxLayout(row);
+        hbl->setContentsMargins(8, 0, 8, 0);
+        hbl->setSpacing(8);
 
-    // ── 得分 / 目标对比 ──
-    auto *scoreBox = new QWidget(mPanel);
-    scoreBox->setStyleSheet("background:#161b28; border-radius:8px;");
-    auto *sbl = new QVBoxLayout(scoreBox);
-    sbl->setContentsMargins(12, 10, 12, 10);
-    sbl->setSpacing(4);
+        // 左侧:大数字
+        *leftNumOut = new QLabel("0", row);
+        QFont nf = mCNFont; nf.setPixelSize(26); nf.setBold(true);
+        (*leftNumOut)->setFont(nf);
+        (*leftNumOut)->setStyleSheet(QString("color:%1; background:transparent;").arg(numColor));
+        (*leftNumOut)->setFixedWidth(40);
+        (*leftNumOut)->setAlignment(Qt::AlignCenter);
+        hbl->addWidget(*leftNumOut);
 
-    mLblScoreLine  = makeRowLabel("得分  ✳ 0",   24, "#ffffff", mPixelFont, scoreBox);
-    mLblTargetLine = makeRowLabel("目标  ✳ 300", 16, "#888888", mPixelFont, scoreBox);
-    sbl->addWidget(mLblScoreLine);
-    sbl->addWidget(mLblTargetLine);
-    root->addWidget(scoreBox);
+        // 描述
+        auto *descLbl = new QLabel(desc, row);
+        QFont df = mCNFont; df.setPixelSize(14);
+        descLbl->setFont(df);
+        descLbl->setStyleSheet("color:white; background:transparent;");
+        descLbl->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+        hbl->addWidget(descLbl, 1);
 
-    root->addSpacing(6);
+        // 右侧 $$$$$
+        *rightSymOut = new QLabel("", row);
+        QFont sf = mCNFont; sf.setPixelSize(20); sf.setBold(true);
+        (*rightSymOut)->setFont(sf);
+        (*rightSymOut)->setStyleSheet("color:#f3b958; background:transparent;");
+        (*rightSymOut)->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        hbl->addWidget(*rightSymOut);
 
-    // ── 金币奖励明细 ──
-    auto *rewardBox = new QWidget(mPanel);
-    rewardBox->setStyleSheet("background:#161b28; border-radius:8px;");
-    auto *rbl = new QVBoxLayout(rewardBox);
-    rbl->setContentsMargins(12, 10, 12, 10);
-    rbl->setSpacing(4);
-
-    auto *rewardTitle = makeRowLabel("奖励", 14, "#888888", mCNFont,
-                                     rewardBox, Qt::AlignLeft);
-    rbl->addWidget(rewardTitle);
-
-    // 创建一行"标签 + 金币值"的辅助函数
-    auto makeRow = [&](const QString &label, QLabel *&valueLbl) {
-        auto *row  = new QWidget(rewardBox);
-        auto *hbl  = new QHBoxLayout(row);
-        hbl->setContentsMargins(0, 0, 0, 0);
-        auto *l    = makeRowLabel(label, 16, "#cccccc", mCNFont,
-                               row, Qt::AlignLeft);
-        valueLbl   = makeRowLabel("$0", 18, "#f0c040", mPixelFont,
-                                row, Qt::AlignRight);
-        hbl->addWidget(l, 1);
-        hbl->addWidget(valueLbl);
         return row;
     };
 
-    rbl->addWidget(makeRow("击败盲注奖励",          mLblBlindReward));
-    rbl->addWidget(makeRow("剩余出牌奖励",          mLblHandBonus));
-    rbl->addWidget(makeRow("利息（每5金 +1，封顶 5）", mLblInterest));
+    // ── 至少得分行(blind 主行) ──
+    {
+        auto *row = new QWidget(panel);
+        auto *hbl = new QHBoxLayout(row);
+        hbl->setContentsMargins(8, 0, 8, 0);
+        hbl->setSpacing(8);
 
-    // 分隔线
-    auto *sep = new QWidget(rewardBox);
-    sep->setFixedHeight(1);
-    sep->setStyleSheet("background: #444;");
-    rbl->addWidget(sep);
+        // 盲注芯片(setData 时填充)
+        mBlindChip = new QLabel(row);
+        mBlindChip->setFixedSize(50, 50);
+        mBlindChip->setStyleSheet("background:transparent;");
+        hbl->addWidget(mBlindChip);
 
-    // 合计
-    auto *totalRow = new QWidget(rewardBox);
-    auto *thbl = new QHBoxLayout(totalRow);
-    thbl->setContentsMargins(0, 0, 0, 0);
-    auto *tl = makeRowLabel("合计", 16, "#ffffff", mCNFont,
-                            totalRow, Qt::AlignLeft);
-    mLblTotal = makeRowLabel("$0", 22, "#f0c040", mPixelFont,
-                             totalRow, Qt::AlignRight);
-    thbl->addWidget(tl, 1);
-    thbl->addWidget(mLblTotal);
-    rbl->addWidget(totalRow);
+        // 中间:至少得分(竖排:小字+蓝芯片+红数字)
+        auto *mid = new QWidget(row);
+        auto *mvbl = new QVBoxLayout(mid);
+        mvbl->setContentsMargins(0, 0, 0, 0);
+        mvbl->setSpacing(2);
+        mvbl->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
 
-    root->addWidget(rewardBox);
+        QLabel *small = new QLabel("至少得分", mid);
+        QFont sf = mCNFont; sf.setPixelSize(13);
+        small->setFont(sf);
+        small->setStyleSheet("color:white; background:transparent;");
+        mvbl->addWidget(small);
 
-    root->addStretch();
+        // 蓝芯片 + 红数字
+        auto *numRow = new QWidget(mid);
+        auto *numBl = new QHBoxLayout(numRow);
+        numBl->setContentsMargins(0, 0, 0, 0);
+        numBl->setSpacing(4);
+        numBl->setAlignment(Qt::AlignLeft);
 
-    // ── 按钮 ──
-    mBtnNext = new QPushButton("前往商店", mPanel);
-    mBtnNext->setFixedHeight(56);
-    QFont bf = mCNFont; bf.setPixelSize(20);
-    mBtnNext->setFont(bf);
-    mBtnNext->setCursor(Qt::PointingHandCursor);
-    mBtnNext->setStyleSheet(
-        "QPushButton {"
-        "  background: #c07820; color: white;"
-        "  border: none; border-radius: 8px;"
-        "}"
-        "QPushButton:hover  { background: #d08830; }"
-        "QPushButton:pressed{ background: #a06010; }"
-        );
-    connect(mBtnNext, &QPushButton::clicked,
-            this, &RoundEndOverlay::nextClicked);
-    root->addWidget(mBtnNext);
+        QLabel *chipIcon = new QLabel(numRow);
+        QPixmap chipsSheet(":/textures/images/chips.png");
+        if (!chipsSheet.isNull()) {
+            QPixmap pix = chipsSheet.copy(0, 0, 58, 58);
+            chipIcon->setPixmap(pix.scaled(20, 20, Qt::KeepAspectRatio,
+                                           Qt::SmoothTransformation));
+        }
+        chipIcon->setFixedSize(20, 20);
+        chipIcon->setStyleSheet("background:transparent;");
+        numBl->addWidget(chipIcon);
+
+        mTargetLbl = new QLabel("0", numRow);
+        QFont nf = mCNFont; nf.setPixelSize(22); nf.setBold(true);
+        mTargetLbl->setFont(nf);
+        mTargetLbl->setStyleSheet("color:#fe5f55; background:transparent;");
+        numBl->addWidget(mTargetLbl);
+
+        mvbl->addWidget(numRow);
+        hbl->addWidget(mid, 1);
+
+        // 右侧 $$$
+        mBlindRewardSym = new QLabel("", row);
+        QFont rf = mCNFont; rf.setPixelSize(20); rf.setBold(true);
+        mBlindRewardSym->setFont(rf);
+        mBlindRewardSym->setStyleSheet("color:#f3b958; background:transparent;");
+        mBlindRewardSym->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        hbl->addWidget(mBlindRewardSym);
+
+        vbl->addWidget(row);
+    }
+
+    // ── 虚线分隔 ──
+    {
+        QLabel *div = new QLabel(QString(48, '.'), panel);
+        QFont dvf = mPixelFont; dvf.setPixelSize(14);
+        div->setFont(dvf);
+        div->setStyleSheet("color:white; background:transparent;");
+        div->setAlignment(Qt::AlignCenter);
+        vbl->addWidget(div);
+    }
+
+    // ── 出牌剩余 ──
+    vbl->addWidget(makeRow(&mHandsNumLbl, "#009dff",
+                           "剩余出牌次数(每次$1)", &mHandsRewardSym));
+
+    // ── 利息 ──
+    vbl->addWidget(makeRow(&mInterestNumLbl, "#f3b958",
+                           "每$5获得1利息(最高 5)", &mInterestRewardSym));
+
+    vbl->addStretch();
 }
 
-void RoundEndOverlay::setData(const QString &blindName,
-                              int score, int target,
-                              int blindReward, int handBonus, int interest)
+void RoundEndOverlay::setData(int blindChipRow, int targetScore, int blindReward,
+                              int handsLeft, int handBonus, int interest)
 {
-    mLblBlind      ->setText(QString("击败 %1").arg(blindName));
-    mLblScoreLine  ->setText(QString("得分  ✳ %1").arg(score));
-    mLblTargetLine ->setText(QString("目标  ✳ %1").arg(target));
-    mLblBlindReward->setText(QString("$%1").arg(blindReward));
-    mLblHandBonus  ->setText(QString("$%1").arg(handBonus));
-    mLblInterest   ->setText(QString("$%1").arg(interest));
-    mLblTotal      ->setText(QString("$%1").arg(blindReward + handBonus + interest));
-}
+    int total = blindReward + handBonus + interest;
+    mCashOutBtn->setText(QString("提现: $%1").arg(total));
 
-void RoundEndOverlay::resizeEvent(QResizeEvent *event)
-{
-    QWidget::resizeEvent(event);
-    layoutPanel();
-}
+    QPixmap sheet(":/textures/images/BlindChips.png");
+    if (!sheet.isNull()) {
+        QPixmap pix = sheet.copy(0, blindChipRow * 68, 68, 68);
+        mBlindChip->setPixmap(pix.scaled(50, 50, Qt::KeepAspectRatio,
+                                         Qt::SmoothTransformation));
+    }
 
-void RoundEndOverlay::layoutPanel()
-{
-    if (!mPanel) return;
-    int x = (width()  - mPanel->width())  / 2;
-    int y = (height() - mPanel->height()) / 2;
-    mPanel->move(x, y);
+    mTargetLbl->setText(QString::number(targetScore));
+    mBlindRewardSym->setText(QString(blindReward, '$'));
+
+    mHandsNumLbl->setText(QString::number(handsLeft));
+    mHandsRewardSym->setText(QString(handBonus, '$'));
+
+    mInterestNumLbl->setText(QString::number(interest));
+    mInterestRewardSym->setText(QString(interest, '$'));
 }

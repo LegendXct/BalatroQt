@@ -18,6 +18,7 @@ public:
     bool isEmpty() const;
     int remaining() const; // 剩余牌数
     void discard(const CardData &card); // 弃牌
+    void addCard(const CardData &card);
 };
 
 #endif // DECK_H

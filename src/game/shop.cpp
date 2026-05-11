@@ -2,34 +2,75 @@
 #include <QRandomGenerator>
 
 void Shop::roll() {
-    mOffers.clear();
-    for (int i = 0; i < 2; ++i) {
-        ShopOffer o;
-        o.type = randomJokerType();
-        o.cost = costFor(o.type);
-        mOffers.append(o);
-    }
+    mShopOffers.clear();
+    mBoosterOffers.clear();
+    for (int i = 0; i < 2; ++i) mShopOffers.append(randomShopOffer());
+    for (int i = 0; i < 2; ++i) mBoosterOffers.append(randomBoosterOffer());
 }
 
-bool Shop::canBuy(int idx, int gold) const {
-    if (idx < 0 || idx >= mOffers.size()) return false;
-    const ShopOffer &o = mOffers[idx];
+void Shop::rerollShopOnly() {
+    mShopOffers.clear();
+    for (int i = 0; i < 2; ++i) mShopOffers.append(randomShopOffer());
+}
+
+bool Shop::canBuyShop(int idx, int gold) const {
+    if (idx < 0 || idx >= mShopOffers.size()) return false;
+    const ShopOffer &o = mShopOffers[idx];
     return !o.sold && gold >= o.cost;
 }
-
-ShopOffer Shop::takeOffer(int idx) {
-    ShopOffer o = mOffers[idx];
-    mOffers[idx].sold = true;
+ShopOffer Shop::takeShopOffer(int idx) {
+    ShopOffer o = mShopOffers[idx];
+    mShopOffers[idx].sold = true;
     return o;
 }
 
-void Shop::onReroll() {
-    if (mRerollCost < 10) ++mRerollCost;
+bool Shop::canBuyBooster(int idx, int gold) const {
+    if (idx < 0 || idx >= mBoosterOffers.size()) return false;
+    const ShopOffer &o = mBoosterOffers[idx];
+    return !o.sold && gold >= o.cost;
+}
+ShopOffer Shop::takeBoosterOffer(int idx) {
+    ShopOffer o = mBoosterOffers[idx];
+    mBoosterOffers[idx].sold = true;
+    return o;
 }
 
-void Shop::resetForNewBlind() {
-    mRerollCost = 5;
+void Shop::onReroll()         { if (mRerollCost < 10) ++mRerollCost; }
+void Shop::resetForNewBlind() { mRerollCost = 5; }
+
+ShopOffer Shop::randomShopOffer() {
+    int roll = QRandomGenerator::global()->bounded(100);
+    ShopOffer o;
+    if (roll < 56) {
+        o.kind = OfferKind::Joker;
+        o.joker = randomJokerType();
+        o.cost = costFor(o.joker);
+    } else if (roll < 78) {
+        o.kind = OfferKind::Tarot;
+        o.consumable = randomTarotType();
+        o.cost = 3;
+    } else {
+        o.kind = OfferKind::Planet;
+        o.consumable = randomPlanetType();
+        o.cost = 3;
+    }
+    return o;
 }
+
+ShopOffer Shop::randomBoosterOffer() {
+    // 按原版权重 normal 4 类:Arcana=10/Celestial=10/Standard=10/Buffoon=6
+    int r = QRandomGenerator::global()->bounded(36);
+    ShopOffer o;
+    o.kind = OfferKind::Pack;
+    o.cost = 4;
+    if      (r < 10) o.pack = PackKind::Arcana;
+    else if (r < 20) o.pack = PackKind::Celestial;
+    else if (r < 30) o.pack = PackKind::Standard;
+    else             o.pack = PackKind::Buffoon;
+    return o;
+}
+
+// randomJokerType 和 costFor 保持原样,从旧代码拷过来
 
 JokerType Shop::randomJokerType() {
     constexpr JokerType pool[] = {

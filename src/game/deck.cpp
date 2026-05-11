@@ -56,3 +56,8 @@ bool Deck::isEmpty() const {
 int Deck::remaining() const {
     return mDrawPile.size();
 }
+
+void Deck::addCard(const CardData &card) {
+    mDrawPile.append(card);
+    shuffle();
+}

@@ -2,6 +2,8 @@
 #include <QPainter>
 #include <QGraphicsSceneMouseEvent>
 #include <QCursor>
+#include <QPropertyAnimation>
+#include <QSequentialAnimationGroup>
 
 QPixmap *JokerItem::sSheet = nullptr;
 
@@ -78,4 +80,28 @@ void JokerItem::mousePressEvent(QGraphicsSceneMouseEvent *e) {
     } else {
         QGraphicsObject::mousePressEvent(e);
     }
+}
+
+void juiceUp(double scaleAmount = 1.15, int durationMs = 200);
+
+// jokeritem.cpp
+void JokerItem::juiceUp(double scaleAmount, int durationMs)
+{
+    setTransformOriginPoint(WIDTH / 2.0, HEIGHT / 2.0);
+
+    auto *up = new QPropertyAnimation(this, "scale");
+    up->setDuration(durationMs / 2);
+    up->setStartValue(1.0);
+    up->setEndValue(scaleAmount);
+
+    auto *down = new QPropertyAnimation(this, "scale");
+    down->setDuration(durationMs / 2);
+    down->setStartValue(scaleAmount);
+    down->setEndValue(1.0);
+
+    auto *seq = new QSequentialAnimationGroup(this);
+    seq->addAnimation(up);
+    seq->addAnimation(down);
+    up->setParent(seq); down->setParent(seq);
+    seq->start(QAbstractAnimation::DeleteWhenStopped);
 }

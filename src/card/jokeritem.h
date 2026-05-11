@@ -21,6 +21,7 @@ public:
     void paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) override;
 
     const Joker &joker() const { return mJoker; }
+    void juiceUp(double scaleAmount = 1.15, int durationMs = 200);
 
 signals:
     void clicked(JokerItem *self);

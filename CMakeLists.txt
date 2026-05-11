@@ -8,6 +8,8 @@ find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets)
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
 find_package(Qt6 REQUIRED COMPONENTS Core)
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Widgets)
 
 qt_standard_project_setup()
 
@@ -27,6 +29,13 @@ qt_add_executable(BalatroQt
     src/game/shop.h src/game/shop.cpp
     src/ui/shopwidget.h src/ui/shopwidget.cpp
     src/game/bossblind.h src/game/bossblind.cpp
+    src/card/consumable.h src/card/consumable.cpp
+    src/card/consumableitem.h src/card/consumableitem.cpp
+    src/game/boosterpack.h src/game/boosterpack.cpp
+    src/ui/packopenwidget.h src/ui/packopenwidget.cpp
+    src/ui/blindselectwidget.h src/ui/blindselectwidget.cpp
+    src/ui/floatingscore.h src/ui/floatingscore.cpp
+    src/ui/shopsignwidget.h src/ui/shopsignwidget.cpp
 )
 
 target_include_directories(BalatroQt
@@ -44,6 +53,8 @@ target_link_libraries(BalatroQt
 target_link_libraries(BalatroQt PRIVATE Qt6::Widgets)
 target_link_libraries(BalatroQt PRIVATE Qt6::Core)
 target_link_libraries(BalatroQt PRIVATE Qt6::Widgets)
+target_link_libraries(BalatroQt PRIVATE Qt6::Widgets)
+target_link_libraries(BalatroQt PRIVATE Qt6::Widgets)
 
 qt_add_resources(BalatroQt "textures"
     PREFIX "/textures"
@@ -52,6 +63,15 @@ qt_add_resources(BalatroQt "textures"
         resources/images/8BitDeck.png
         resources/images/Enhancers.png
         resources/images/Jokers.png
+        resources/images/Tarots.png
+        resources/images/boosters.png
+        resources/images/BlindChips.png
+        resources/images/chips.png
+        resources/images/tags.png
+        resources/images/ui_assets.png
+        resources/images/icons.png
+        resources/images/balatro.png
+        resources/images/ShopSignAnimation.png
 )
 
 qt_add_resources(BalatroQt "fonts"

@@ -11,6 +11,7 @@
 #include "../utils/constants.h"
 #include "shop.h"
 #include "bossblind.h"
+#include "../card/consumable.h"
 
 struct HandLevel {
     int level = 1;
@@ -25,10 +26,23 @@ enum class BlindType {
     Boss
 };
 
+enum class BlindState {
+    Upcoming,
+    Current,
+    Defeated,
+    Skipped,
+};
+
 enum class GamePhase {
+    BlindSelect,
     Blind,
     Shop,
     GameOver
+};
+
+enum class HandSortMode {
+    ByRank,
+    BySuit
 };
 
 class GameState : public QObject
@@ -56,11 +70,13 @@ public:
     const HandResult &lastResult() const{return mLastResult;}
     void sortHandByRank();
     void sortHandBySuit();
+    HandSortMode sortMode() const { return mSortMode; }
     int deckRemaining() const {return mDeck.remaining();}
+    BlindState blindState(int idx) const { return mBlindStates[idx]; }
+    void skipCurrentBlind();
 
     // 商店相关
     Shop &shop() { return mShop; }
-    bool buyJoker(int offerIdx);     // 商店第 idx 个
     void rerollShop();
     void leaveShop();                // 离开商店 → 进入下一盲注
     bool canAddJoker() const { return mJokers.size() < jokerSlots(); }
@@ -70,6 +86,28 @@ public:
 
     BossEffect bossEffect() const { return mBossEffect; }
     BossInfo currentBossInfo() const { return bossInfo(mBossEffect); }
+
+    QVector<CardData> &handMutable() { return mHand; }
+    void notifyHandChanged() { emit handChanged(); }
+
+    // 消耗品接口
+    const QVector<Consumable> &consumables() const { return mConsumables; }
+    bool canAddConsumable() const { return mConsumables.size() < Constants::MAX_CONSUMABLE_SLOTS; }
+    bool addConsumable(ConsumableType t);
+    bool useConsumable(int idx, const QVector<int> &selectedHandIdx);
+    bool sellConsumable(int idx);
+
+    // 商店买入：扩展为支持 3 种 offer
+    bool buyShopOffer(int offerIdx);     // ← 替代旧的 buyJoker
+    bool buyPack(int offerIdx, PackContent &outContent);
+    void applyPackChoice(const PackContent &pack, int chosenIdx);
+
+    int blindIdx() const { return mBlindIdx; }       // 当前 ante 内打到第几个 (0/1/2)
+    BossEffect pendingBossEffect() const { return mPendingBossEffect; }
+    void selectCurrentBlind();                       // 玩家从 BlindSelect 点"选择"
+    bool justSkipped() const { return mJustSkipped; }
+
+    HandResult previewSelection(const QVector<int> &indices) const;
 signals:
     void handChanged();
     void scoreChanged();
@@ -77,10 +115,13 @@ signals:
     void roundWon(int blindReward, int handBonus, int interest);
     void gameOver(bool won);
     void handPlayed();
-    void blindStarted();
     void jokersChanged();
     void shopChanged();
     void handLevelsChanged();
+    void consumablesChanged();
+    void blindSelectEntered();                       // 切到选择页
+    void blindStarted();                             // 切到对局页
+
 private:
     Deck mDeck;
     QVector<CardData> mHand;
@@ -96,6 +137,17 @@ private:
     HandResult mLastResult;
     Shop mShop;
     QHash<HandType, HandLevel> mHandLevels;
+    BlindState mBlindStates[3] = {
+        BlindState::Current, BlindState::Upcoming, BlindState::Upcoming
+    };
+
+    bool mJustSkipped = false;
+
+    int mBlindIdx = 0;
+    BossEffect mPendingBossEffect = BossEffect::None;
+
+    HandSortMode mSortMode = HandSortMode::ByRank;   // 默认按点数
+    void enterBlindSelect();
 
     void dealCards(); // 补牌到满
     int calcTargetScore() const;
@@ -108,6 +160,12 @@ private:
     BossEffect mBossEffect = BossEffect::None;
     void applyBossDebuffs();   // 给手牌打 debuff 标记
     void applyBossPostPlay();  // 出牌后 The Hook 等
+
+    bool mFirstShop = true;
+
+    QVector<Consumable> mConsumables;
+    void scoreCard(const CardData &card, HandResult &result, int playedIdx);
+    static ConsumableType planetTypeFor(HandType t);
 };
 
 #endif // GAMESTATE_H
