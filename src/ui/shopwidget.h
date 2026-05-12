@@ -42,6 +42,8 @@ private:
 
     void onBuyShop(int slot);
     void onBuyBooster(int slot);
+    void onBuyVoucher(int slot);
+    QPixmap playingCardPixmap(const CardData &c) const;
 
     GameState *mGS;
     QFont mCNFont;
@@ -53,6 +55,7 @@ private:
     QLabel      *mLblGold      = nullptr;
 
     QVector<OfferUi> mShopUi;
+    QVector<OfferUi> mVoucherUi;
     QVector<OfferUi> mBoosterUi;
 };
 

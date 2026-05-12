@@ -2,6 +2,8 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QPixmap>
+#include <QPropertyAnimation>
+#include <QEasingCurve>
 
 RoundEndOverlay::RoundEndOverlay(const QFont &cnFont, const QFont &pixelFont, QWidget *parent)
     : QWidget(parent), mCNFont(cnFont), mPixelFont(pixelFont)
@@ -166,6 +168,48 @@ void RoundEndOverlay::buildUi()
                            "每$5获得1利息(最高 5)", &mInterestRewardSym));
 
     vbl->addStretch();
+}
+
+
+void RoundEndOverlay::showFromBottom(const QRect &finalGeometry)
+{
+    if (!parentWidget()) {
+        setGeometry(finalGeometry);
+        raise();
+        show();
+        return;
+    }
+
+    QRect start = finalGeometry;
+    start.moveTop(finalGeometry.bottom() + 1);
+    setGeometry(start);
+    raise();
+    show();
+
+    auto *anim = new QPropertyAnimation(this, "geometry", this);
+    anim->setDuration(320);
+    anim->setStartValue(start);
+    anim->setEndValue(finalGeometry);
+    anim->setEasingCurve(QEasingCurve::OutCubic);
+    anim->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+void RoundEndOverlay::hideToBottom(std::function<void()> after)
+{
+    QRect start = geometry();
+    QRect end = start;
+    end.moveTop(start.bottom() + 1);
+
+    auto *anim = new QPropertyAnimation(this, "geometry", this);
+    anim->setDuration(260);
+    anim->setStartValue(start);
+    anim->setEndValue(end);
+    anim->setEasingCurve(QEasingCurve::InCubic);
+    connect(anim, &QPropertyAnimation::finished, this, [this, after]() {
+        hide();
+        if (after) after();
+    });
+    anim->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
 void RoundEndOverlay::setData(int blindChipRow, int targetScore, int blindReward,

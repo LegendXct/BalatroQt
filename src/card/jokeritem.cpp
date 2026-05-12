@@ -74,8 +74,9 @@ void JokerItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) 
 }
 
 void JokerItem::mousePressEvent(QGraphicsSceneMouseEvent *e) {
-    if (e->button() == Qt::LeftButton) {
-        emit clicked(this);
+    if (e->button() == Qt::LeftButton || e->button() == Qt::RightButton) {
+        emit pressed(this, e->button());
+        if (e->button() == Qt::LeftButton) emit clicked(this);
         e->accept();
     } else {
         QGraphicsObject::mousePressEvent(e);

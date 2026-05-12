@@ -11,6 +11,9 @@
 #include <QStatusBar>
 #include <QPauseAnimation>
 #include <QSequentialAnimationGroup>
+#include <QMenu>
+#include <QPropertyAnimation>
+#include <QCursor>
 #include "shopsignwidget.h"
 
 void MainWindow::loadFonts() {
@@ -105,10 +108,17 @@ MainWindow::MainWindow(QWidget *parent)
     connect(mRoundEndOverlay, &RoundEndOverlay::nextClicked,
             this, &MainWindow::onNextBlindClicked);
 
-    mPackOpenWidget = new PackOpenWidget(mCNFont, mPixelFont, mShopWidget);
+    mPackOpenWidget = new PackOpenWidget(mCNFont, mPixelFont, mPlayPage);
     mPackOpenWidget->hide();
     connect(mPackOpenWidget, &PackOpenWidget::choiceMade,
             this, &MainWindow::onPackChoiceMade);
+    connect(mPackOpenWidget, &PackOpenWidget::inventoryConsumableRequested,
+            this, &MainWindow::onInventoryConsumableUseRequested);
+    connect(mPackOpenWidget, &PackOpenWidget::packFinished,
+            this, &MainWindow::onPackFinished);
+
+    mDeckViewWidget = new DeckViewWidget(mCNFont, mPixelFont, mPlayPage);
+    mDeckViewWidget->hide();
 
     setupConnections();
     // 让所有 overlay 跟着 mPlayPage 一起 resize
@@ -505,6 +515,7 @@ void MainWindow::setupScene() {
     mDeckBackCard->setPos(mSceneW - CARD_W - 10, mSceneH - CARD_H - 36);
     mDeckBackCard->setZValue(1);
     mScene->addItem(mDeckBackCard);
+    connect(mDeckBackCard, &CardItem::clicked, this, &MainWindow::onDeckClicked);
 
     mDeckLabel = mScene->addText("52/52");
     QFont df = mCNFont; df.setPixelSize(12);
@@ -656,6 +667,9 @@ void MainWindow::refreshHand() {
             mScene->addItem(match);
             connect(match, &CardItem::clicked,
                     this, &MainWindow::onCardClicked);
+        } else {
+            // Boss debuff、塔罗/幻灵增强等会改变同一张牌的数据；复用旧 CardItem 时也必须刷新画面。
+            match->setCardData(hc);
         }
         reordered.append(match);
     }
@@ -683,7 +697,7 @@ void MainWindow::layoutHandCards() {
     if (n == 0) return;
 
     mHandCountLabel->setPlainText(
-        QString("%1/%2").arg(n).arg(Constants::HAND_SIZE));
+        QString("%1/%2").arg(n).arg(mGameState->handSize()));
     QRectF hcr = mHandCountLabel->boundingRect();
     mHandCountLabel->setPos((mSceneW - hcr.width()) / 2, mHandY - 22);
 
@@ -817,7 +831,14 @@ void MainWindow::refreshCounters() {
     // 更新牌堆计数
     if (mDeckLabel)
         mDeckLabel->setPlainText(
-            QString("%1/52").arg(mGameState->deckRemaining()));
+            QString("%1/%2").arg(mGameState->deckRemaining()).arg(mGameState->deckTotal()));
+}
+
+void MainWindow::onDeckClicked(CardItem *)
+{
+    if (!mDeckViewWidget || !mPlayPage) return;
+    mDeckViewWidget->setGeometry(mPlayPage->rect());
+    mDeckViewWidget->open(mGameState->remainingDeckCards(), mGameState->fullDeckCards());
 }
 
 // 卡牌点击：切换选中状态
@@ -996,48 +1017,119 @@ void MainWindow::resizeEvent(QResizeEvent *event)
     if (mPlayPage) {
         QRect r = mPlayPage->rect();
         if (mBlindSelectWidget) mBlindSelectWidget->setGeometry(r);
-        if (mShopWidget)        mShopWidget       ->setGeometry(r);
         if (mRoundEndOverlay)   mRoundEndOverlay  ->setGeometry(r);
+        if (mShopWidget)        mShopWidget       ->setGeometry(lowerOverlayRect());
+        if (mPackOpenWidget)    mPackOpenWidget   ->setGeometry(lowerOverlayRect());
+        if (mDeckViewWidget)    mDeckViewWidget   ->setGeometry(r);
     }
-    if (mPackOpenWidget && mShopWidget)
-        mPackOpenWidget->setGeometry(mShopWidget->rect());
 }
 
 void MainWindow::refreshJokerSlots()
 {
-    // 清掉旧的视图
     for (auto *ji : mJokerItems) {
         mScene->removeItem(ji);
         delete ji;
     }
     mJokerItems.clear();
 
-    // 用现有 jokers() 重画
     const auto &js = mGameState->jokers();
+    int n = js.size();
+    int available = qMin(mSceneW - 430, 760);
+    int step = (n > 1) ? (available - CARD_W) / (n - 1) : CARD_W + 14;
+    step = qBound(64, step, CARD_W + 14); // 小丑多时像手牌一样轻微重叠
+    int totalW = (n > 0) ? (CARD_W + (n - 1) * step) : 0;
+    int startX = 8;
+    if (totalW < available) startX = 8 + (available - totalW) / 2;
+
     for (int i = 0; i < js.size(); ++i) {
-        int x = 8 + i * (CARD_W + 14);
+        int x = startX + i * step;
         int y = JOKER_Y + 18;
         auto *ji = new JokerItem(js[i]);
         ji->setPos(x, y);
-        ji->setZValue(20);
+        ji->setZValue(20 + i);
         mScene->addItem(ji);
         mJokerItems.append(ji);
+        connect(ji, &JokerItem::pressed, this, &MainWindow::onJokerPressed);
+    }
+}
+
+void MainWindow::onJokerPressed(JokerItem *item, Qt::MouseButton btn)
+{
+    int idx = mJokerItems.indexOf(item);
+    if (idx < 0) return;
+
+    if (btn == Qt::RightButton) {
+        const auto &js = mGameState->jokers();
+        if (idx >= js.size()) return;
+        QMenu menu;
+        QAction *sell = menu.addAction(QString("售出 %1　+$%2")
+                                            .arg(js[idx].name)
+                                            .arg(qMax(1, js[idx].sellValue)));
+        QAction *chosen = menu.exec(QCursor::pos());
+        if (chosen == sell) {
+            mGameState->sellJoker(idx);
+            mSelectedJokerIdx = -1;
+            if (mShopWidget && mShopWidget->isVisible()) mShopWidget->refresh();
+        }
+        return;
+    }
+
+    if (btn == Qt::LeftButton) {
+        // 简化复刻原版拖拽排序：第一次点中小丑，第二次点另一张小丑，两者交换位置。
+        if (mSelectedJokerIdx < 0 || mSelectedJokerIdx >= mJokerItems.size()) {
+            mSelectedJokerIdx = idx;
+            item->juiceUp(1.10, 160);
+            return;
+        }
+        if (mSelectedJokerIdx == idx) {
+            mSelectedJokerIdx = -1;
+            item->juiceUp(1.06, 120);
+            return;
+        }
+        mGameState->moveJoker(mSelectedJokerIdx, idx);
+        mSelectedJokerIdx = -1;
+    }
+}
+
+void MainWindow::refreshConsumableSlotFrames()
+{
+    for (auto *r : mConsumableSlotRects) {
+        mScene->removeItem(r);
+        delete r;
+    }
+    mConsumableSlotRects.clear();
+
+    int slotCount = mGameState ? mGameState->consumableSlots() : Constants::MAX_CONSUMABLE_SLOTS;
+    for (int i = 0; i < slotCount; ++i) {
+        int x = mSceneW - 8 - (slotCount - i) * (CARD_W + 14);
+        auto *r = mScene->addRect(x, JOKER_Y + 18, CARD_W, CARD_H,
+                                  QPen(QColor(255,255,255,60), 2, Qt::DashLine),
+                                  QBrush(QColor(0,0,0,50)));
+        r->setZValue(1);
+        mConsumableSlotRects.append(r);
     }
 }
 
 void MainWindow::refreshConsumableSlots()
 {
+    refreshConsumableSlotFrames();
+
     for (auto *ci : mConsumableItems) { mScene->removeItem(ci); delete ci; }
     mConsumableItems.clear();
 
     const auto &cs = mGameState->consumables();
+    int slotCount = mGameState->consumableSlots();
+    if (mConsCountLabel) {
+        mConsCountLabel->setPlainText(QString("%1/%2").arg(cs.size()).arg(slotCount));
+        mConsCountLabel->setPos(mSceneW - 62, 4);
+    }
+
     for (int i = 0; i < cs.size(); ++i) {
-        // 消耗品在右上角，从右往左排：与 setupScene 里的虚线占位对齐
-        int x = mSceneW - 8 - (Constants::MAX_CONSUMABLE_SLOTS - i) * (CARD_W + 14);
+        int x = mSceneW - 8 - (slotCount - i) * (CARD_W + 14);
         int y = JOKER_Y + 18;
         auto *ci = new ConsumableItem(cs[i]);
         ci->setPos(x, y);
-        ci->setZValue(20);
+        ci->setZValue(30 + i);
         mScene->addItem(ci);
         mConsumableItems.append(ci);
 
@@ -1053,6 +1145,25 @@ void MainWindow::onConsumableClicked(ConsumableItem *item, Qt::MouseButton btn)
 
     if (btn == Qt::RightButton) {
         mGameState->sellConsumable(idx);
+        if (mShopWidget && mShopWidget->isVisible()) mShopWidget->refresh();
+        return;
+    }
+
+    // 开奥秘/幻灵包时，原版仍然点击右上角仓库特殊牌使用，目标是包界面的临时手牌。
+    if (mPackOpenWidget && mPackOpenWidget->isVisible() && !mPendingPackHand.isEmpty()) {
+        QVector<int> packSel = mPackOpenWidget->selectedHandIndices();
+        if (mGameState->useConsumableOnPackHand(idx, packSel, mPendingPackHand)) {
+            mPackOpenWidget->setPackHand(mPendingPackHand);
+            mPackOpenWidget->setInventoryConsumables(mGameState->consumables());
+            refreshConsumableSlots();
+            refreshGold();
+            if (mShopWidget && mShopWidget->isVisible()) mShopWidget->refresh();
+        } else {
+            mConsCountLabel->setDefaultTextColor(QColor("#ff8080"));
+            QTimer::singleShot(400, this, [this]() {
+                if (mConsCountLabel) mConsCountLabel->setDefaultTextColor(QColor("#aaddaa"));
+            });
+        }
         return;
     }
 
@@ -1062,7 +1173,6 @@ void MainWindow::onConsumableClicked(ConsumableItem *item, Qt::MouseButton btn)
     const auto &cs = mGameState->consumables();
     if (idx >= cs.size()) return;
     if (cs[idx].needsSelection > 0 && sel.size() < cs[idx].needsSelection) {
-        // 选牌不足：闪一下手牌计数提示
         mHandCountLabel->setDefaultTextColor(QColor("#ff8080"));
         QTimer::singleShot(400, this, [this]() {
             if (mHandCountLabel) mHandCountLabel->setDefaultTextColor(QColor("#aaddaa"));
@@ -1070,14 +1180,42 @@ void MainWindow::onConsumableClicked(ConsumableItem *item, Qt::MouseButton btn)
         return;
     }
 
-    mGameState->useConsumable(idx, sel);
-    // 后续刷新由 handChanged / consumablesChanged 信号自动驱动
+    if (mGameState->useConsumable(idx, sel)) {
+        refreshGold();
+        if (mShopWidget && mShopWidget->isVisible()) mShopWidget->refresh();
+    }
 }
 
-void MainWindow::onPackChoiceMade(int chosenIdx)
+void MainWindow::onPackChoiceMade(int chosenIdx, QVector<int> selectedPackHandIdx)
 {
-    if (chosenIdx >= 0)
-        mGameState->applyPackChoice(mPendingPack, chosenIdx);
+    if (chosenIdx >= 0) {
+        mGameState->applyPackChoice(mPendingPack, chosenIdx, selectedPackHandIdx, mPendingPackHand);
+        mPackOpenWidget->setPackHand(mPendingPackHand);
+        mPackOpenWidget->setInventoryConsumables(mGameState->consumables());
+    }
+    refreshConsumableSlots();
+    refreshJokerSlots();
+    refreshGold();
+    mShopWidget->refresh();
+}
+
+void MainWindow::onInventoryConsumableUseRequested(int inventoryIdx, QVector<int> selectedPackHandIdx)
+{
+    if (mGameState->useConsumableOnPackHand(inventoryIdx, selectedPackHandIdx, mPendingPackHand)) {
+        mPackOpenWidget->setPackHand(mPendingPackHand);
+        mPackOpenWidget->setInventoryConsumables(mGameState->consumables());
+        refreshConsumableSlots();
+        refreshGold();
+    }
+}
+
+void MainWindow::onPackFinished()
+{
+    if (!mPendingPackHand.isEmpty())
+        mGameState->returnPackHand(mPendingPackHand);
+    mPendingPackHand.clear();
+    refreshCounters();
+    refreshGold();
     mShopWidget->refresh();
 }
 
@@ -1093,15 +1231,32 @@ void MainWindow::onLeaveShopClicked()
     refreshConsumableSlots();
 }
 
+QRect MainWindow::lowerOverlayRect() const
+{
+    if (!mPlayPage) return QRect();
+    // 商店/开包只覆盖中下区，保留原版上方小丑槽和右上角消耗牌槽可点击。
+    const int y = JOKER_Y + JOKER_H + 10;
+    return QRect(0, y, mPlayPage->width(), qMax(0, mPlayPage->height() - y));
+}
+
+void MainWindow::showShopOverlay()
+{
+    if (!mShopWidget || !mPlayPage) return;
+    mShopWidget->refresh();
+    mShopWidget->setGeometry(lowerOverlayRect());
+    mShopWidget->raise();
+    mShopWidget->show();
+}
+
 bool MainWindow::eventFilter(QObject *obj, QEvent *ev)
 {
     if (obj == mPlayPage && ev->type() == QEvent::Resize) {
         QRect r = mPlayPage->rect();
         if (mBlindSelectWidget) mBlindSelectWidget->setGeometry(r);
-        if (mShopWidget)        mShopWidget       ->setGeometry(r);
         if (mRoundEndOverlay)   mRoundEndOverlay  ->setGeometry(r);
-        if (mPackOpenWidget && mShopWidget)
-            mPackOpenWidget->setGeometry(mShopWidget->rect());
+        if (mShopWidget)        mShopWidget       ->setGeometry(lowerOverlayRect());
+        if (mPackOpenWidget)    mPackOpenWidget   ->setGeometry(lowerOverlayRect());
+        if (mDeckViewWidget)    mDeckViewWidget   ->setGeometry(r);
     }
     return QMainWindow::eventFilter(obj, ev);
 }
@@ -1146,20 +1301,54 @@ void MainWindow::onBlindStarted()
     mLblMult ->setText("0");
 }
 
+void MainWindow::animateCollectRoundCardsThen(std::function<void()> after)
+{
+    QVector<CardItem*> cards;
+    for (auto *c : mHandCards) if (c) cards.append(c);
+    for (auto *c : mPlayedCards) if (c) cards.append(c);
+
+    QPointF deckPos(mSceneW - CARD_W - 10, mSceneH - CARD_H - 36);
+    const int duration = cards.isEmpty() ? 0 : 420;
+
+    for (int i = 0; i < cards.size(); ++i) {
+        CardItem *c = cards[i];
+        c->setZValue(80 + i);
+        c->moveTo(deckPos, duration);
+        auto *fade = new QPropertyAnimation(c, "opacity", this);
+        fade->setDuration(duration);
+        fade->setStartValue(c->opacity());
+        fade->setEndValue(0.0);
+        fade->setEasingCurve(QEasingCurve::InQuad);
+        fade->start(QAbstractAnimation::DeleteWhenStopped);
+    }
+
+    QTimer::singleShot(duration + 40, this, [this, after]() {
+        clearPlayedCards();
+        mGameState->collectRoundCardsToDeck();
+        for (auto *c : mHandCards) c->setOpacity(1.0);
+        refreshHand();
+        refreshCounters();
+        if (after) after();
+    });
+}
+
 void MainWindow::onNextBlindClicked()
 {
     clearFloatingScores();
-    mRoundEndOverlay->hide();
-    mShopWidget->refresh();
-    mShopWidget->raise();
-    mShopWidget->show();
-    setContextPage(2);
-    setPlayPhaseVisible(false);       // ← 隐藏对局元素
-    clearPlayedCards();                // ← 清出牌
-    QTimer::singleShot(0, this, [this]() {
-        if (mShopWidget && mPlayPage)
-            mShopWidget->setGeometry(mPlayPage->rect());
-    });
+
+    // 原版 cash_out 只负责把结算窗口收走并进入商店；
+    // 手牌/弃牌在 ROUND_EVAL 弹出之前就已经自动收回牌组了。
+    auto enterShop = [this]() {
+        setContextPage(2);
+        setPlayPhaseVisible(false);
+        showShopOverlay();
+    };
+
+    if (mRoundEndOverlay && mRoundEndOverlay->isVisible()) {
+        mRoundEndOverlay->hideToBottom(enterShop);
+    } else {
+        enterShop();
+    }
 }
 
 void MainWindow::onRoundWon(int blindReward, int handBonus, int interest)
@@ -1191,25 +1380,38 @@ void MainWindow::onRoundWon(int blindReward, int handBonus, int interest)
         interest
         );
 
-    // 延迟弹出(等浮动分跑完)
+    // 原版顺序：得分动画结束 → 自动把手牌/弃牌收回牌组 → 从底部弹出结算/提现面板。
+    // 不是点击“提现”以后才收牌。
     int eventCount = mGameState->lastResult().events.size();
     int delay = 350 + eventCount * 220 + 900 + 300;
     QTimer::singleShot(delay, this, [this]() {
-        mRoundEndOverlay->raise();
-        mRoundEndOverlay->show();
-        if (mPlayPage) mRoundEndOverlay->setGeometry(mPlayPage->rect());
+        animateCollectRoundCardsThen([this]() {
+            if (!mRoundEndOverlay || !mPlayPage) return;
+            mRoundEndOverlay->showFromBottom(mPlayPage->rect());
+        });
     });
 }
 
 void MainWindow::onPackBuyRequested(int slot)
 {
     if (!mGameState->buyPack(slot, mPendingPack)) return;
+
+    // 原版只有奥秘包/幻灵包需要在上方显示临时手牌供塔罗/幻灵作用；
+    // 标准包、天体包、小丑包不需要抽这排牌。
+    mPendingPackHand.clear();
+    if (mPendingPack.kind == PackKind::Arcana || mPendingPack.kind == PackKind::Spectral) {
+        mPendingPackHand = mGameState->drawPackHand();
+        refreshCounters();
+    }
+
     int freeJoker = mGameState->jokerSlots() - mGameState->jokers().size();
-    int freeCons  = Constants::MAX_CONSUMABLE_SLOTS - mGameState->consumables().size();
-    mPackOpenWidget->open(mPendingPack, freeCons, freeJoker);
+    mPackOpenWidget->open(mPendingPack, mPendingPackHand,
+                          mGameState->consumables(), freeJoker);
     QTimer::singleShot(0, this, [this]() {
-        if (mPackOpenWidget && mShopWidget)
-            mPackOpenWidget->setGeometry(mShopWidget->rect());
+        if (mPackOpenWidget)
+            mPackOpenWidget->setGeometry(lowerOverlayRect());
+        if (mDeckViewWidget && mPlayPage)
+            mDeckViewWidget->setGeometry(mPlayPage->rect());
     });
 }
 

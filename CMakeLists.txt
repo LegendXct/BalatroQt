@@ -36,6 +36,7 @@ qt_add_executable(BalatroQt
     src/ui/blindselectwidget.h src/ui/blindselectwidget.cpp
     src/ui/floatingscore.h src/ui/floatingscore.cpp
     src/ui/shopsignwidget.h src/ui/shopsignwidget.cpp
+    src/ui/deckviewwidget.h src/ui/deckviewwidget.cpp
 )
 
 target_include_directories(BalatroQt
@@ -72,6 +73,7 @@ qt_add_resources(BalatroQt "textures"
         resources/images/icons.png
         resources/images/balatro.png
         resources/images/ShopSignAnimation.png
+        resources/images/Vouchers.png
 )
 
 qt_add_resources(BalatroQt "fonts"

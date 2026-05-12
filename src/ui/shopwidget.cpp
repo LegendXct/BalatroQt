@@ -4,6 +4,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QResizeEvent>
+#include <QPainter>
 
 ShopWidget::ShopWidget(GameState *gs,
                        const QFont &cnFont, const QFont &pixelFont,
@@ -19,7 +20,9 @@ void ShopWidget::buildUi()
 {
     mPanel = new QWidget(this);
     mPanel->setObjectName("shopPanel");
-    mPanel->setFixedSize(900, 520);   // 800×420 → 900×520
+    // 原版商店比例：上方商品区横向更宽，下方左 Voucher、右 Booster。
+    // 不再固定 900×520，避免超级/巨型包贴图被面板裁掉。
+    mPanel->setMinimumSize(980, 640);
     mPanel->setAttribute(Qt::WA_StyledBackground, true);
     mPanel->setStyleSheet(
         "QWidget#shopPanel {"
@@ -30,8 +33,8 @@ void ShopWidget::buildUi()
         );
 
     auto *root = new QVBoxLayout(mPanel);
-    root->setContentsMargins(20, 20, 20, 20);
-    root->setSpacing(14);
+    root->setContentsMargins(18, 16, 18, 16);
+    root->setSpacing(10);
 
     // ── 顶部:右上角金币 ──
     auto *topRow = new QWidget(mPanel);
@@ -106,7 +109,7 @@ void ShopWidget::buildUi()
     shbl->setSpacing(12);
     shbl->setAlignment(Qt::AlignCenter);
 
-    for (int i = 0; i < 2; ++i) {
+    for (int i = 0; i < 4; ++i) {
         OfferUi ou = createOfferSlot(shopBox, false);
         connect(ou.cardBtn, &QPushButton::clicked, this, [this, i]() { onBuyShop(i); });
         shbl->addWidget(ou.card);
@@ -122,23 +125,22 @@ void ShopWidget::buildUi()
     lhbl->setContentsMargins(0, 0, 0, 0);
     lhbl->setSpacing(12);
 
-    // Voucher 单槽(暂时占位,不实现购买)
+    // Voucher 单槽：原版下半区左侧优惠券，固定售价 $10
     auto *voucherBox = new QWidget(lowerRow);
     voucherBox->setObjectName("voucherBox");
-    voucherBox->setFixedSize(160, 260);     // ← 加宽到 160 高度 260,跟 booster 槽对齐
+    voucherBox->setMinimumSize(185, 275);
     voucherBox->setAttribute(Qt::WA_StyledBackground, true);
     voucherBox->setStyleSheet(
         "QWidget#voucherBox { background:#4f6367; border-radius:10px; }"
         );
     auto *vbl = new QVBoxLayout(voucherBox);
-    vbl->setContentsMargins(8, 8, 8, 8);
+    vbl->setContentsMargins(10, 8, 10, 8);
     vbl->setAlignment(Qt::AlignCenter);
-    QLabel *voucherLbl = new QLabel("底注券", voucherBox);
-    QFont vlf = mCNFont; vlf.setPixelSize(12);
-    voucherLbl->setFont(vlf);
-    voucherLbl->setStyleSheet("color:#888; background:transparent;");
-    voucherLbl->setAlignment(Qt::AlignCenter);
-    vbl->addWidget(voucherLbl);
+
+    OfferUi vu = createOfferSlot(voucherBox, false);
+    connect(vu.cardBtn, &QPushButton::clicked, this, [this]() { onBuyVoucher(0); });
+    vbl->addWidget(vu.card);
+    mVoucherUi.append(vu);
     lhbl->addWidget(voucherBox);
 
     // Booster 区
@@ -168,7 +170,8 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
 {
     OfferUi ou;
     ou.card = new QWidget(parent);
-    ou.card->setFixedSize(160, 280);
+    if (isBooster) ou.card->setFixedSize(180, 260);
+    else           ou.card->setFixedSize(150, 260);
     ou.card->setStyleSheet("background:transparent;");
 
     auto *vbl = new QVBoxLayout(ou.card);
@@ -189,7 +192,9 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
 
     // 卡图(整张点击)
     ou.cardBtn = new QPushButton(ou.card);
-    ou.cardBtn->setFixedSize(140, 190);
+    // Booster 在原版商店区使用约 1.27×牌宽的显示区域，给它单独更宽的按钮。
+    if (isBooster) ou.cardBtn->setFixedSize(156, 184);
+    else           ou.cardBtn->setFixedSize(126, 174);
     ou.cardBtn->setCursor(Qt::PointingHandCursor);
     ou.cardBtn->setStyleSheet(
         "QPushButton { background:#374244; border-radius:6px; border:none; }"
@@ -207,7 +212,7 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
     ou.nameLbl->setStyleSheet("color:white; background:transparent;");
     ou.nameLbl->setAlignment(Qt::AlignCenter);
     ou.nameLbl->setWordWrap(true);
-    ou.nameLbl->setFixedHeight(36);
+    ou.nameLbl->setFixedHeight(38);
     vbl->addWidget(ou.nameLbl);
 
     return ou;
@@ -226,7 +231,12 @@ void ShopWidget::refresh()
             Joker tmp = createJoker(o.joker);
             name = tmp.name;
         } else if (o.kind == OfferKind::Pack) {
-            name = packDisplayName(o.pack);
+            name = packDisplayName(o.pack, o.packSize);
+        } else if (o.kind == OfferKind::Voucher) {
+            name = voucherData(o.voucher).name;
+            ou.cardBtn->setToolTip(voucherData(o.voucher).description);
+        } else if (o.kind == OfferKind::PlayingCard) {
+            name = o.playingCard.toString();
         } else {
             Consumable tmp = createConsumable(o.consumable);
             name = tmp.name;
@@ -246,15 +256,27 @@ void ShopWidget::refresh()
     };
 
     const auto &shopOffers = mGS->shop().shopOffers();
-    for (int i = 0; i < mShopUi.size() && i < shopOffers.size(); ++i) {
+    for (int i = 0; i < mShopUi.size(); ++i) {
+        if (i >= shopOffers.size()) {
+            mShopUi[i].card->setVisible(false);
+            continue;
+        }
         bool slotOk = true;
         const ShopOffer &o = shopOffers[i];
         if (o.kind == OfferKind::Joker)
             slotOk = mGS->canAddJoker();
-        else if (o.kind == OfferKind::Tarot || o.kind == OfferKind::Planet)
+        else if (o.kind == OfferKind::Tarot || o.kind == OfferKind::Planet || o.kind == OfferKind::Spectral)
             slotOk = mGS->canAddConsumable();
+        else if (o.kind == OfferKind::PlayingCard)
+            slotOk = true;
         fillSlot(mShopUi[i], o,
                  mGS->shop().canBuyShop(i, mGS->gold()) && slotOk, false);
+    }
+
+    const auto &voucherOffers = mGS->shop().voucherOffers();
+    for (int i = 0; i < mVoucherUi.size() && i < voucherOffers.size(); ++i) {
+        fillSlot(mVoucherUi[i], voucherOffers[i],
+                 mGS->shop().canBuyVoucher(i, mGS->gold()), false);
     }
 
     const auto &boosterOffers = mGS->shop().boosterOffers();
@@ -278,7 +300,7 @@ QPixmap ShopWidget::offerPixmap(const ShopOffer &o) const
                           JokerItem::WIDTH, JokerItem::HEIGHT);
     }
 
-    if (o.kind == OfferKind::Tarot || o.kind == OfferKind::Planet) {
+    if (o.kind == OfferKind::Tarot || o.kind == OfferKind::Planet || o.kind == OfferKind::Spectral) {
         QPixmap sheet(":/textures/images/Tarots.png");
         if (sheet.isNull()) return QPixmap();
         QPoint c = ConsumableItem::spritePos(o.consumable);
@@ -290,23 +312,91 @@ QPixmap ShopWidget::offerPixmap(const ShopOffer &o) const
     if (o.kind == OfferKind::Pack) {
         QPixmap sheet(":/textures/images/boosters.png");
         if (sheet.isNull()) return QPixmap();
-        // 我们目前只用 normal 版,固定 x=0
-        // 行号: Standard=6, Arcana=0, Celestial=1, Buffoon=8
-        int row = 0;
-        switch (o.pack) {
-        case PackKind::Standard:  row = 6; break;
-        case PackKind::Arcana:    row = 0; break;
-        case PackKind::Celestial: row = 1; break;
-        case PackKind::Buffoon:   row = 8; break;
-        }
-        return sheet.copy(0, row * ConsumableItem::HEIGHT,
+        QPoint c = packSpritePos(o.pack, o.packSize);
+        return sheet.copy(c.x() * ConsumableItem::WIDTH,
+                          c.y() * ConsumableItem::HEIGHT,
                           ConsumableItem::WIDTH, ConsumableItem::HEIGHT);
     }
+    if (o.kind == OfferKind::PlayingCard) {
+        return playingCardPixmap(o.playingCard);
+    }
+
+    if (o.kind == OfferKind::Voucher) {
+        // 如果你把队友的 Vouchers.png 加进 Qt 资源，这里会自动使用贴图；
+        // 如果资源不存在，则走下面的文字券兜底。
+        QPixmap voucherSheet(":/textures/images/Vouchers.png");
+        if (!voucherSheet.isNull()) {
+            QPoint c = voucherData(o.voucher).spritePos;
+            return voucherSheet.copy(c.x() * ConsumableItem::WIDTH,
+                                     c.y() * ConsumableItem::HEIGHT,
+                                     ConsumableItem::WIDTH,
+                                     ConsumableItem::HEIGHT);
+        }
+
+        QPixmap pix(ConsumableItem::WIDTH, ConsumableItem::HEIGHT);
+        pix.fill(Qt::transparent);
+        QPainter p(&pix);
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setBrush(QColor("#2f9e44"));
+        p.setPen(QPen(QColor("#e9ffd9"), 3));
+        p.drawRoundedRect(4, 4, pix.width() - 8, pix.height() - 8, 10, 10);
+        p.setPen(Qt::white);
+        QFont f = mCNFont;
+        f.setPixelSize(18);
+        f.setBold(true);
+        p.setFont(f);
+        p.drawText(pix.rect().adjusted(8, 8, -8, -8), Qt::AlignCenter | Qt::TextWordWrap,
+                   voucherData(o.voucher).name);
+        return pix;
+    }
+
     return QPixmap();
+}
+
+QPixmap ShopWidget::playingCardPixmap(const CardData &c) const
+{
+    constexpr int W = ConsumableItem::WIDTH, H = ConsumableItem::HEIGHT;
+    QPixmap deckSheet(":/textures/images/8BitDeck.png");
+    QPixmap enhSheet (":/textures/images/Enhancers.png");
+    QPixmap pix(W, H); pix.fill(Qt::transparent);
+    QPainter p(&pix);
+    p.setRenderHint(QPainter::SmoothPixmapTransform);
+
+    int eCol = 1, eRow = 0;
+    switch (c.enhancement) {
+    case Enhancement::Bonus: eCol = 1; eRow = 1; break;
+    case Enhancement::Mult:  eCol = 2; eRow = 1; break;
+    case Enhancement::Wild:  eCol = 3; eRow = 1; break;
+    case Enhancement::Lucky: eCol = 4; eRow = 1; break;
+    case Enhancement::Glass: eCol = 5; eRow = 1; break;
+    case Enhancement::Steel: eCol = 6; eRow = 1; break;
+    case Enhancement::Stone: eCol = 5; eRow = 0; break;
+    case Enhancement::Gold:  eCol = 6; eRow = 0; break;
+    default: break;
+    }
+    if (!enhSheet.isNull())
+        p.drawPixmap(QRect(0, 0, W, H), enhSheet, QRect(eCol*W, eRow*H, W, H));
+
+    if (c.enhancement != Enhancement::Stone && !deckSheet.isNull()) {
+        int col = static_cast<int>(c.rank) - 2;
+        int row = 0;
+        switch (c.suit) {
+        case Suit::Hearts: row = 0; break;
+        case Suit::Clubs:  row = 1; break;
+        case Suit::Diamonds: row = 2; break;
+        case Suit::Spades: row = 3; break;
+        }
+        p.drawPixmap(QRect(0, 0, W, H), deckSheet, QRect(col*W, row*H, W, H));
+    }
+    return pix;
 }
 
 void ShopWidget::onBuyShop(int slot) {
     if (mGS->buyShopOffer(slot)) refresh();
+}
+
+void ShopWidget::onBuyVoucher(int slot) {
+    if (mGS->buyVoucherOffer(slot)) refresh();
 }
 
 void ShopWidget::onBuyBooster(int slot) {
@@ -326,6 +416,9 @@ void ShopWidget::resizeEvent(QResizeEvent *e)
 void ShopWidget::layoutPanel()
 {
     if (!mPanel) return;
+    int panelW = qBound(980, int(width() * 0.86), 1220);
+    int panelH = qBound(640, int(height() * 0.82), 760);
+    mPanel->resize(panelW, panelH);
     int x = (width()  - mPanel->width())  / 2;
     int y = (height() - mPanel->height()) / 2;
     mPanel->move(x, y);

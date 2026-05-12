@@ -4,8 +4,11 @@
 #include <QRandomGenerator>
 
 ConsumableKind kindOf(ConsumableType t) {
-    return (static_cast<int>(t) < static_cast<int>(ConsumableType::Planet_Pluto))
-    ? ConsumableKind::Tarot : ConsumableKind::Planet;
+    if (static_cast<int>(t) < static_cast<int>(ConsumableType::Planet_Pluto))
+        return ConsumableKind::Tarot;
+    if (static_cast<int>(t) < static_cast<int>(ConsumableType::Spectral_Talisman))
+        return ConsumableKind::Planet;
+    return ConsumableKind::Spectral;
 }
 
 // 把 ctx.selectedHandIdx 指到的手牌应用 enhancement，最多 maxN 张
@@ -21,6 +24,49 @@ static void enhanceSelected(UseContext &ctx, Enhancement e, int maxN) {
     ctx.state.notifyHandChanged();
 }
 
+static void sealSelected(UseContext &ctx, Seal s, int maxN) {
+    auto &hand = ctx.state.handMutable();
+    int applied = 0;
+    for (int idx : ctx.selectedHandIdx) {
+        if (applied >= maxN) break;
+        if (idx < 0 || idx >= hand.size()) continue;
+        hand[idx].seal = s;
+        applied++;
+    }
+    ctx.state.notifyHandChanged();
+}
+
+static void randomEditionSelected(UseContext &ctx, int maxN) {
+    auto &hand = ctx.state.handMutable();
+    int applied = 0;
+    for (int idx : ctx.selectedHandIdx) {
+        if (applied >= maxN) break;
+        if (idx < 0 || idx >= hand.size()) continue;
+        int r = QRandomGenerator::global()->bounded(3);
+        if      (r == 0) hand[idx].edition = Edition::Foil;
+        else if (r == 1) hand[idx].edition = Edition::Holographic;
+        else             hand[idx].edition = Edition::Polychrome;
+        applied++;
+    }
+    ctx.state.notifyHandChanged();
+}
+
+static void destroySelectedGainGold(UseContext &ctx, int maxN, int goldGain) {
+    auto &hand = ctx.state.handMutable();
+    QVector<int> sel = ctx.selectedHandIdx;
+    std::sort(sel.begin(), sel.end(), std::greater<int>());
+
+    int destroyed = 0;
+    for (int idx : sel) {
+        if (destroyed >= maxN) break;
+        if (idx < 0 || idx >= hand.size()) continue;
+        hand.removeAt(idx);      // 幻灵牌 Immolate 是“摧毁”，不进弃牌堆
+        destroyed++;
+    }
+    if (destroyed > 0) ctx.state.addGold(goldGain);
+    ctx.state.notifyHandChanged();
+}
+
 static void planetLevelUp(UseContext &ctx, HandType t) {
     ctx.state.levelUpHand(t, 1);
 }
@@ -29,7 +75,7 @@ Consumable createConsumable(ConsumableType type) {
     Consumable c;
     c.type = type;
     c.kind = kindOf(type);
-    c.sellValue = 1;
+    c.sellValue = (c.kind == ConsumableKind::Spectral) ? 2 : 1;
 
     switch (type) {
     case ConsumableType::Tarot_Empress:
@@ -65,7 +111,6 @@ Consumable createConsumable(ConsumableType type) {
         };
         break;
 
-    // 行星——除了名字和升级目标都一样
     case ConsumableType::Planet_Pluto:
         c.name = "冥王星";   c.description = "升级【高牌】";
         c.effect = [](UseContext &ctx) { planetLevelUp(ctx, HandType::HighCard); }; break;
@@ -102,6 +147,37 @@ Consumable createConsumable(ConsumableType type) {
     case ConsumableType::Planet_Eris:
         c.name = "厄里斯";   c.description = "升级【同花五条】";
         c.effect = [](UseContext &ctx) { planetLevelUp(ctx, HandType::FlushFive); }; break;
+
+    case ConsumableType::Spectral_Talisman:
+        c.name = "护身符"; c.description = "把 1 张选中手牌加上金色印章";
+        c.needsSelection = 1; c.maxSelection = 1;
+        c.effect = [](UseContext &ctx) { sealSelected(ctx, Seal::Gold, 1); };
+        break;
+    case ConsumableType::Spectral_Aura:
+        c.name = "光环"; c.description = "把 1 张选中手牌变为随机版本";
+        c.needsSelection = 1; c.maxSelection = 1;
+        c.effect = [](UseContext &ctx) { randomEditionSelected(ctx, 1); };
+        break;
+    case ConsumableType::Spectral_Immolate:
+        c.name = "火祭"; c.description = "摧毁最多 5 张选中手牌，获得 $20";
+        c.needsSelection = 1; c.maxSelection = 5;
+        c.effect = [](UseContext &ctx) { destroySelectedGainGold(ctx, 5, 20); };
+        break;
+    case ConsumableType::Spectral_DejaVu:
+        c.name = "既视感"; c.description = "把 1 张选中手牌加上红色印章";
+        c.needsSelection = 1; c.maxSelection = 1;
+        c.effect = [](UseContext &ctx) { sealSelected(ctx, Seal::Red, 1); };
+        break;
+    case ConsumableType::Spectral_Trance:
+        c.name = "恍惚"; c.description = "把 1 张选中手牌加上蓝色印章";
+        c.needsSelection = 1; c.maxSelection = 1;
+        c.effect = [](UseContext &ctx) { sealSelected(ctx, Seal::Blue, 1); };
+        break;
+    case ConsumableType::Spectral_Medium:
+        c.name = "灵媒"; c.description = "把 1 张选中手牌加上紫色印章";
+        c.needsSelection = 1; c.maxSelection = 1;
+        c.effect = [](UseContext &ctx) { sealSelected(ctx, Seal::Purple, 1); };
+        break;
     }
     return c;
 }
@@ -124,6 +200,19 @@ ConsumableType randomPlanetType() {
         ConsumableType::Planet_Earth,   ConsumableType::Planet_Mars,
         ConsumableType::Planet_Neptune, ConsumableType::Planet_PlanetX,
         ConsumableType::Planet_Ceres,   ConsumableType::Planet_Eris,
+    };
+    int n = int(sizeof(pool)/sizeof(pool[0]));
+    return pool[QRandomGenerator::global()->bounded(n)];
+}
+
+ConsumableType randomSpectralType() {
+    constexpr ConsumableType pool[] = {
+        ConsumableType::Spectral_Talisman,
+        ConsumableType::Spectral_Aura,
+        ConsumableType::Spectral_Immolate,
+        ConsumableType::Spectral_DejaVu,
+        ConsumableType::Spectral_Trance,
+        ConsumableType::Spectral_Medium,
     };
     int n = int(sizeof(pool)/sizeof(pool[0]));
     return pool[QRandomGenerator::global()->bounded(n)];

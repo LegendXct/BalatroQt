@@ -21,7 +21,9 @@
 #include "packopenwidget.h"
 #include "blindselectwidget.h"
 #include <QStackedWidget>
+#include <functional>
 #include "floatingscore.h"
+#include "deckviewwidget.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -94,7 +96,9 @@ private:
     QVector<ConsumableItem*> mConsumableItems;
 
     PackOpenWidget *mPackOpenWidget = nullptr;
+    DeckViewWidget *mDeckViewWidget = nullptr;
     PackContent     mPendingPack;        // 当前正在打开的包
+    QVector<CardData> mPendingPackHand;  // 开包界面临时翻出的一手牌
 
     QGraphicsTextItem *mConsCountLabel = nullptr;
     QGraphicsRectItem *mPlayBgRect     = nullptr;
@@ -124,7 +128,11 @@ private:
     void onSkipBlind(int idx);
 
     void onPackBuyRequested(int slot);
-    void onPackChoiceMade(int chosenIdx);
+    void onPackChoiceMade(int chosenIdx, QVector<int> selectedPackHandIdx);
+    void onInventoryConsumableUseRequested(int inventoryIdx, QVector<int> selectedPackHandIdx);
+    void onPackFinished();
+    void onDeckClicked(CardItem *card);
+    void onJokerPressed(JokerItem *item, Qt::MouseButton btn);
 
     void refreshConsumableSlots();
     void onConsumableClicked(ConsumableItem *item, Qt::MouseButton btn);
@@ -160,16 +168,21 @@ private:
 
     ShopWidget *mShopWidget = nullptr;
     QVector<JokerItem*> mJokerItems;     // 主场景上已持有的小丑视图
+    int mSelectedJokerIdx = -1;           // 点击两个小丑交换顺序；右键小丑出售
 
     QWidget           *mPlayPage          = nullptr;     // 对局页（包 mLeftPanel + mView）
     BlindSelectWidget *mBlindSelectWidget = nullptr;
 
     void onBlindSelectEntered();
     void onBlindStarted();
+    QRect lowerOverlayRect() const;
+    void showShopOverlay();
+    void animateCollectRoundCardsThen(std::function<void()> after);
     void onSelectBlindClicked();
 
     void onLeaveShopClicked();
     void refreshJokerSlots();
+    void refreshConsumableSlotFrames();
 
     bool eventFilter(QObject *obj, QEvent *ev) override;
     void spawnFloatingText(const QPointF &nearPos, const QString &text, const QColor &color);

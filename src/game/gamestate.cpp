@@ -1,6 +1,8 @@
 #include "gamestate.h"
 #include <QSet>
 #include <QRandomGenerator>
+#include <algorithm>
+#include <functional>
 
 GameState::GameState(QObject *parent)
     : QObject{parent}
@@ -60,8 +62,49 @@ void GameState::sortHandBySuit() {
     emit handChanged();
 }
 
+
+int GameState::deckTotal() const
+{
+    return mDeck.totalKnown() + mHand.size();
+}
+
+QVector<CardData> GameState::remainingDeckCards() const
+{
+    return mDeck.drawPile();
+}
+
+QVector<CardData> GameState::fullDeckCards() const
+{
+    QVector<CardData> out = mDeck.allKnownCards();
+    for (CardData c : mHand) {
+        c.isDebuffed = false;
+        c.faceUp = true;
+        out.append(c);
+    }
+    return out;
+}
+
+QVector<JokerType> GameState::ownedJokerTypes() const
+{
+    QVector<JokerType> out;
+    for (const Joker &j : mJokers) out.append(j.type);
+    return out;
+}
+
+bool GameState::hasJokerDuplicateBypass() const
+{
+    // 原版 Showman/马戏团长允许重复小丑。当前项目还没有实现 Showman，
+    // 所以这里先恒为 false；以后加 JokerType::Showman 时，在这里返回 true。
+    return false;
+}
+
+void GameState::syncShopJokerRules()
+{
+    mShop.setOwnedJokers(ownedJokerTypes(), hasJokerDuplicateBypass());
+}
+
 void GameState::dealCards() {
-    while (mHand.size() < Constants::HAND_SIZE && !mDeck.isEmpty())
+    while (mHand.size() < handSize() && !mDeck.isEmpty())
         mHand.append(mDeck.draw());
     if (mSortMode == HandSortMode::ByRank)
         std::sort(mHand.begin(), mHand.end(), rankComp);
@@ -232,10 +275,13 @@ void GameState::playCards(const QVector<int> &indices) {
                 j.effect(rctx);
         }
 
-        int interest = qMin(mGold / 5, Constants::INTEREST_MAX);
+        int interest = qMin(mGold / 5, mInterestCap / 5);
         mGold += interest;
 
+        // 注意：这里不要立刻清空最后一手牌。原版是在结算界面仍然能看到最后一手，
+        // 点“下一回合”时再播放收牌动画并把牌归还牌组。
         mPhase = GamePhase::Shop;
+        syncShopJokerRules();
         mShop.roll();
         if (mFirstShop) {
             auto &b = mShop.boosterOffersMutable();
@@ -243,6 +289,7 @@ void GameState::playCards(const QVector<int> &indices) {
                 ShopOffer &o = b[0];
                 o.kind = OfferKind::Pack;
                 o.pack = PackKind::Buffoon;
+                o.packSize = PackSize::Normal;
                 o.cost = 4;
                 o.sold = false;
             }
@@ -375,7 +422,7 @@ int GameState::roundReward() const {
     case BlindType::Boss: base = 5; break;
     }
     int handBonus = mHandsLeft * Constants::HAND_GOLD;
-    int interest = qMin(mGold / 5, Constants::INTEREST_MAX);
+    int interest = qMin(mGold / 5, mInterestCap / 5);
     return base + handBonus + interest;
 }
 
@@ -431,8 +478,9 @@ bool GameState::useConsumable(int idx, const QVector<int> &selectedHandIdx) {
 
     QVector<int> sel = selectedHandIdx;
     std::sort(sel.begin(), sel.end());
+    sel.erase(std::unique(sel.begin(), sel.end()), sel.end());
     if (c.maxSelection > 0 && sel.size() > c.maxSelection)
-        sel.resize(c.maxSelection);
+        return false;
 
     UseContext ctx{ *this, sel };
     c.effect(ctx);
@@ -452,6 +500,41 @@ bool GameState::sellConsumable(int idx) {
     return true;
 }
 
+bool GameState::sellJoker(int idx) {
+    if (idx < 0 || idx >= mJokers.size()) return false;
+    int v = qMax(1, mJokers[idx].sellValue);
+    mJokers.removeAt(idx);
+    mGold += v;
+    syncShopJokerRules();
+    if (mPhase == GamePhase::Shop) {
+        mShop.refreshCurrentOfferCosts();
+        mShop.ensureShopOfferCount();
+    }
+    emit jokersChanged();
+    emit goldChanged();
+    emit shopChanged();
+    return true;
+}
+
+bool GameState::moveJoker(int from, int to) {
+    if (from < 0 || from >= mJokers.size() || to < 0 || to >= mJokers.size()) return false;
+    if (from == to) return true;
+    mJokers.move(from, to);
+    emit jokersChanged();
+    return true;
+}
+
+void GameState::collectRoundCardsToDeck() {
+    // RoundEnd → Shop 时调用：把最后留在手上的牌、以及出牌区已弃进弃牌堆的牌
+    // 统一合回摸牌堆并洗牌，保证商店开包/下一盲注看到的是完整当前牌组。
+    if (!mHand.isEmpty()) {
+        mDeck.returnCards(mHand);
+        mHand.clear();
+    }
+    mDeck.reset();
+    emit handChanged();
+}
+
 bool GameState::buyShopOffer(int idx) {
     if (mPhase != GamePhase::Shop) return false;
     if (!mShop.canBuyShop(idx, mGold)) return false;
@@ -462,17 +545,108 @@ bool GameState::buyShopOffer(int idx) {
         ShopOffer t = mShop.takeShopOffer(idx);
         mGold -= t.cost;
         mJokers.append(createJoker(t.joker));
+        syncShopJokerRules();
         emit jokersChanged();
-    } else {
+    } else if (o.kind == OfferKind::Tarot ||
+               o.kind == OfferKind::Planet ||
+               o.kind == OfferKind::Spectral) {
         if (!canAddConsumable()) return false;
         ShopOffer t = mShop.takeShopOffer(idx);
         mGold -= t.cost;
         mConsumables.append(createConsumable(t.consumable));
         emit consumablesChanged();
+    } else if (o.kind == OfferKind::PlayingCard) {
+        ShopOffer t = mShop.takeShopOffer(idx);
+        mGold -= t.cost;
+        mDeck.addCard(t.playingCard);
+    } else {
+        return false;
     }
+
     emit goldChanged();
     emit shopChanged();
     return true;
+}
+
+bool GameState::buyVoucherOffer(int idx) {
+    if (mPhase != GamePhase::Shop) return false;
+    if (!mShop.canBuyVoucher(idx, mGold)) return false;
+
+    ShopOffer t = mShop.takeVoucherOffer(idx);
+    mGold -= t.cost;
+    mRedeemedVouchers.append(t.voucher);
+    mShop.setRedeemedVouchers(mRedeemedVouchers);
+    applyVoucher(t.voucher);
+    syncShopJokerRules();
+    mShop.refreshCurrentOfferCosts();
+    mShop.ensureShopOfferCount();
+
+    emit goldChanged();
+    emit shopChanged();
+    emit consumablesChanged();
+    return true;
+}
+
+bool GameState::hasVoucher(VoucherType t) const {
+    return mRedeemedVouchers.contains(t);
+}
+
+void GameState::applyVoucher(VoucherType t) {
+    switch (t) {
+    case VoucherType::Overstock:
+        mShop.changeShopSlots(1);
+        mShop.rerollShopOnly();
+        break;
+    case VoucherType::ClearanceSale:
+        mShop.setDiscountPercent(25);
+        break;
+    case VoucherType::RerollSurplus:
+        mShop.setRerollDiscount(2);
+        break;
+    case VoucherType::TarotMerchant:
+        mShop.setTarotRate(9.6);
+        break;
+    case VoucherType::PlanetMerchant:
+        mShop.setPlanetRate(9.6);
+        break;
+    case VoucherType::MagicTrick:
+        // 原版 v_magic_trick: playing_card_rate = 4
+        mShop.setPlayingCardRate(4.0);
+        break;
+    case VoucherType::CrystalBall:
+        mExtraConsumableSlots += 1;
+        break;
+    case VoucherType::Grabber:
+        mExtraHandsPerRound += 1;
+        break;
+    case VoucherType::Wasteful:
+        mExtraDiscardsPerRound += 1;
+        break;
+    case VoucherType::SeedMoney:
+        mInterestCap = 50;
+        break;
+    case VoucherType::PaintBrush:
+        mExtraHandSize += 1;
+        break;
+    case VoucherType::Hieroglyph:
+        mAnte = qMax(1, mAnte - 1);
+        mExtraHandsPerRound -= 1;
+        break;
+    case VoucherType::Hone:
+    case VoucherType::Telescope:
+    case VoucherType::Blank:
+    case VoucherType::DirectorsCut:
+        // 这些需要和版本概率 / Boss 重掷 / 包偏向进一步联动，先登记为已购买。
+        break;
+    }
+}
+
+int GameState::consumableSlots() const {
+    return Constants::MAX_CONSUMABLE_SLOTS + mExtraConsumableSlots;
+}
+
+int GameState::handSize() const {
+    return Constants::HAND_SIZE + mExtraHandSize;
 }
 
 void GameState::scoreCard(const CardData &card, HandResult &result, int playedIdx)
@@ -595,36 +769,173 @@ bool GameState::buyPack(int idx, PackContent &out)
 
     ShopOffer t = mShop.takeBoosterOffer(idx);
     mGold -= t.cost;
-    out = generatePackContent(t.pack);
+    out = generatePackContent(t.pack, t.packSize, false, hasVoucher(VoucherType::Telescope),
+                              ConsumableType::Planet_Pluto,
+                              ownedJokerTypes(), hasJokerDuplicateBypass());
 
     emit goldChanged();
     emit shopChanged();
     return true;
 }
 
-void GameState::applyPackChoice(const PackContent &pack, int chosenIdx)
+
+QVector<CardData> GameState::drawPackHand()
 {
-    if (chosenIdx < 0) return;
+    QVector<CardData> out;
+    int n = handSize();
+    for (int i = 0; i < n; ++i) {
+        if (mDeck.isEmpty()) mDeck.reset();
+        if (mDeck.isEmpty()) break;
+        out.append(mDeck.draw());
+    }
+    emit scoreChanged();
+    return out;
+}
+
+void GameState::returnPackHand(const QVector<CardData> &packHand)
+{
+    // 开包界面的临时手牌来自牌组。没被摧毁的牌要放回牌组；
+    // 被 Immolate 等效果删除的牌不会出现在 packHand 里，也就不会放回。
+    for (const CardData &c : packHand) {
+        mDeck.addCard(c);
+    }
+    emit scoreChanged();
+}
+
+static QVector<int> normalizedSelection(const QVector<int> &selected, int size, int maxSelection)
+{
+    QVector<int> sel = selected;
+    std::sort(sel.begin(), sel.end());
+    sel.erase(std::unique(sel.begin(), sel.end()), sel.end());
+    sel.erase(std::remove_if(sel.begin(), sel.end(), [size](int idx) {
+        return idx < 0 || idx >= size;
+    }), sel.end());
+    return sel;
+}
+
+static bool applyConsumableTypeToPackHand(GameState &state,
+                                          ConsumableType type,
+                                          const QVector<int> &selectedPackHandIdx,
+                                          QVector<CardData> &packHand)
+{
+    Consumable c = createConsumable(type);
+    QVector<int> sel = normalizedSelection(selectedPackHandIdx, packHand.size(), c.maxSelection);
+    if (sel.size() < c.needsSelection) return false;
+    if (c.maxSelection > 0 && sel.size() > c.maxSelection) return false;
+
+    auto enhance = [&](Enhancement e, int maxN) {
+        QVector<int> use = normalizedSelection(sel, packHand.size(), maxN);
+        int applied = 0;
+        for (int idx : use) { if (applied++ >= maxN) break; packHand[idx].enhancement = e; }
+    };
+    auto seal = [&](Seal s, int maxN) {
+        QVector<int> use = normalizedSelection(sel, packHand.size(), maxN);
+        int applied = 0;
+        for (int idx : use) { if (applied++ >= maxN) break; packHand[idx].seal = s; }
+    };
+    auto randomEdition = [&](int maxN) {
+        QVector<int> use = normalizedSelection(sel, packHand.size(), maxN);
+        int applied = 0;
+        for (int idx : use) {
+            if (applied++ >= maxN) break;
+            int r = QRandomGenerator::global()->bounded(3);
+            if      (r == 0) packHand[idx].edition = Edition::Foil;
+            else if (r == 1) packHand[idx].edition = Edition::Holographic;
+            else             packHand[idx].edition = Edition::Polychrome;
+        }
+    };
+
+    switch (type) {
+    case ConsumableType::Tarot_Empress:    enhance(Enhancement::Mult, 2); break;
+    case ConsumableType::Tarot_Hierophant: enhance(Enhancement::Bonus, 2); break;
+    case ConsumableType::Tarot_Chariot:    enhance(Enhancement::Steel, 1); break;
+    case ConsumableType::Tarot_Lovers:     enhance(Enhancement::Wild, 1); break;
+    case ConsumableType::Tarot_Tower:      enhance(Enhancement::Stone, 1); break;
+    case ConsumableType::Tarot_Hermit: {
+        int gain = qMin(state.gold(), 20);
+        state.addGold(gain);
+        break;
+    }
+
+    case ConsumableType::Planet_Pluto:     state.levelUpHand(HandType::HighCard); break;
+    case ConsumableType::Planet_Mercury:   state.levelUpHand(HandType::Pair); break;
+    case ConsumableType::Planet_Uranus:    state.levelUpHand(HandType::TwoPair); break;
+    case ConsumableType::Planet_Venus:     state.levelUpHand(HandType::ThreeOfAKind); break;
+    case ConsumableType::Planet_Saturn:    state.levelUpHand(HandType::Straight); break;
+    case ConsumableType::Planet_Jupiter:   state.levelUpHand(HandType::Flush); break;
+    case ConsumableType::Planet_Earth:     state.levelUpHand(HandType::FullHouse); break;
+    case ConsumableType::Planet_Mars:      state.levelUpHand(HandType::FourOfAKind); break;
+    case ConsumableType::Planet_Neptune:   state.levelUpHand(HandType::StraightFlush); break;
+    case ConsumableType::Planet_PlanetX:   state.levelUpHand(HandType::FiveOfAKind); break;
+    case ConsumableType::Planet_Ceres:     state.levelUpHand(HandType::FlushHouse); break;
+    case ConsumableType::Planet_Eris:      state.levelUpHand(HandType::FlushFive); break;
+
+    case ConsumableType::Spectral_Talisman: seal(Seal::Gold, 1); break;
+    case ConsumableType::Spectral_Aura:     randomEdition(1); break;
+    case ConsumableType::Spectral_DejaVu:   seal(Seal::Red, 1); break;
+    case ConsumableType::Spectral_Trance:   seal(Seal::Blue, 1); break;
+    case ConsumableType::Spectral_Medium:   seal(Seal::Purple, 1); break;
+    case ConsumableType::Spectral_Immolate: {
+        QVector<int> use = normalizedSelection(sel, packHand.size(), 5);
+        std::sort(use.begin(), use.end(), std::greater<int>());
+        int destroyed = 0;
+        for (int idx : use) {
+            if (idx < 0 || idx >= packHand.size()) continue;
+            packHand.removeAt(idx);
+            ++destroyed;
+        }
+        if (destroyed > 0) state.addGold(20);
+        break;
+    }
+    }
+    return true;
+}
+
+bool GameState::applyPackChoice(const PackContent &pack, int chosenIdx,
+                                const QVector<int> &selectedPackHandIdx,
+                                QVector<CardData> &packHand)
+{
+    if (chosenIdx < 0) return false;
 
     switch (pack.kind) {
     case PackKind::Standard:
-        if (chosenIdx >= pack.standardCards.size()) return;
+        if (chosenIdx >= pack.standardCards.size()) return false;
         mDeck.addCard(pack.standardCards[chosenIdx]);
-        break;
+        return true;
+
     case PackKind::Arcana:
     case PackKind::Celestial:
-        if (chosenIdx >= pack.consumables.size()) return;
-        if (!canAddConsumable()) return;
-        mConsumables.append(createConsumable(pack.consumables[chosenIdx]));
-        emit consumablesChanged();
-        break;
+    case PackKind::Spectral:
+        if (chosenIdx >= pack.consumables.size()) return false;
+        return applyConsumableTypeToPackHand(*this, pack.consumables[chosenIdx],
+                                             selectedPackHandIdx, packHand);
+
     case PackKind::Buffoon:
-        if (chosenIdx >= pack.jokers.size()) return;
-        if (!canAddJoker()) return;
+        if (chosenIdx >= pack.jokers.size()) return false;
+        if (!canAddJoker()) return false;
         mJokers.append(createJoker(pack.jokers[chosenIdx]));
         emit jokersChanged();
-        break;
+        return true;
     }
+    return false;
+}
+
+bool GameState::useConsumableOnPackHand(int consumableIdx,
+                                        const QVector<int> &selectedPackHandIdx,
+                                        QVector<CardData> &packHand)
+{
+    if (consumableIdx < 0 || consumableIdx >= mConsumables.size()) return false;
+    Consumable c = mConsumables[consumableIdx];
+    QVector<int> sel = normalizedSelection(selectedPackHandIdx, packHand.size(), c.maxSelection);
+    if (sel.size() < c.needsSelection) return false;
+    if (c.maxSelection > 0 && sel.size() > c.maxSelection) return false;
+
+    bool ok = applyConsumableTypeToPackHand(*this, c.type, sel, packHand);
+    if (!ok) return false;
+
+    mConsumables.removeAt(consumableIdx);
+    emit consumablesChanged();
+    return true;
 }
 
 void GameState::startGame()
@@ -634,8 +945,15 @@ void GameState::startGame()
     mScore = 0;
     mJokers.clear();
     mShop = Shop();
+    syncShopJokerRules();
     mHandLevels.clear();
     mConsumables.clear();
+    mRedeemedVouchers.clear();
+    mExtraConsumableSlots = 0;
+    mExtraHandsPerRound = 0;
+    mExtraDiscardsPerRound = 0;
+    mExtraHandSize = 0;
+    mInterestCap = Constants::INTEREST_MAX;
     mBlindIdx = 0;
     mPendingBossEffect = BossEffect::None;
     mSortMode = HandSortMode::ByRank;
@@ -652,8 +970,9 @@ void GameState::startGame()
 
 void GameState::enterBlindSelect() {
     mPhase = GamePhase::BlindSelect;
+    mBossEffect = BossEffect::None;  // 已激活 Boss 效果只存在于 Boss 对局内，不能泄漏到下个小盲注。
     mBlindType = static_cast<BlindType>(mBlindIdx);
-    if (mPendingBossEffect == BossEffect::None)   // ← 去掉 mBlindIdx == 2 条件
+    if (mPendingBossEffect == BossEffect::None)
         mPendingBossEffect = randomBossEffect();
     mTargetScore = calcTargetScore();
     emit blindSelectEntered();
@@ -669,8 +988,8 @@ void GameState::startBlind(BlindType type)
 {
     mBlindType = type;
     mScore = 0;
-    mHandsLeft = Constants::INITIAL_HANDS;
-    mDiscardLeft = Constants::INITIAL_DISCARDS;
+    mHandsLeft = qMax(1, Constants::INITIAL_HANDS + mExtraHandsPerRound);
+    mDiscardLeft = qMax(0, Constants::INITIAL_DISCARDS + mExtraDiscardsPerRound);
 
     if (type == BlindType::Boss) {
         mBossEffect = mPendingBossEffect;     // 用预先确定的
@@ -682,8 +1001,10 @@ void GameState::startBlind(BlindType type)
     mTargetScore = calcTargetScore();
     mPhase = GamePhase::Blind;
 
-    mDeck.reset();
+    // 原版每个盲注开始都会用当前完整牌组重新洗牌；上一盲注结束时手里没打出的牌也要回到牌组。
+    mDeck.returnCards(mHand);
     mHand.clear();
+    mDeck.reset();
     dealCards();
     applyBossDebuffs();
 
@@ -732,6 +1053,7 @@ void GameState::leaveShop()
 {
     if (mPhase != GamePhase::Shop) return;
     mShop.resetForNewBlind();
+    syncShopJokerRules();
     nextBlind();
 }
 

@@ -5,6 +5,8 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QFont>
+#include <QRect>
+#include <functional>
 
 class RoundEndOverlay : public QWidget
 {
@@ -14,6 +16,8 @@ public:
     void setData(int blindChipRow, int targetScore, int blindReward,
                  int handsLeft, int handBonus,
                  int interest);
+    void showFromBottom(const QRect &finalGeometry);
+    void hideToBottom(std::function<void()> after = nullptr);
 signals:
     void nextClicked();
 private:

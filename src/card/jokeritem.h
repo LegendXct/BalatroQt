@@ -25,6 +25,7 @@ public:
 
 signals:
     void clicked(JokerItem *self);
+    void pressed(JokerItem *self, Qt::MouseButton button);
 
 protected:
     void mousePressEvent(QGraphicsSceneMouseEvent *e) override;

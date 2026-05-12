@@ -34,6 +34,14 @@ QPoint ConsumableItem::spritePos(ConsumableType t) {
     case ConsumableType::Planet_PlanetX:   return {9, 2};
     case ConsumableType::Planet_Ceres:     return {8, 2};
     case ConsumableType::Planet_Eris:      return {3, 2};
+
+    // 幻灵（原版 Tarots.png 第 4、5 行）
+    case ConsumableType::Spectral_Talisman: return {3, 4};
+    case ConsumableType::Spectral_Aura:     return {4, 4};
+    case ConsumableType::Spectral_Immolate: return {9, 4};
+    case ConsumableType::Spectral_DejaVu:   return {1, 5};
+    case ConsumableType::Spectral_Trance:   return {3, 5};
+    case ConsumableType::Spectral_Medium:   return {4, 5};
     }
     return {0, 0};
 }

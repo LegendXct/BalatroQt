@@ -72,6 +72,9 @@ public:
     void sortHandBySuit();
     HandSortMode sortMode() const { return mSortMode; }
     int deckRemaining() const {return mDeck.remaining();}
+    int deckTotal() const;
+    QVector<CardData> remainingDeckCards() const;
+    QVector<CardData> fullDeckCards() const;
     BlindState blindState(int idx) const { return mBlindStates[idx]; }
     void skipCurrentBlind();
 
@@ -80,6 +83,8 @@ public:
     void rerollShop();
     void leaveShop();                // 离开商店 → 进入下一盲注
     bool canAddJoker() const { return mJokers.size() < jokerSlots(); }
+    bool buyVoucherOffer(int offerIdx);
+    bool hasVoucher(VoucherType t) const;
 
     const QHash<HandType, HandLevel> &handLevels() const { return mHandLevels; }
     void levelUpHand(HandType t, int times = 1);   // 行星牌用
@@ -92,15 +97,27 @@ public:
 
     // 消耗品接口
     const QVector<Consumable> &consumables() const { return mConsumables; }
-    bool canAddConsumable() const { return mConsumables.size() < Constants::MAX_CONSUMABLE_SLOTS; }
+    int consumableSlots() const;
+    int handSize() const;
+    bool canAddConsumable() const { return mConsumables.size() < consumableSlots(); }
     bool addConsumable(ConsumableType t);
     bool useConsumable(int idx, const QVector<int> &selectedHandIdx);
     bool sellConsumable(int idx);
+    bool sellJoker(int idx);
+    bool moveJoker(int from, int to);
+    void collectRoundCardsToDeck();
 
     // 商店买入：扩展为支持 3 种 offer
     bool buyShopOffer(int offerIdx);     // ← 替代旧的 buyJoker
     bool buyPack(int offerIdx, PackContent &outContent);
-    void applyPackChoice(const PackContent &pack, int chosenIdx);
+    QVector<CardData> drawPackHand();
+    void returnPackHand(const QVector<CardData> &packHand);
+    bool applyPackChoice(const PackContent &pack, int chosenIdx,
+                         const QVector<int> &selectedPackHandIdx,
+                         QVector<CardData> &packHand);
+    bool useConsumableOnPackHand(int consumableIdx,
+                                 const QVector<int> &selectedPackHandIdx,
+                                 QVector<CardData> &packHand);
 
     int blindIdx() const { return mBlindIdx; }       // 当前 ante 内打到第几个 (0/1/2)
     BossEffect pendingBossEffect() const { return mPendingBossEffect; }
@@ -164,6 +181,18 @@ private:
     bool mFirstShop = true;
 
     QVector<Consumable> mConsumables;
+    QVector<VoucherType> mRedeemedVouchers;
+
+    int mExtraConsumableSlots = 0;
+    int mExtraHandsPerRound = 0;
+    int mExtraDiscardsPerRound = 0;
+    int mExtraHandSize = 0;
+    int mInterestCap = Constants::INTEREST_MAX;
+
+    void applyVoucher(VoucherType t);
+    QVector<JokerType> ownedJokerTypes() const;
+    bool hasJokerDuplicateBypass() const;
+    void syncShopJokerRules();
     void scoreCard(const CardData &card, HandResult &result, int playedIdx);
     static ConsumableType planetTypeFor(HandType t);
 };

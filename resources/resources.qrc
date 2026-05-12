@@ -12,6 +12,7 @@
         <file>images/icons.png</file>
         <file>images/balatro.png</file>
         <file>images/ShopSignAnimation.png</file>
+        <file>images/Vouchers.png</file>
     </qresource>
     <qresource prefix="/fonts">
         <file>fonts/m6x11plus.ttf</file>

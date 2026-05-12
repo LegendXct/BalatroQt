@@ -6,8 +6,17 @@ Deck::Deck() {
     buildDeck();
 }
 
+CardData Deck::clearTransientFlags(CardData card)
+{
+    // Boss 盲注的 debuff 只是“本盲注临时状态”，不能存回牌组。
+    card.isDebuffed = false;
+    card.faceUp = true;
+    return card;
+}
+
 void Deck::buildDeck() {
     mDrawPile.clear();
+    mDiscardPile.clear();
     const Suit suits[] = {
         Suit::Spades, Suit::Hearts,
         Suit::Diamonds, Suit::Clubs
@@ -24,8 +33,9 @@ void Deck::buildDeck() {
 }
 
 void Deck::reset() {
-    // 合并弃牌堆到摸牌堆并洗牌
-    mDrawPile.append(mDiscardPile);
+    // 原版每个盲注开始会重新洗当前完整牌组；这里把弃牌堆合回摸牌堆。
+    for (const CardData &c : mDiscardPile)
+        mDrawPile.append(clearTransientFlags(c));
     mDiscardPile.clear();
     shuffle();
 }
@@ -39,14 +49,14 @@ void Deck::shuffle() {
 }
 
 void Deck::discard(const CardData& card) {
-    mDiscardPile.append(card);
+    mDiscardPile.append(clearTransientFlags(card));
 }
 
 CardData Deck::draw() {
     if (isEmpty()) {
         throw std::out_of_range("Deck is empty");
     }
-    return mDrawPile.takeFirst();
+    return clearTransientFlags(mDrawPile.takeFirst());
 }
 
 bool Deck::isEmpty() const {
@@ -57,7 +67,26 @@ int Deck::remaining() const {
     return mDrawPile.size();
 }
 
+int Deck::totalKnown() const {
+    return mDrawPile.size() + mDiscardPile.size();
+}
+
 void Deck::addCard(const CardData &card) {
-    mDrawPile.append(card);
+    mDrawPile.append(clearTransientFlags(card));
     shuffle();
+}
+
+void Deck::returnCards(const QVector<CardData> &cards)
+{
+    for (const CardData &card : cards)
+        mDrawPile.append(clearTransientFlags(card));
+}
+
+QVector<CardData> Deck::allKnownCards() const
+{
+    QVector<CardData> out = mDrawPile;
+    for (CardData &c : out) c = clearTransientFlags(c);
+    for (const CardData &c : mDiscardPile)
+        out.append(clearTransientFlags(c));
+    return out;
 }
