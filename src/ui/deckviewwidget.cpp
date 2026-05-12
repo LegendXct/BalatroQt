@@ -174,11 +174,6 @@ static QString suitTitle(Suit s)
     return "";
 }
 
-static bool isStoneCardForView(const CardData &c)
-{
-    return c.enhancement == Enhancement::Stone;
-}
-
 void DeckViewWidget::refreshGrid()
 {
     while (auto *item = mGrid->takeAt(0)) {
@@ -198,6 +193,11 @@ void DeckViewWidget::refreshGrid()
     }
 
     auto rankDesc = [](const CardData &a, const CardData &b) {
+        // 原版牌组查看里石头牌仍保留原来的 suit/rank 归属，排在该花色行最后，
+        // 不是单独开一行。
+        bool as = a.enhancement == Enhancement::Stone;
+        bool bs = b.enhancement == Enhancement::Stone;
+        if (as != bs) return !as;
         if (a.rank != b.rank) return static_cast<int>(a.rank) > static_cast<int>(b.rank);
         return static_cast<int>(a.suit) < static_cast<int>(b.suit);
     };
@@ -205,7 +205,7 @@ void DeckViewWidget::refreshGrid()
     const Suit suits[4] = { Suit::Spades, Suit::Hearts, Suit::Clubs, Suit::Diamonds };
     int gridRow = 0;
 
-    auto addRow = [&](const QString &title, QVector<CardData> rowCards, bool stoneRow) {
+    auto addRow = [&](const QString &title, QVector<CardData> rowCards) {
         std::sort(rowCards.begin(), rowCards.end(), rankDesc);
         if (rowCards.isEmpty()) return;
 
@@ -217,8 +217,7 @@ void DeckViewWidget::refreshGrid()
         QFont tf = mCNFont; tf.setPixelSize(16); tf.setBold(true);
         titleLbl->setFont(tf);
         titleLbl->setAlignment(Qt::AlignCenter);
-        titleLbl->setStyleSheet(stoneRow ? "color:#c7c7c7; background:transparent;"
-                                         : "color:#f3b958; background:transparent;");
+        titleLbl->setStyleSheet("color:#f3b958; background:transparent;");
         titleLbl->setGeometry(10, 12, 84, 28);
 
         auto *countLbl = new QLabel(QString::number(rowCards.size()), row);
@@ -252,15 +251,10 @@ void DeckViewWidget::refreshGrid()
     for (Suit s : suits) {
         QVector<CardData> rowCards;
         for (const CardData &c : cards) {
-            if (!isStoneCardForView(c) && c.suit == s) rowCards.append(c);
+            if (c.suit == s) rowCards.append(c);
         }
-        addRow(suitTitle(s), rowCards, false);
+        addRow(suitTitle(s), rowCards);
     }
-
-    QVector<CardData> stones;
-    for (const CardData &c : cards)
-        if (isStoneCardForView(c)) stones.append(c);
-    addRow("石头牌", stones, true);
 }
 
 QString DeckViewWidget::cardExtraText(const CardData &c) const
@@ -361,6 +355,13 @@ QPixmap DeckViewWidget::renderCard(const CardData &c, const QSize &size) const
         p.setPen(QPen(QColor(180, 100, 255, 200), 4));
         p.drawRoundedRect(2, 2, W-4, H-4, 8, 8); break;
     default: break;
+    }
+
+    if (c.isDebuffed) {
+        p.fillRect(0, 0, W, H, QColor(0, 0, 0, 130));
+        p.setPen(QPen(QColor(255, 80, 80), 5));
+        p.drawLine(10, 10, W - 10, H - 10);
+        p.drawLine(W - 10, 10, 10, H - 10);
     }
 
     return pix.scaled(size, Qt::KeepAspectRatio, Qt::SmoothTransformation);

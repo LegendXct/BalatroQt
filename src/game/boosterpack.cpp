@@ -13,7 +13,7 @@ QString packDisplayName(PackKind k, PackSize s) {
 
     switch (k) {
     case PackKind::Standard:  return prefix + "标准包";
-    case PackKind::Arcana:    return prefix + "奥秘包";
+    case PackKind::Arcana:    return prefix + "塔罗包";
     case PackKind::Celestial: return prefix + "天体包";
     case PackKind::Buffoon:   return prefix + "小丑包";
     case PackKind::Spectral:  return prefix + "幻灵包";
@@ -126,6 +126,21 @@ static QVector<JokerType> allBuffoonJokers() {
         JokerType::Fibonacci,       JokerType::EvenSteven,
         JokerType::OddTodd,         JokerType::Scholar,
         JokerType::Bull,            JokerType::Bootstraps,
+        JokerType::AbstractJoker,   JokerType::Supernova,
+        JokerType::GrosMichel,      JokerType::Cavendish,
+        JokerType::IceCream,        JokerType::Stuntman,
+        JokerType::TheDuo,          JokerType::TheTrio,
+        JokerType::TheFamily,       JokerType::TheOrder,
+        JokerType::TheTribe,        JokerType::Blackboard,
+        JokerType::ScaryFace,       JokerType::SmileyFace,
+        JokerType::WalkieTalkie,    JokerType::Arrowhead,
+        JokerType::OnyxAgate,       JokerType::RoughGem,
+        JokerType::Bloodstone,      JokerType::ShootTheMoon,
+        JokerType::Baron,           JokerType::FlowerPot,
+        JokerType::Acrobat,         JokerType::Swashbuckler,
+        JokerType::Ramen,           JokerType::DriversLicense,
+        JokerType::Blueprint,       JokerType::Brainstorm,
+        JokerType::DNA,             JokerType::Mime,
     };
 }
 
@@ -159,7 +174,8 @@ static ConsumableType randomUniqueTarot(QVector<ConsumableType> &already)
     QVector<ConsumableType> pool = {
         ConsumableType::Tarot_Empress, ConsumableType::Tarot_Hierophant,
         ConsumableType::Tarot_Chariot, ConsumableType::Tarot_Lovers,
-        ConsumableType::Tarot_Hermit,  ConsumableType::Tarot_Tower,
+        ConsumableType::Tarot_Hermit,  ConsumableType::Tarot_HangedMan,
+        ConsumableType::Tarot_Tower,
     };
     return randomUniqueFromPool(pool, already);
 }
@@ -180,11 +196,36 @@ static ConsumableType randomUniquePlanet(QVector<ConsumableType> &already)
 static ConsumableType randomUniqueSpectral(QVector<ConsumableType> &already)
 {
     QVector<ConsumableType> pool = {
-        ConsumableType::Spectral_Talisman, ConsumableType::Spectral_Aura,
-        ConsumableType::Spectral_Immolate, ConsumableType::Spectral_DejaVu,
-        ConsumableType::Spectral_Trance,   ConsumableType::Spectral_Medium,
+        ConsumableType::Spectral_Familiar, ConsumableType::Spectral_Grim,
+        ConsumableType::Spectral_Incantation, ConsumableType::Spectral_Talisman,
+        ConsumableType::Spectral_Aura, ConsumableType::Spectral_Wraith,
+        ConsumableType::Spectral_Sigil, ConsumableType::Spectral_Ouija,
+        ConsumableType::Spectral_Ectoplasm, ConsumableType::Spectral_Immolate,
+        ConsumableType::Spectral_Ankh, ConsumableType::Spectral_DejaVu,
+        ConsumableType::Spectral_Hex, ConsumableType::Spectral_Trance,
+        ConsumableType::Spectral_Medium, ConsumableType::Spectral_Cryptid,
     };
     return randomUniqueFromPool(pool, already);
+}
+
+static ConsumableType randomPackConsumableWithSpecials(PackKind kind, QVector<ConsumableType> &already, bool omenGlobe)
+{
+    auto *rng = QRandomGenerator::global();
+    // 原版 The Soul / Black Hole 是 0.3%；为了测试体验这里临时改成 20%。
+    // Soul: 塔罗包和幻灵包；Black Hole: 天体包和幻灵包。
+    if ((kind == PackKind::Arcana || kind == PackKind::Spectral) && !already.contains(ConsumableType::Spectral_Soul)) {
+        if (rng->bounded(100) < 20) { already.append(ConsumableType::Spectral_Soul); return ConsumableType::Spectral_Soul; }
+    }
+    if ((kind == PackKind::Celestial || kind == PackKind::Spectral) && !already.contains(ConsumableType::Spectral_BlackHole)) {
+        if (rng->bounded(100) < 20) { already.append(ConsumableType::Spectral_BlackHole); return ConsumableType::Spectral_BlackHole; }
+    }
+
+    if (kind == PackKind::Arcana) {
+        if (omenGlobe && rng->bounded(100) < 20) return randomUniqueSpectral(already);
+        return randomUniqueTarot(already);
+    }
+    if (kind == PackKind::Celestial) return randomUniquePlanet(already);
+    return randomUniqueSpectral(already);
 }
 
 PackContent generatePackContent(PackKind k, PackSize s, bool omenGlobe,
@@ -209,20 +250,10 @@ PackContent generatePackContent(PackKind k, PackSize s, bool omenGlobe,
             pc.standardCards.append(randomStandardCard(pc.standardCards));
         break;
     case PackKind::Arcana:
-        for (int i = 0; i < pc.optionsToShow; ++i) {
-            if (omenGlobe && QRandomGenerator::global()->bounded(100) < 20)
-                pc.consumables.append(randomUniqueSpectral(usedConsumables));
-            else
-                pc.consumables.append(randomUniqueTarot(usedConsumables));
-        }
-        break;
     case PackKind::Celestial:
-        for (int i = 0; i < pc.optionsToShow; ++i)
-            pc.consumables.append(randomUniquePlanet(usedConsumables));
-        break;
     case PackKind::Spectral:
         for (int i = 0; i < pc.optionsToShow; ++i)
-            pc.consumables.append(randomUniqueSpectral(usedConsumables));
+            pc.consumables.append(randomPackConsumableWithSpecials(k, usedConsumables, omenGlobe));
         break;
     case PackKind::Buffoon:
         for (int i = 0; i < pc.optionsToShow; ++i) {

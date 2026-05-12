@@ -25,6 +25,13 @@ enum class JokerType {
     Banner, MysticSummit, Misprint, RaisedFist,                    // 杂项倍率
     Fibonacci, EvenSteven, OddTodd, Scholar,                       // 计分牌触发
     Bull, Bootstraps,                                              // 经济联动
+    AbstractJoker, Supernova, GrosMichel, Cavendish, IceCream, Stuntman,
+    TheDuo, TheTrio, TheFamily, TheOrder, TheTribe, Blackboard,
+    ScaryFace, SmileyFace, WalkieTalkie, Arrowhead, OnyxAgate,
+    RoughGem, Bloodstone, ShootTheMoon, Baron, FlowerPot, Acrobat,
+    Swashbuckler, Ramen, DriversLicense,
+    Blueprint, Brainstorm, DNA, Mime,
+    Caino, Triboulet, Yorick, Chicot, Perkeo,
 };
 
 // 触发上下文，打包所有触发时可访问的数据

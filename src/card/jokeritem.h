@@ -3,6 +3,7 @@
 
 #include <QGraphicsObject>
 #include <QPixmap>
+#include <QPointF>
 #include "joker.h"
 
 class JokerItem : public QGraphicsObject
@@ -26,15 +27,24 @@ public:
 signals:
     void clicked(JokerItem *self);
     void pressed(JokerItem *self, Qt::MouseButton button);
+    void dragReleased(JokerItem *self, QPointF scenePos);
+    void hoverChanged(JokerItem *self, bool hovered);
 
 protected:
     void mousePressEvent(QGraphicsSceneMouseEvent *e) override;
-    void hoverEnterEvent(QGraphicsSceneHoverEvent *) override { mHovered = true;  update(); }
-    void hoverLeaveEvent(QGraphicsSceneHoverEvent *) override { mHovered = false; update(); }
+    void mouseMoveEvent(QGraphicsSceneMouseEvent *e) override;
+    void mouseReleaseEvent(QGraphicsSceneMouseEvent *e) override;
+    void hoverEnterEvent(QGraphicsSceneHoverEvent *e) override;
+    void hoverLeaveEvent(QGraphicsSceneHoverEvent *e) override;
 
 private:
     Joker mJoker;
     bool mHovered = false;
+    bool mPressed = false;
+    bool mDragging = false;
+    QPointF mPressScenePos;
+    qreal mRestZ = 0;
+    void animateScale(qreal target, int durationMs = 120);
     static QPixmap *sSheet;
 };
 

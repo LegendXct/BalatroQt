@@ -43,8 +43,12 @@ public:
     void setBaseRotation(double deg) { mBaseRotation = deg; applyTransform(); }
 signals:
     void clicked(CardItem *card);
+    void dragReleased(CardItem *card, QPointF scenePos);
+    void hoverChanged(CardItem *card, bool hovered);
 protected:
     void mousePressEvent(QGraphicsSceneMouseEvent *event) override;
+    void mouseMoveEvent(QGraphicsSceneMouseEvent *event) override;
+    void mouseReleaseEvent(QGraphicsSceneMouseEvent *event) override;
     void hoverMoveEvent(QGraphicsSceneHoverEvent *event) override;
     void hoverEnterEvent(QGraphicsSceneHoverEvent  *event) override;
     void hoverLeaveEvent(QGraphicsSceneHoverEvent  *event) override;
@@ -52,6 +56,9 @@ private:
     CardData mData;
     bool mSelected = false;
     bool mHovered = false;
+    bool mPressed = false;
+    bool mDragging = false;
+    QPointF mPressScenePos;
 
     double mBaseRotation = 0.0;       // Z 轴旋转(扇形)
     double mHoverTiltX  = 0.0;        // 绕 X 轴倾斜(度,-25 ~ +25)

@@ -4,10 +4,82 @@
 #include <QPropertyAnimation>
 #include <QCursor>
 #include <QSequentialAnimationGroup>
+#include <QLineF>
+#include <QDateTime>
+#include <QTimer>
+#include <QPainterPath>
+#include <cmath>
 
 QPixmap *CardItem::sDeckSheet = nullptr;
 QPixmap *CardItem::sEnhSheet = nullptr;
 QPixmap *CardItem::sJokerSheet = nullptr;
+
+
+static void paintEditionShine(QPainter *p, const QRectF &r, Edition e)
+{
+    if (e == Edition::None) return;
+    const qreal phase = std::fmod(QDateTime::currentMSecsSinceEpoch() / 900.0, 1.0);
+
+    p->save();
+    p->setRenderHint(QPainter::Antialiasing, true);
+    QPainterPath clip;
+    clip.addRoundedRect(r.adjusted(2, 2, -2, -2), 9, 9);
+    p->setClipPath(clip);
+
+    if (e == Edition::Negative) {
+        p->setCompositionMode(QPainter::CompositionMode_Multiply);
+        p->fillRect(r, QColor(45, 0, 80, 155));
+        p->setCompositionMode(QPainter::CompositionMode_Screen);
+        QLinearGradient neg(r.topLeft(), r.bottomRight());
+        neg.setColorAt(0.0, QColor(40, 0, 80, 120));
+        neg.setColorAt(0.45, QColor(180, 95, 255, 105));
+        neg.setColorAt(1.0, QColor(15, 10, 25, 150));
+        p->fillRect(r, neg);
+    } else {
+        QLinearGradient g(r.topLeft(), r.bottomRight());
+        if (e == Edition::Foil) {
+            g.setColorAt(0.00, QColor(180, 235, 255, 70));
+            g.setColorAt(0.50, QColor(255, 255, 255, 112));
+            g.setColorAt(1.00, QColor(105, 170, 255, 58));
+        } else if (e == Edition::Holographic) {
+            g.setColorAt(0.00, QColor(255, 80, 185, 70));
+            g.setColorAt(0.50, QColor(115, 245, 255, 90));
+            g.setColorAt(1.00, QColor(255, 245, 120, 58));
+        } else if (e == Edition::Polychrome) {
+            g.setColorAt(0.00, QColor(255, 55, 70, 92));
+            g.setColorAt(0.25, QColor(255, 230, 70, 88));
+            g.setColorAt(0.50, QColor(70, 255, 150, 92));
+            g.setColorAt(0.75, QColor(80, 160, 255, 88));
+            g.setColorAt(1.00, QColor(210, 80, 255, 92));
+        }
+        p->setCompositionMode(QPainter::CompositionMode_Screen);
+        p->fillRect(r, g);
+    }
+
+    // 移动高光带：对应原版 shader 在卡面上持续流动的感觉。
+    p->setCompositionMode(QPainter::CompositionMode_Screen);
+    qreal stripeX = r.left() - r.width() * 0.65 + phase * r.width() * 2.2;
+    QLinearGradient stripe(stripeX, r.top(), stripeX + r.width() * 0.42, r.bottom());
+    stripe.setColorAt(0.00, QColor(255, 255, 255, 0));
+    stripe.setColorAt(0.48, QColor(255, 255, 255, e == Edition::Negative ? 70 : 120));
+    stripe.setColorAt(1.00, QColor(255, 255, 255, 0));
+    p->fillRect(r, stripe);
+
+    p->setClipping(false);
+    QColor border;
+    switch (e) {
+    case Edition::Foil:        border = QColor(170, 230, 255, 225); break;
+    case Edition::Holographic: border = QColor(255, 130, 215, 225); break;
+    case Edition::Polychrome:  border = QColor(235, 245, 120, 235); break;
+    case Edition::Negative:    border = QColor(190, 100, 255, 235); break;
+    default: break;
+    }
+    p->setCompositionMode(QPainter::CompositionMode_SourceOver);
+    p->setBrush(Qt::NoBrush);
+    p->setPen(QPen(border, e == Edition::Negative ? 5 : 4));
+    p->drawRoundedRect(r.adjusted(2, 2, -2, -2), 9, 9);
+    p->restore();
+}
 
 void CardItem::loadResources() {
     sDeckSheet = new QPixmap(":/textures/images/8BitDeck.png");
@@ -28,6 +100,12 @@ CardItem::CardItem(const CardData &data, QGraphicsItem *parent)
 {
     setAcceptHoverEvents(true);
     setCursor(Qt::PointingHandCursor);
+
+    auto *shineTimer = new QTimer(this);
+    connect(shineTimer, &QTimer::timeout, this, [this]() {
+        if (mData.edition != Edition::None) update();
+    });
+    shineTimer->start(80);
 }
 
 QRectF CardItem::boundingRect() const {
@@ -93,33 +171,7 @@ void CardItem::paintFront(QPainter *painter)
     QRect seal = sealSrcRect();
     if (!seal.isNull()) painter->drawPixmap(dst, *sEnhSheet, seal);
 
-    // ── edition 视觉 ──
-    painter->setBrush(Qt::NoBrush);
-    switch (mData.edition) {
-    case Edition::Foil:
-        painter->setPen(QPen(QColor(120, 200, 255, 200), 4));
-        painter->drawRoundedRect(2, 2, WIDTH - 4, HEIGHT - 4, 8, 8);
-        break;
-    case Edition::Holographic:
-        painter->setPen(QPen(QColor(255, 100, 200, 200), 4));
-        painter->drawRoundedRect(2, 2, WIDTH - 4, HEIGHT - 4, 8, 8);
-        break;
-    case Edition::Polychrome: {
-        QLinearGradient g(0, 0, WIDTH, HEIGHT);
-        g.setColorAt(0,    QColor(255, 100, 100, 220));
-        g.setColorAt(0.5,  QColor(100, 255, 100, 220));
-        g.setColorAt(1,    QColor(100, 100, 255, 220));
-        painter->setPen(QPen(QBrush(g), 4));
-        painter->drawRoundedRect(2, 2, WIDTH - 4, HEIGHT - 4, 8, 8);
-        break;
-    }
-    case Edition::Negative:
-        painter->fillRect(0, 0, WIDTH, HEIGHT, QColor(40, 0, 60, 120));
-        painter->setPen(QPen(QColor(180, 100, 255, 200), 4));
-        painter->drawRoundedRect(2, 2, WIDTH - 4, HEIGHT - 4, 8, 8);
-        break;
-    default: break;
-    }
+    paintEditionShine(painter, QRectF(0, 0, WIDTH, HEIGHT), mData.edition);
 
     if (mData.isDebuffed) {
         painter->fillRect(0, 0, WIDTH, HEIGHT, QColor(0, 0, 0, 130));
@@ -143,6 +195,7 @@ void CardItem::setCardData(const CardData &data) {
 
 void CardItem::setCardSelected(bool selected) {
     mSelected = selected;
+    update();
 }
 
 void CardItem::moveTo(const QPointF &target, int durationMs) {
@@ -177,10 +230,46 @@ void CardItem::flip() {
 
 void CardItem::mousePressEvent(QGraphicsSceneMouseEvent *event) {
     if (event->button() == Qt::LeftButton) {
-        emit clicked(this);
+        mPressed = true;
+        mDragging = false;
+        mPressScenePos = event->scenePos();
+        setZValue(100);
         event->accept();
     }
     else QGraphicsObject::mousePressEvent(event);
+}
+
+void CardItem::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
+{
+    if (!mPressed) {
+        QGraphicsObject::mouseMoveEvent(event);
+        return;
+    }
+    if (!mDragging && QLineF(event->scenePos(), mPressScenePos).length() > 8.0)
+        mDragging = true;
+
+    if (mDragging) {
+        setPos(event->scenePos() - QPointF(WIDTH / 2.0, HEIGHT / 2.0));
+        event->accept();
+        return;
+    }
+    QGraphicsObject::mouseMoveEvent(event);
+}
+
+void CardItem::mouseReleaseEvent(QGraphicsSceneMouseEvent *event)
+{
+    if (event->button() == Qt::LeftButton && mPressed) {
+        mPressed = false;
+        if (mDragging) {
+            mDragging = false;
+            emit dragReleased(this, event->scenePos());
+        } else {
+            emit clicked(this);
+        }
+        event->accept();
+        return;
+    }
+    QGraphicsObject::mouseReleaseEvent(event);
 }
 
 void CardItem::juiceUp(double scaleAmount, int durationMs)
@@ -248,6 +337,7 @@ void CardItem::applyTransform()
 
 void CardItem::hoverEnterEvent(QGraphicsSceneHoverEvent *event) {
     mHovered = true;
+    emit hoverChanged(this, true);
     QGraphicsObject::hoverEnterEvent(event);
 }
 
@@ -267,6 +357,7 @@ void CardItem::hoverMoveEvent(QGraphicsSceneHoverEvent *event) {
 
 void CardItem::hoverLeaveEvent(QGraphicsSceneHoverEvent *event) {
     mHovered = false;
+    emit hoverChanged(this, false);
     mHoverTiltX = 0;
     mHoverTiltY = 0;
     applyTransform();

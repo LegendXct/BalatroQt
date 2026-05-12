@@ -6,6 +6,7 @@
 #include <QGraphicsView>
 #include <QGraphicsTextItem>
 #include <QGraphicsRectItem>
+#include <QGraphicsProxyWidget>
 #include <QWidget>
 #include <QLabel>
 #include <QPushButton>
@@ -24,6 +25,7 @@
 #include <functional>
 #include "floatingscore.h"
 #include "deckviewwidget.h"
+#include "dynamicbackgrounditem.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -68,6 +70,7 @@ private:
     QPushButton *mBtnDiscard = nullptr; // 弃牌
     QGraphicsTextItem *mHandCountLabel  = nullptr;  // 8/8
     QGraphicsTextItem *mDeckLabel       = nullptr;  // 52/52
+    QGraphicsTextItem *mJokerCountLabel = nullptr;  // 0/5
 
     QVector<CardItem *> mHandCards; // 手牌
     QVector<CardItem *> mPlayedCards; // 出牌区
@@ -92,13 +95,16 @@ private:
     int mHandY = 0;
 
     bool mGameOverHandled = false;
+    bool mScoringInProgress = false;
 
     QVector<ConsumableItem*> mConsumableItems;
 
     PackOpenWidget *mPackOpenWidget = nullptr;
     DeckViewWidget *mDeckViewWidget = nullptr;
+    DynamicBackgroundItem *mDynamicBg = nullptr;
     PackContent     mPendingPack;        // 当前正在打开的包
     QVector<CardData> mPendingPackHand;  // 开包界面临时翻出的一手牌
+    bool mPackFromTag = false;
 
     QGraphicsTextItem *mConsCountLabel = nullptr;
     QGraphicsRectItem *mPlayBgRect     = nullptr;
@@ -131,8 +137,14 @@ private:
     void onPackChoiceMade(int chosenIdx, QVector<int> selectedPackHandIdx);
     void onInventoryConsumableUseRequested(int inventoryIdx, QVector<int> selectedPackHandIdx);
     void onPackFinished();
+    void openImmediateTagPack(PackKind kind);
+    void setBackgroundMoodForPhase();
+    void setBackgroundMoodForPack(PackKind kind);
     void onDeckClicked(CardItem *card);
     void onJokerPressed(JokerItem *item, Qt::MouseButton btn);
+    void onJokerDragReleased(JokerItem *item, QPointF scenePos);
+    void showJokerInfo(int idx, bool showSellButton = false);
+    void hideJokerInfo();
 
     void refreshConsumableSlots();
     void onConsumableClicked(ConsumableItem *item, Qt::MouseButton btn);
@@ -152,6 +164,9 @@ private:
     void layoutPlayedCards();
 
     void onCardClicked(CardItem *card);
+    void onHandCardDragReleased(CardItem *card, QPointF scenePos);
+    void showCardInfo(CardItem *card);
+    void hideCardInfo();
     void onPlayClicked();
     void onDiscardClicked();
     void onHandPlayed();
@@ -168,7 +183,21 @@ private:
 
     ShopWidget *mShopWidget = nullptr;
     QVector<JokerItem*> mJokerItems;     // 主场景上已持有的小丑视图
-    int mSelectedJokerIdx = -1;           // 点击两个小丑交换顺序；右键小丑出售
+    int mSelectedJokerIdx = -1;           // 当前打开操作面板的小丑
+    QGraphicsProxyWidget *mJokerInfoProxy = nullptr;
+    QWidget *mJokerInfoPanel = nullptr;
+    QLabel *mJokerInfoName = nullptr;
+    QLabel *mJokerInfoDesc = nullptr;
+    QLabel *mJokerInfoMeta = nullptr;
+    QPushButton *mJokerSellButton = nullptr;
+
+    QGraphicsProxyWidget *mGameOverProxy = nullptr;
+    QWidget *mGameOverPanel = nullptr;
+
+    QGraphicsProxyWidget *mCardInfoProxy = nullptr;
+    QWidget *mCardInfoPanel = nullptr;
+    QLabel *mCardInfoName = nullptr;
+    QLabel *mCardInfoDesc = nullptr;
 
     QWidget           *mPlayPage          = nullptr;     // 对局页（包 mLeftPanel + mView）
     BlindSelectWidget *mBlindSelectWidget = nullptr;
@@ -182,6 +211,7 @@ private:
 
     void onLeaveShopClicked();
     void refreshJokerSlots();
+    void refreshJokerSlotFrames();
     void refreshConsumableSlotFrames();
 
     bool eventFilter(QObject *obj, QEvent *ev) override;
@@ -193,6 +223,10 @@ private:
 
     void updateHandPreview();
     void playScoreEvent(const ScoreEvent &ev);
+    void animateScoreTotalThenFinalize(int gained, int delayAfterEvents);
+    void animatePlayedCardsToDiscardThen(std::function<void()> after);
+    void showGameOverOverlay(bool won);
+    void hideGameOverOverlay();
 
 protected:
     void resizeEvent(QResizeEvent *event) override;

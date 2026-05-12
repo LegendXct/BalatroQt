@@ -9,6 +9,7 @@
 #include <QResizeEvent>
 #include <QColor>
 #include <QStyle>
+#include <QEvent>
 
 // 把 #rrggbb 字符串解析成 RGB
 static QColor hexToColor(const QString &hex) { return QColor(hex); }
@@ -36,12 +37,22 @@ static QString darkenHex(const QString &c, double p)
 static QString bossColourRaw(BossEffect e)
 {
     switch (e) {
-    case BossEffect::TheHook:   return "#a84024";
-    case BossEffect::TheClub:   return "#b9cb92";
-    case BossEffect::TheWall:   return "#8a59a5";
-    case BossEffect::ThePlant:  return "#709284";
-    case BossEffect::TheNeedle: return "#5c6e31";
-    default:                    return "#a84024";   // 钩子作 fallback
+    case BossEffect::TheHook:    return "#a84024";
+    case BossEffect::TheClub:    return "#b9cb92";
+    case BossEffect::TheGoad:    return "#b95f92";
+    case BossEffect::TheHead:    return "#5f92b9";
+    case BossEffect::TheWindow:  return "#d6b04a";
+    case BossEffect::TheWall:    return "#8a59a5";
+    case BossEffect::ThePlant:   return "#709284";
+    case BossEffect::TheNeedle:  return "#5c6e31";
+    case BossEffect::TheWater:   return "#347c94";
+    case BossEffect::TheManacle: return "#6b5868";
+    case BossEffect::ThePsychic: return "#b06aa8";
+    case BossEffect::TheFlint:   return "#af5f3f";
+    case BossEffect::TheArm:     return "#8b6fb3";
+    case BossEffect::TheMouth:   return "#9a3636";
+    case BossEffect::TheEye:     return "#2d8a73";
+    default:                     return "#a84024";   // 钩子作 fallback
     }
 }
 
@@ -64,6 +75,18 @@ BlindSelectWidget::BlindSelectWidget(GameState *gs, const QFont &cnFont,
     setAttribute(Qt::WA_StyledBackground, true);
     setStyleSheet("background: rgba(0, 0, 0, 30);");
     buildUi();
+
+    mTagPopup = new QLabel(this);
+    mTagPopup->setAttribute(Qt::WA_StyledBackground, true);
+    mTagPopup->setWordWrap(true);
+    mTagPopup->setAlignment(Qt::AlignCenter);
+    QFont tf = mCNFont; tf.setPixelSize(15); tf.setBold(true);
+    mTagPopup->setFont(tf);
+    mTagPopup->setStyleSheet(
+        "color:white; background:rgba(31,37,42,235);"
+        "border:2px solid #fda200; border-radius:12px; padding:10px;"
+    );
+    mTagPopup->hide();
 }
 
 void BlindSelectWidget::buildUi()
@@ -268,6 +291,21 @@ void BlindSelectWidget::buildUi()
         p3->setStyleSheet("color:white; background:transparent; border:none;");
         bpvbl->addWidget(p3);
 
+        b.bossRerollBtn = new QPushButton("重掷 Boss $10", b.bossPromptBox);
+        QFont rbf = mCNFont; rbf.setPixelSize(13); rbf.setBold(true);
+        b.bossRerollBtn->setFont(rbf);
+        b.bossRerollBtn->setCursor(Qt::PointingHandCursor);
+        b.bossRerollBtn->setFixedHeight(32);
+        b.bossRerollBtn->setStyleSheet(
+            "QPushButton { background:#8a4fd3; color:white; border:none; border-radius:8px; padding:4px 8px; }"
+            "QPushButton:hover { background:#9f63ee; }"
+            "QPushButton:disabled { background:#333; color:#777; }"
+        );
+        connect(b.bossRerollBtn, &QPushButton::clicked, this, [this]() {
+            if (mGS && mGS->rerollBoss()) refresh();
+        });
+        bpvbl->addWidget(b.bossRerollBtn);
+
         vbl->addWidget(b.bossPromptBox, 0, Qt::AlignHCenter);
 
         // ===== skipBox(透明灰圆角,横排:tag图标 + 按钮) =====
@@ -278,23 +316,21 @@ void BlindSelectWidget::buildUi()
         shbl->setSpacing(8);
         shbl->setAlignment(Qt::AlignCenter);
 
-        // 跳过 tag 图标(从 tags.png 切片,Skip Tag 在第 4 行第 1 列)
-        QLabel *skipTagIcon = new QLabel(b.skipBox);
-        {
-            QPixmap tagSheet(":/textures/images/tags.png");
-            if (!tagSheet.isNull()) {
-                // tag_skip 坐标 (col=0, row=3),单格 68×68
-                QPixmap pix = tagSheet.copy(0, 3 * 68, 68, 68);
-                skipTagIcon->setPixmap(pix.scaled(48, 48, Qt::KeepAspectRatio,
-                                                  Qt::SmoothTransformation));
-            }
-        }
-        skipTagIcon->setFixedSize(48, 48);
-        skipTagIcon->setStyleSheet("background:transparent; border:none;");
-        shbl->addWidget(skipTagIcon);
+        // 跳过奖励 tag 图标。原版每个 Small/Big blind 都会预先随机一个 Tag。
+        b.tagIcon = new QLabel(b.skipBox);
+        b.tagIcon->setFixedSize(48, 48);
+        b.tagIcon->setStyleSheet("background:transparent; border:none;");
+        b.tagIcon->setProperty("blindTagIdx", i);
+        b.tagIcon->installEventFilter(this);
+        shbl->addWidget(b.tagIcon);
 
-        b.skipBtn = new QPushButton("跳过盲注", b.skipBox);
-        b.skipBtn->setFixedSize(120, 48);
+        b.tagName = new QLabel("", b.skipBox);
+        b.tagName->hide(); // 名称不占用按钮行空间，改为悬停浮窗显示。
+
+        b.skipBtn = new QPushButton("跳过", b.skipBox);
+        b.skipBtn->setFixedSize(96, 48);
+        b.skipBtn->setProperty("blindTagIdx", i);
+        b.skipBtn->installEventFilter(this);
         QFont skf = mCNFont; skf.setPixelSize(16); skf.setBold(true);
         b.skipBtn->setFont(skf);
         b.skipBtn->setCursor(Qt::PointingHandCursor);
@@ -321,6 +357,45 @@ void BlindSelectWidget::buildUi()
     }
 }
 
+bool BlindSelectWidget::eventFilter(QObject *obj, QEvent *event)
+{
+    if (event->type() == QEvent::Enter) {
+        QWidget *w = qobject_cast<QWidget*>(obj);
+        if (w && w->property("blindTagIdx").isValid()) {
+            showTagPopup(w->property("blindTagIdx").toInt(), w);
+            return false;
+        }
+    } else if (event->type() == QEvent::Leave) {
+        QWidget *w = qobject_cast<QWidget*>(obj);
+        if (w && w->property("blindTagIdx").isValid()) {
+            hideTagPopup();
+            return false;
+        }
+    }
+    return QWidget::eventFilter(obj, event);
+}
+
+void BlindSelectWidget::showTagPopup(int idx, QWidget *anchor)
+{
+    if (!mTagPopup || idx < 0 || idx > 1) return;
+    TagData td = tagData(mGS->blindTag(idx));
+    mTagPopup->setText(QString("%1\n%2").arg(td.name, td.description));
+    mTagPopup->setFixedWidth(260);
+    mTagPopup->adjustSize();
+
+    QPoint globalAnchor = anchor->mapTo(this, QPoint(anchor->width() / 2, 0));
+    int x = qBound(12, globalAnchor.x() - mTagPopup->width() / 2, width() - mTagPopup->width() - 12);
+    int y = qMax(12, globalAnchor.y() - mTagPopup->height() - 10);
+    mTagPopup->move(x, y);
+    mTagPopup->raise();
+    mTagPopup->show();
+}
+
+void BlindSelectWidget::hideTagPopup()
+{
+    if (mTagPopup) mTagPopup->hide();
+}
+
 void BlindSelectWidget::resizeEvent(QResizeEvent *e)
 {
     QWidget::resizeEvent(e);
@@ -338,14 +413,7 @@ QPixmap BlindSelectWidget::chipPixmap(int blindIdx) const
     if (blindIdx == 0) row = 0;
     else if (blindIdx == 1) row = 1;
     else {
-        switch (mGS->pendingBossEffect()) {
-        case BossEffect::TheHook:   row = 7;  break;
-        case BossEffect::TheClub:   row = 4;  break;
-        case BossEffect::TheWall:   row = 9;  break;
-        case BossEffect::ThePlant:  row = 19; break;
-        case BossEffect::TheNeedle: row = 20; break;
-        default: row = 7; break;
-        }
+        row = bossChipRow(mGS->pendingBossEffect());
     }
     return sheet.copy(0, row * FH, FW, FH);
 }
@@ -435,6 +503,12 @@ void BlindSelectWidget::refresh()
         b.rewardSymLbl->setText(dollars + "+");
         b.bossDescLbl->setText(i == 2 ? descs[2] : "");
         b.bossDescLbl->setVisible(i == 2);
+        if (b.bossRerollBtn) {
+            bool canShow = (i == 2) && (mGS->hasVoucher(VoucherType::DirectorsCut) || mGS->hasVoucher(VoucherType::Retcon));
+            b.bossRerollBtn->setVisible(canShow);
+            b.bossRerollBtn->setEnabled(canShow && mGS->canRerollBoss());
+            b.bossRerollBtn->setText(mGS->hasVoucher(VoucherType::Retcon) ? "重掷 Boss $10" : "重掷 Boss $10");
+        }
 
         // ===== 状态按钮 =====
         QString text, btnColor, hoverColor;
@@ -458,8 +532,20 @@ void BlindSelectWidget::refresh()
                                        "QPushButton:disabled { background:%1; color:#bbb; }"
                                        ).arg(btnColor, hoverColor));
 
-        // 跳过按钮(只跳过 Current 时启用,其他状态禁用)
+        // 跳过按钮与 Tag 奖励(只跳过 Current 时启用,其他状态禁用)
         if (i < 2) {
+            TagData td = tagData(mGS->blindTag(i));
+            if (b.tagName) {
+                b.tagName->setText(td.name);
+                b.tagName->hide();
+            }
+            if (b.tagIcon) {
+                QPixmap tagSheet(":/textures/images/tags.png");
+                if (!tagSheet.isNull()) {
+                    QPixmap tp = tagSheet.copy(td.spritePos.x() * 68, td.spritePos.y() * 68, 68, 68);
+                    b.tagIcon->setPixmap(tp.scaled(48, 48, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+                }
+            }
             b.skipBtn->setEnabled(state == BlindState::Current);
         }
     }

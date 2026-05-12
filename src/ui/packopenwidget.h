@@ -8,6 +8,7 @@
 
 class QLabel;
 class QPushButton;
+class QTimer;
 
 class PackOpenWidget : public QWidget
 {
@@ -26,6 +27,7 @@ public:
 
     void setPackHand(const QVector<CardData> &packHand);
     void setInventoryConsumables(const QVector<Consumable> &inventoryConsumables);
+    void setFreeJokerSlots(int freeSlots);
     QVector<int> selectedHandIndices() const { return mSelectedHand; }
 
 signals:
@@ -53,6 +55,7 @@ private:
     QVector<int> mChosenOptions;
     QVector<int> mSelectedHand;
     bool mFinishing = false;
+    QTimer *mSoulAnimTimer = nullptr;
 
     QWidget *mPanel = nullptr;
     QWidget *mHandBox = nullptr;
@@ -91,6 +94,7 @@ private:
     void refreshOptionUi();
     void refreshInventoryUi();
     void finishAndClose();
+    void animateCardsIn();
 
     int optionCount() const;
     QPixmap renderOption(int i) const;

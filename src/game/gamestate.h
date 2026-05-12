@@ -4,6 +4,7 @@
 #include <QObject>
 #include <QVector>
 #include <QHash>
+#include <QSet>
 #include "deck.h"
 #include "handevaluator.h"
 #include "../card/carddata.h"
@@ -11,6 +12,7 @@
 #include "../utils/constants.h"
 #include "shop.h"
 #include "bossblind.h"
+#include "tag.h"
 #include "../card/consumable.h"
 
 struct HandLevel {
@@ -42,7 +44,8 @@ enum class GamePhase {
 
 enum class HandSortMode {
     ByRank,
-    BySuit
+    BySuit,
+    Manual
 };
 
 class GameState : public QObject
@@ -53,10 +56,12 @@ public:
     void startGame();
     void startBlind(BlindType type);
     void playCards(const QVector<int> &indices);
+    void finalizePlayedHand();
     void discardCards(const QVector<int> &indices);
     void nextBlind();
     const QVector<CardData> &hand() const {return mHand;}
     const QVector<Joker> &jokers() const {return mJokers;}
+    bool hasJokerType(JokerType t) const;
     int gold() const {return mGold;}
     int handsLeft() const {return mHandsLeft;}
     int discardLeft() const {return mDiscardLeft;}
@@ -77,12 +82,17 @@ public:
     QVector<CardData> fullDeckCards() const;
     BlindState blindState(int idx) const { return mBlindStates[idx]; }
     void skipCurrentBlind();
+    TagType blindTag(int idx) const;
+    TagType lastSkippedTag() const { return mLastSkippedTag; }
+    const QVector<TagType> &activeTags() const { return mActiveTags; }
 
     // 商店相关
     Shop &shop() { return mShop; }
     void rerollShop();
     void leaveShop();                // 离开商店 → 进入下一盲注
     bool canAddJoker() const { return mJokers.size() < jokerSlots(); }
+    // 负片小丑自己提供 +1 小丑槽。满槽时，普通小丑不能买，但负片小丑必须允许买入。
+    bool canAddJokerWithEdition(Edition edition) const;
     bool buyVoucherOffer(int offerIdx);
     bool hasVoucher(VoucherType t) const;
 
@@ -101,10 +111,12 @@ public:
     int handSize() const;
     bool canAddConsumable() const { return mConsumables.size() < consumableSlots(); }
     bool addConsumable(ConsumableType t);
+    bool addFoolCopyConsumable();
     bool useConsumable(int idx, const QVector<int> &selectedHandIdx);
     bool sellConsumable(int idx);
     bool sellJoker(int idx);
     bool moveJoker(int from, int to);
+    bool moveHandCard(int from, int to);
     void collectRoundCardsToDeck();
 
     // 商店买入：扩展为支持 3 种 offer
@@ -121,6 +133,19 @@ public:
 
     int blindIdx() const { return mBlindIdx; }       // 当前 ante 内打到第几个 (0/1/2)
     BossEffect pendingBossEffect() const { return mPendingBossEffect; }
+    bool canRerollBoss() const;
+    bool rerollBoss();
+    bool addRandomLegendaryJoker();
+    bool addRandomRareJoker();
+    bool duplicateRandomJokerAndDestroyOthers();
+    bool setRandomEditionlessJoker(Edition e, bool destroyOthers, bool reduceHandSize);
+    void addPermanentHandSizeBonus(int delta);
+    void immolateRandomHandCards(int destroyCount, int goldGain);
+    void notifyPlayingCardDestroyed(const CardData &card);
+    double cainoXMult() const { return mCainoXMult; }
+    double yorickXMult() const { return mYorickXMult; }
+    int yorickDiscardsRemaining() const { return mYorickDiscardsRemaining; }
+    void levelUpAllHands(int times = 1);
     void selectCurrentBlind();                       // 玩家从 BlindSelect 点"选择"
     bool justSkipped() const { return mJustSkipped; }
 
@@ -160,6 +185,12 @@ private:
 
     bool mJustSkipped = false;
 
+    bool mAwaitingScoreFinalize = false;
+    int mPendingHandScore = 0;
+    QVector<int> mPendingPlayedIndices;
+    QVector<bool> mPendingShattered;
+    void finishWinningRound();
+
     int mBlindIdx = 0;
     BossEffect mPendingBossEffect = BossEffect::None;
 
@@ -177,6 +208,7 @@ private:
     BossEffect mBossEffect = BossEffect::None;
     void applyBossDebuffs();   // 给手牌打 debuff 标记
     void applyBossPostPlay();  // 出牌后 The Hook 等
+    bool bossBlocksPlayedHand(const HandResult &result, int playedCount);
 
     bool mFirstShop = true;
 
@@ -188,8 +220,32 @@ private:
     int mExtraDiscardsPerRound = 0;
     int mExtraHandSize = 0;
     int mInterestCap = Constants::INTEREST_MAX;
+    int mExtraJokerSlots = 0;
+    int mOneRoundHandSizeBonus = 0;
+    int mPendingInvestmentBonus = 0;
+    bool mTagVoucherNextShop = false;
+    PackKind mTagFreePackKind = PackKind::Standard;
+    bool mHasTagFreePack = false;
+    int mBossRerollsUsedThisAnte = 0;
+    HandType mBossMouthOnlyHand = HandType::HighCard;
+    bool mBossMouthHasHand = false;
+    QSet<HandType> mBossEyePlayedHands;
+    TagType mBlindTags[2] = { TagType::Skip, TagType::Skip };
+    TagType mLastSkippedTag = TagType::Skip;
+    QVector<TagType> mActiveTags;
+
+    double mCainoXMult = 1.0;
+    double mYorickXMult = 1.0;
+    int mYorickDiscardsRemaining = 23;
+    bool mHasLastUsedConsumable = false;
+    ConsumableType mLastUsedConsumable = ConsumableType::Tarot_Fool;
+    void notifyDiscardedCardsForYorick(int count);
+    void triggerPerkeoLeavingShop();
 
     void applyVoucher(VoucherType t);
+    void prepareBlindTags();
+    void applySkippedTag(TagType t, int recursionDepth = 0);
+    void applyTagEffectsToShop();
     QVector<JokerType> ownedJokerTypes() const;
     bool hasJokerDuplicateBypass() const;
     void syncShopJokerRules();

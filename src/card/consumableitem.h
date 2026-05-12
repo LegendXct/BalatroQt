@@ -2,6 +2,7 @@
 #define CONSUMABLEITEM_H
 
 #include <QGraphicsObject>
+#include <QPixmap>
 #include "consumable.h"
 
 // consumableitem.h
@@ -14,6 +15,7 @@ public:
 
     static void loadResources();                            // ← 新增
     static QPoint spritePos(ConsumableType t);              // ← 新增
+    static QPixmap renderPixmap(ConsumableType type, bool negative = false); // 含灵魂白水晶/负片前景层
 
     explicit ConsumableItem(const Consumable &c, QGraphicsItem *parent = nullptr);
     QRectF boundingRect() const override { return {0, 0, WIDTH, HEIGHT}; }
