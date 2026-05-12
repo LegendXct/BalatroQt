@@ -72,6 +72,7 @@ qt_add_resources(BalatroQt "textures"
         resources/images/icons.png
         resources/images/balatro.png
         resources/images/ShopSignAnimation.png
+        resources/images/Vouchers.png
 )
 
 qt_add_resources(BalatroQt "fonts"
