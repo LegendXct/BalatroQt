@@ -79,7 +79,7 @@ private:
     RoundEndOverlay *mRoundEndOverlay = nullptr;
 
     // 布局常量
-    int mLeftW = 340;
+    int mLeftW = 390;
     int mWinW = 1920;
     int mWinH = 1080;
     int mSceneW = 1620;
@@ -142,6 +142,7 @@ private:
     void setBackgroundMoodForPack(PackKind kind);
     void onDeckClicked(CardItem *card);
     void onJokerPressed(JokerItem *item, Qt::MouseButton btn);
+    void onJokerDragMoved(JokerItem *item, QPointF scenePos);
     void onJokerDragReleased(JokerItem *item, QPointF scenePos);
     void showJokerInfo(int idx, bool showSellButton = false);
     void hideJokerInfo();
@@ -164,6 +165,7 @@ private:
     void layoutPlayedCards();
 
     void onCardClicked(CardItem *card);
+    void onHandCardDragMoved(CardItem *card, QPointF scenePos);
     void onHandCardDragReleased(CardItem *card, QPointF scenePos);
     void showCardInfo(CardItem *card);
     void hideCardInfo();
@@ -190,6 +192,16 @@ private:
     QLabel *mJokerInfoDesc = nullptr;
     QLabel *mJokerInfoMeta = nullptr;
     QPushButton *mJokerSellButton = nullptr;
+
+    // 消耗牌点击后的原版式小操作牌片（使用 / 售出）
+    int mSelectedConsumableIdx = -1;
+    QGraphicsProxyWidget *mConsumableActionProxy = nullptr;
+    QWidget *mConsumableActionPanel = nullptr;
+    QLabel *mConsumableActionPrice = nullptr;
+    QPushButton *mConsumableUseButton = nullptr;
+    QPushButton *mConsumableSellButton = nullptr;
+    void showConsumableAction(int idx);
+    void hideConsumableAction();
 
     QGraphicsProxyWidget *mGameOverProxy = nullptr;
     QWidget *mGameOverPanel = nullptr;

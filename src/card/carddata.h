@@ -2,6 +2,14 @@
 #define CARDDATA_H
 
 #include <QString>
+#include <atomic>
+
+
+inline int nextCardUid()
+{
+    static std::atomic<int> counter{1};
+    return counter.fetch_add(1, std::memory_order_relaxed);
+}
 
 // 花色
 enum class Suit {
@@ -57,6 +65,10 @@ public:
     Edition edition = Edition::None;
     Seal seal = Seal::None;
     bool isDebuffed = false;
+    int permanentBonusChips = 0; // Hiker/徒步者等给这张牌的永久筹码
+    int uid = nextCardUid();
+
+    void assignNewUid() { uid = nextCardUid(); }
 
     int chipValue() const {
         int r = static_cast<int>(rank);

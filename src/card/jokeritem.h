@@ -23,10 +23,12 @@ public:
 
     const Joker &joker() const { return mJoker; }
     void juiceUp(double scaleAmount = 1.15, int durationMs = 200);
+    void moveTo(const QPointF &target, int durationMs = 180);
 
 signals:
     void clicked(JokerItem *self);
     void pressed(JokerItem *self, Qt::MouseButton button);
+    void dragMoved(JokerItem *self, QPointF scenePos);
     void dragReleased(JokerItem *self, QPointF scenePos);
     void hoverChanged(JokerItem *self, bool hovered);
 

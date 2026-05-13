@@ -250,6 +250,7 @@ void CardItem::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
 
     if (mDragging) {
         setPos(event->scenePos() - QPointF(WIDTH / 2.0, HEIGHT / 2.0));
+        emit dragMoved(this, event->scenePos());
         event->accept();
         return;
     }

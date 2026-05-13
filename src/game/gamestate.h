@@ -149,6 +149,7 @@ public:
     double cainoXMult() const { return mCainoXMult; }
     double yorickXMult() const { return mYorickXMult; }
     int yorickDiscardsRemaining() const { return mYorickDiscardsRemaining; }
+    int jokerDynamicCounter(JokerType t) const;
     void levelUpAllHands(int times = 1);
     void selectCurrentBlind();                       // 玩家从 BlindSelect 点"选择"
     bool justSkipped() const { return mJustSkipped; }
@@ -231,6 +232,7 @@ private:
     bool mDNAUsedThisBlind = false;
     bool mDNAEligibleThisPlay = false;
     int mDNACopiesCreatedThisPlay = 0;
+    QVector<CardData> mPendingDNACopies;
     bool mTagVoucherNextShop = false;
     PackKind mTagFreePackKind = PackKind::Standard;
     bool mHasTagFreePack = false;
@@ -246,9 +248,11 @@ private:
     double mYorickXMult = 1.0;
     int mYorickDiscardsRemaining = 23;
     bool mHasLastUsedConsumable = false;
+    bool mGrosMichelExtinct = false;
     ConsumableType mLastUsedConsumable = ConsumableType::Tarot_Fool;
     void notifyDiscardedCardsForYorick(int count);
     void triggerPerkeoLeavingShop();
+    void processEndOfRoundJokerExtinctions();
 
     void applyVoucher(VoucherType t);
     void prepareBlindTags();

@@ -139,6 +139,11 @@ static QVector<JokerType> allBuffoonJokers() {
         JokerType::Baron,           JokerType::FlowerPot,
         JokerType::Acrobat,         JokerType::Swashbuckler,
         JokerType::Ramen,           JokerType::DriversLicense,
+        JokerType::Hiker,           JokerType::CardSharp,
+        JokerType::Hologram,        JokerType::MidasMask,
+        JokerType::Vampire,         JokerType::Constellation,
+        JokerType::Photograph,      JokerType::HangingChad,
+        JokerType::SockAndBuskin,
         JokerType::Blueprint,       JokerType::Brainstorm,
         JokerType::DNA,             JokerType::Mime,
     };

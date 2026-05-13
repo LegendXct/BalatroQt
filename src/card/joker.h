@@ -30,6 +30,7 @@ enum class JokerType {
     ScaryFace, SmileyFace, WalkieTalkie, Arrowhead, OnyxAgate,
     RoughGem, Bloodstone, ShootTheMoon, Baron, FlowerPot, Acrobat,
     Swashbuckler, Ramen, DriversLicense,
+    Hiker, CardSharp, Hologram, MidasMask, Vampire, Constellation, Photograph, HangingChad, SockAndBuskin,
     Blueprint, Brainstorm, DNA, Mime,
     Caino, Triboulet, Yorick, Chicot, Perkeo,
 };

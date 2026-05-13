@@ -18,6 +18,17 @@
 #include "shopsignwidget.h"
 #include <QParallelAnimationGroup>
 #include <QVariantAnimation>
+#include <QDialog>
+#include <QTabWidget>
+#include <QTextEdit>
+#include <QTableWidget>
+#include <QHeaderView>
+#include <QDialogButtonBox>
+#include <QScrollArea>
+#include <QGridLayout>
+#include <QFrame>
+#include <QAbstractItemView>
+#include <cmath>
 
 void MainWindow::loadFonts() {
     int pid = QFontDatabase::addApplicationFont(":/fonts/fonts/m6x11plus.ttf");
@@ -45,6 +56,58 @@ static QPushButton *makeBtn(const QString &text, const QString &bg, const QStrin
         "QPushButton:disabled { background: #333; color: #666; }"
     ).arg(bg, hover));
     return btn;
+}
+
+
+static QString formatScoreNumber(double num)
+{
+    // 对齐原版 functions/misc_functions.lua:number_format：
+    // 低于 1e11 使用千分位；达到 1e11 切换成 1.234e11 形式。
+    if (num >= 100000000000.0) {
+        int exp = int(std::floor(std::log10(num)));
+        double mantissa = num / std::pow(10.0, exp);
+        return QString::number(mantissa, 'f', 3) + "e" + QString::number(exp);
+    }
+    qint64 n = qRound64(num);
+    QString raw = QString::number(n);
+    QString out;
+    int count = 0;
+    for (int i = raw.size() - 1; i >= 0; --i) {
+        out.prepend(raw[i]);
+        ++count;
+        if (count == 3 && i > 0) {
+            out.prepend(',');
+            count = 0;
+        }
+    }
+    return out;
+}
+
+static QWidget *makeInfoCard(const QString &title, const QString &body, const QFont &cnFont, QWidget *parent = nullptr,
+                             const QString &accent = "#fe5f55")
+{
+    auto *box = new QWidget(parent);
+    box->setAttribute(Qt::WA_StyledBackground, true);
+    box->setStyleSheet(QString(
+        "background:rgba(42,57,60,235); border:2px solid %1; border-radius:12px;"
+    ).arg(accent));
+    auto *v = new QVBoxLayout(box);
+    v->setContentsMargins(12, 8, 12, 8);
+    v->setSpacing(4);
+    auto *t = new QLabel(title, box);
+    QFont tf = cnFont; tf.setPixelSize(17); tf.setBold(true);
+    t->setFont(tf);
+    t->setAlignment(Qt::AlignCenter);
+    t->setStyleSheet("color:white; background:transparent; border:none;");
+    v->addWidget(t);
+    auto *b = new QLabel(body, box);
+    QFont bf = cnFont; bf.setPixelSize(14); bf.setBold(true);
+    b->setFont(bf);
+    b->setAlignment(Qt::AlignCenter);
+    b->setWordWrap(true);
+    b->setStyleSheet("color:#e7f5f2; background:transparent; border:none;");
+    v->addWidget(b, 1);
+    return box;
 }
 
 
@@ -224,20 +287,23 @@ MainWindow::~MainWindow()
 
 void MainWindow::setupLeftPanel() {
     mLeftPanel = new QWidget;
+    mLeftPanel->setObjectName("LeftPanel");
     mLeftPanel->setFixedWidth(mLeftW);
     mLeftPanel->setAttribute(Qt::WA_StyledBackground, true);
     mLeftPanel->setStyleSheet(
-        "background: #2a3035;"                        // 比 #2c3439 偏中性灰
-        "border-radius: 12px;"
+        "QWidget#LeftPanel { background: rgba(31,39,42,238); border: none; border-radius: 0px; }"
+        "QWidget#LeftPanel QWidget { border: none; }"
+        "QWidget#LeftPanel QLabel { border: none; }"
+        "QWidget#LeftPanel QPushButton { border: none; }"
         );
 
     QVBoxLayout *layout = new QVBoxLayout(mLeftPanel);
-    layout->setContentsMargins(10, 10, 10, 10);
-    layout->setSpacing(6);
+    layout->setContentsMargins(12, 12, 12, 12);
+    layout->setSpacing(8);
 
     // ── 上下文区(固定高度 200px,3 态切换) ──
     mContextArea = new QStackedWidget(mLeftPanel);
-    mContextArea->setFixedHeight(160);
+    mContextArea->setFixedHeight(215);
     mContextArea->setStyleSheet("background:transparent;");
 
     // 页面 0: BlindSelect
@@ -268,7 +334,7 @@ void MainWindow::setupLeftPanel() {
     // 页面 1: Blind (对局阶段)
     mCtxBlind = new QWidget;
     mCtxBlind->setAttribute(Qt::WA_StyledBackground, true);
-    mCtxBlind->setStyleSheet("background:#374244; border-radius:8px;");
+    mCtxBlind->setStyleSheet("background:#374244; border:none; border-radius:8px;");
     {
         auto *hbl = new QHBoxLayout(mCtxBlind);
         hbl->setContentsMargins(10, 8, 10, 8);
@@ -344,9 +410,9 @@ void MainWindow::setupLeftPanel() {
 
     // ── 回合分数(横排:标题 + 芯片 + 数字) ──
     QWidget *scoreBox = new QWidget(mLeftPanel);
-    scoreBox->setFixedHeight(48);
+    scoreBox->setFixedHeight(66);
     scoreBox->setAttribute(Qt::WA_StyledBackground, true);
-    scoreBox->setStyleSheet("background:#374244; border-radius:8px;");
+    scoreBox->setStyleSheet("background:#374244; border:none; border-radius:8px;");
     auto *sbl = new QHBoxLayout(scoreBox);
     sbl->setContentsMargins(10, 6, 10, 6);
     sbl->setSpacing(6);
@@ -375,7 +441,7 @@ void MainWindow::setupLeftPanel() {
     sbl->addWidget(scoreChip);
 
     mLblScore = new QLabel("0", scoreBox);
-    QFont smf = mPixelFont; smf.setPixelSize(28);
+    QFont smf = mPixelFont; smf.setPixelSize(36);
     mLblScore->setFont(smf);
     mLblScore->setStyleSheet("color:white; background:transparent;");
     sbl->addWidget(mLblScore);
@@ -384,7 +450,7 @@ void MainWindow::setupLeftPanel() {
 
     // 牌型名行
     QWidget *handNameBox = new QWidget(mLeftPanel);
-    handNameBox->setFixedHeight(40);
+    handNameBox->setFixedHeight(54);
     auto *hnl = new QHBoxLayout(handNameBox);
     hnl->setContentsMargins(0, 0, 0, 0);
     hnl->setSpacing(6);
@@ -407,14 +473,14 @@ void MainWindow::setupLeftPanel() {
 
     // 筹码 × 倍率
     QWidget *chipsRow = new QWidget(mLeftPanel);
-    chipsRow->setFixedHeight(56);
+    chipsRow->setFixedHeight(74);
     QHBoxLayout *chipsLayout = new QHBoxLayout(chipsRow);
     chipsLayout->setContentsMargins(0, 0, 0, 0);
     chipsLayout->setSpacing(4);
 
     mLblChips = new QLabel("0", chipsRow);
     mLblChips->setAlignment(Qt::AlignCenter);
-    QFont cf = mPixelFont; cf.setPixelSize(30);
+    QFont cf = mPixelFont; cf.setPixelSize(38);
     mLblChips->setFont(cf);
     mLblChips->setStyleSheet(
         "background: #009dff; color: white;"
@@ -474,7 +540,6 @@ void MainWindow::setupLeftPanel() {
             }
             return QString("未知");
         };
-
         auto baseScore = [](HandType t) -> QPair<int,int> {
             switch (t) {
             case HandType::HighCard: return {Constants::BASE_HIGH_CARD_CHIPS, Constants::BASE_HIGH_CARD_MULT};
@@ -494,54 +559,238 @@ void MainWindow::setupLeftPanel() {
             return {0,0};
         };
 
-        QString text;
-        text += QString("当前盲注目标：%1\n当前分数：%2\n底注：%3/8\n剩余出牌：%4　剩余弃牌：%5\n\n")
-                    .arg(mGameState->targetScore())
-                    .arg(mGameState->score())
-                    .arg(mGameState->ante())
-                    .arg(mGameState->handsLeft())
-                    .arg(mGameState->discardLeft());
+        QDialog dlg(this);
+        dlg.setModal(true);
+        dlg.setWindowTitle("比赛信息");
+        dlg.resize(qMin(960, int(mWinW * 0.60)), qMin(690, int(mWinH * 0.68)));
+        dlg.setStyleSheet(
+            "QDialog { background:rgba(27,43,45,246); border:4px solid #dbe9e7; border-radius:18px; }"
+            "QLabel { color:white; background:transparent; border:none; }"
+            "QPushButton { font-weight:bold; border:none; }"
+        );
 
-        text += "牌型等级：\n";
+        auto *root = new QVBoxLayout(&dlg);
+        root->setContentsMargins(18, 12, 18, 12);
+        root->setSpacing(8);
+
+        QWidget *top = new QWidget(&dlg);
+        auto *topL = new QVBoxLayout(top);
+        topL->setContentsMargins(0,0,0,0);
+        topL->setSpacing(3);
+        QLabel *arrow = new QLabel("▼", top);
+        QFont af = mCNFont; af.setPixelSize(24); af.setBold(true);
+        arrow->setFont(af);
+        arrow->setAlignment(Qt::AlignCenter);
+        arrow->setStyleSheet("color:#ff5f55;");
+        topL->addWidget(arrow);
+        QWidget *tabRow = new QWidget(top);
+        auto *tabL = new QHBoxLayout(tabRow);
+        tabL->setContentsMargins(70,0,70,0);
+        tabL->setSpacing(12);
+        topL->addWidget(tabRow);
+        root->addWidget(top);
+
+        QStackedWidget *pages = new QStackedWidget(&dlg);
+        pages->setStyleSheet("background:transparent; border:none;");
+        root->addWidget(pages, 1);
+
+        auto makeTab = [&](const QString &txt, int pageIdx) {
+            auto *b = new QPushButton(txt, tabRow);
+            QFont f = mCNFont; f.setPixelSize(19); f.setBold(true);
+            b->setFont(f);
+            b->setFixedHeight(50);
+            b->setStyleSheet(
+                "QPushButton { background:#f04f47; color:white; border-radius:9px; padding:8px 24px; }"
+                "QPushButton:hover { background:#ff665e; }"
+                "QPushButton:pressed { background:#c63f38; }"
+            );
+            connect(b, &QPushButton::clicked, this, [pages, pageIdx, arrow, b]() {
+                pages->setCurrentIndex(pageIdx);
+                arrow->move(b->x() + b->width()/2 - arrow->width()/2, arrow->y());
+            });
+            tabL->addWidget(b, 1);
+            return b;
+        };
+
+        auto makeDarkPage = [&](QWidget *parent) {
+            auto *w = new QWidget(parent);
+            w->setAttribute(Qt::WA_StyledBackground, true);
+            w->setStyleSheet("background:rgba(31,48,50,230); border:3px solid #132023; border-radius:14px;");
+            return w;
+        };
+        auto makeHandRow = [&](QWidget *parent, const QString &level, const QString &name,
+                               const QString &chips, const QString &mult, const QString &played) {
+            QWidget *row = new QWidget(parent);
+            row->setFixedHeight(48);
+            row->setAttribute(Qt::WA_StyledBackground, true);
+            row->setStyleSheet("background:rgba(226,232,226,235); border:2px solid #bcd3cc; border-radius:11px;");
+            auto *h = new QHBoxLayout(row);
+            h->setContentsMargins(8,4,8,4);
+            h->setSpacing(8);
+            auto addPill = [&](const QString &txt, const QString &bg, int w) {
+                QLabel *l = new QLabel(txt, row);
+                QFont f = mCNFont; f.setPixelSize(16); f.setBold(true);
+                l->setFont(f); l->setAlignment(Qt::AlignCenter);
+                l->setFixedWidth(w);
+                l->setStyleSheet(QString("background:%1; color:white; border-radius:10px; padding:3px 8px;").arg(bg));
+                h->addWidget(l);
+                return l;
+            };
+            addPill(level, "#eef7f4", 92)->setStyleSheet("background:#eef7f4; color:#23584f; border-radius:10px; padding:3px 8px;");
+            QLabel *n = new QLabel(name, row);
+            QFont nf = mCNFont; nf.setPixelSize(17); nf.setBold(true);
+            n->setFont(nf); n->setAlignment(Qt::AlignCenter); n->setStyleSheet("color:white; background:transparent;");
+            h->addWidget(n, 1);
+            addPill(chips, "#009dff", 86);
+            QLabel *x = new QLabel("X", row);
+            QFont xf = mCNFont; xf.setPixelSize(18); xf.setBold(true); x->setFont(xf); x->setStyleSheet("color:#fe5f55; background:transparent;");
+            h->addWidget(x);
+            addPill(mult, "#fe5f55", 72);
+            QLabel *hash = new QLabel("#", row); hash->setFont(xf); hash->setStyleSheet("color:white; background:transparent;"); h->addWidget(hash);
+            addPill(played, "#3b4d50", 56);
+            return row;
+        };
+        auto makeInfoTile = [&](QWidget *parent, const QString &title, const QString &body, const QString &accent) {
+            QWidget *tile = new QWidget(parent);
+            tile->setAttribute(Qt::WA_StyledBackground, true);
+            tile->setStyleSheet(QString("background:rgba(14,23,25,215); border:3px solid %1; border-radius:13px;").arg(accent));
+            auto *v = new QVBoxLayout(tile); v->setContentsMargins(12,8,12,8); v->setSpacing(5);
+            QLabel *t = new QLabel(title, tile); QFont tf2=mCNFont; tf2.setPixelSize(19); tf2.setBold(true); t->setFont(tf2); t->setAlignment(Qt::AlignCenter); t->setStyleSheet(QString("color:%1;").arg(accent)); v->addWidget(t);
+            QLabel *b = new QLabel(body, tile); QFont bf=mCNFont; bf.setPixelSize(15); bf.setBold(true); b->setFont(bf); b->setAlignment(Qt::AlignCenter); b->setWordWrap(true); b->setStyleSheet("color:#f4fbfb;"); v->addWidget(b,1);
+            return tile;
+        };
+
+        // 牌型页：按原版一行一行显示，右侧是筹码 × 倍率与打出次数。
+        QWidget *handPage = makeDarkPage(pages);
+        auto *handV = new QVBoxLayout(handPage);
+        handV->setContentsMargins(78, 18, 78, 18);
+        handV->setSpacing(5);
         QVector<HandType> order = {
-            HandType::HighCard, HandType::Pair, HandType::TwoPair, HandType::ThreeOfAKind,
-            HandType::Straight, HandType::Flush, HandType::FullHouse, HandType::FourOfAKind,
-            HandType::StraightFlush, HandType::FiveOfAKind, HandType::FlushHouse, HandType::FlushFive
+            HandType::FlushFive, HandType::FiveOfAKind, HandType::FlushHouse, HandType::Flush,
+            HandType::Straight, HandType::ThreeOfAKind, HandType::TwoPair, HandType::Pair, HandType::HighCard
         };
         const auto &levels = mGameState->handLevels();
         for (HandType t : order) {
-            const HandLevel lv = levels.value(t);
-            text += QString("  等级%1　%2　%3×%4　#%5\n")
-                        .arg(lv.level).arg(handName(t))
-                        .arg(baseScore(t).first + lv.chipsBonus)
-                        .arg(baseScore(t).second + lv.multBonus)
-                        .arg(lv.played);
+            HandLevel lv = levels.value(t);
+            auto b = baseScore(t);
+            handV->addWidget(makeHandRow(handPage,
+                                         QString("等级%1").arg(lv.level),
+                                         handName(t),
+                                         formatScoreNumber(b.first + lv.chipsBonus),
+                                         formatScoreNumber(b.second + lv.multBonus),
+                                         QString::number(lv.played)));
         }
+        pages->addWidget(handPage);
 
-        text += "\n已兑换优惠券：";
+        // 盲注页：三列 Small/Big/Boss 样式。
+        QWidget *blindPage = makeDarkPage(pages);
+        auto *blindH = new QHBoxLayout(blindPage); blindH->setContentsMargins(50, 22, 50, 22); blindH->setSpacing(16);
+        BossInfo bi = mGameState->currentBossInfo();
+        BossInfo nextBi = bossInfo(mGameState->pendingBossEffect());
+        blindH->addWidget(makeInfoTile(blindPage, "小盲注", QString("至少得分\n%1\n奖励：$$$+").arg(formatScoreNumber(qMax(1, mGameState->targetScore()*2/3))), "#009dff"), 1);
+        blindH->addWidget(makeInfoTile(blindPage, "当前盲注", QString("至少得分\n%1\n奖励：$$$$+").arg(formatScoreNumber(mGameState->targetScore())), "#fda200"), 1);
+        blindH->addWidget(makeInfoTile(blindPage, nextBi.name.isEmpty()?bi.name:nextBi.name,
+                                       (nextBi.description.isEmpty()?bi.description:nextBi.description) + QString("\n\n至少得分\n%1\n奖励：$$$$$+").arg(formatScoreNumber(mGameState->targetScore()*4/3)), "#fe5f55"), 1);
+        pages->addWidget(blindPage);
+
+        // 优惠券页：空时显示原版式提示和票券图标；有券时显示图标网格。
+        QWidget *voucherPage = makeDarkPage(pages);
+        auto *voucherV = new QVBoxLayout(voucherPage); voucherV->setContentsMargins(70, 34, 70, 34); voucherV->setSpacing(18); voucherV->setAlignment(Qt::AlignCenter);
+        QLabel *voucherTitle = new QLabel("本赛局兑换的优惠券", voucherPage); QFont vtf=mCNFont; vtf.setPixelSize(25); vtf.setBold(true); voucherTitle->setFont(vtf); voucherTitle->setAlignment(Qt::AlignCenter); voucherV->addWidget(voucherTitle);
         if (mGameState->redeemedVouchers().isEmpty()) {
-            text += "无";
+            QLabel *empty = new QLabel("本赛局尚未兑换任何优惠券", voucherPage); QFont ef=mCNFont; ef.setPixelSize(22); ef.setBold(true); empty->setFont(ef); empty->setAlignment(Qt::AlignCenter); voucherV->addWidget(empty, 1);
         } else {
-            text += "\n";
-            for (VoucherType v : mGameState->redeemedVouchers())
-                text += "  · " + voucherData(v).name + "：" + voucherData(v).description + "\n";
+            QWidget *gridW = new QWidget(voucherPage); auto *grid = new QGridLayout(gridW); grid->setSpacing(12); grid->setContentsMargins(0,0,0,0);
+            int vi = 0;
+            QPixmap voucherSheet(":/textures/images/Vouchers.png");
+            for (VoucherType v : mGameState->redeemedVouchers()) {
+                const VoucherData vd = voucherData(v);
+                QWidget *card = new QWidget(gridW); card->setFixedSize(205, 92); card->setAttribute(Qt::WA_StyledBackground,true);
+                card->setStyleSheet("background:rgba(11,20,22,215); border:2px solid #51696d; border-radius:10px;");
+                auto *h = new QHBoxLayout(card); h->setContentsMargins(8,6,8,6); h->setSpacing(8);
+                QLabel *img = new QLabel(card); img->setFixedSize(54,72); img->setAlignment(Qt::AlignCenter);
+                if (!voucherSheet.isNull()) {
+                    QPoint c = vd.spritePos;
+                    QPixmap pm = voucherSheet.copy(c.x()*ConsumableItem::WIDTH, c.y()*ConsumableItem::HEIGHT, ConsumableItem::WIDTH, ConsumableItem::HEIGHT);
+                    img->setPixmap(pm.scaled(img->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+                }
+                h->addWidget(img);
+                QLabel *txt = new QLabel(vd.name + "\n" + vd.description, card); QFont txf=mCNFont; txf.setPixelSize(13); txf.setBold(true); txt->setFont(txf); txt->setWordWrap(true); txt->setStyleSheet("color:white;"); h->addWidget(txt,1);
+                grid->addWidget(card, vi/2, vi%2); ++vi;
+            }
+            voucherV->addWidget(gridW, 1, Qt::AlignCenter);
         }
+        pages->addWidget(voucherPage);
 
-        QMessageBox::information(this, "比赛信息", text);
+        // 赌注页：本阶段还未做白注/牌组限制，先按原版格式展示占位和当前数据。
+        QWidget *stakePage = makeDarkPage(pages);
+        auto *stakeV = new QVBoxLayout(stakePage); stakeV->setContentsMargins(110, 42, 110, 42); stakeV->setSpacing(14);
+        stakeV->addWidget(makeInfoTile(stakePage, "蓝注", "弃牌次数 -1", "#009dff"));
+        stakeV->addWidget(makeInfoTile(stakePage, "同样起效", "商店可能会出现永恒小丑牌\n底注提升时，过关需求分数的增速更快\n小盲注没有奖励金", "#4bc292"));
+        stakeV->addWidget(makeInfoTile(stakePage, "当前赌注", QString("底注 %1/8　金钱 $%2\n小丑 %3/%4　消耗牌 %5/%6\n牌组 %7/%8")
+                                             .arg(mGameState->ante()).arg(mGameState->gold())
+                                             .arg(mGameState->jokers().size()).arg(mGameState->jokerSlots())
+                                             .arg(mGameState->consumables().size()).arg(mGameState->consumableSlots())
+                                             .arg(mGameState->deckRemaining()).arg(mGameState->deckTotal()), "#fe5f55"));
+        pages->addWidget(stakePage);
+
+        QVector<QPushButton*> tabButtons;
+        tabButtons << makeTab("牌型", 0) << makeTab("盲注", 1) << makeTab("优惠券", 2) << makeTab("赌注", 3);
+        pages->setCurrentIndex(0);
+
+        auto *back = new QPushButton("返回", &dlg);
+        QFont bf = mCNFont; bf.setPixelSize(21); bf.setBold(true); back->setFont(bf);
+        back->setFixedHeight(46);
+        back->setStyleSheet("QPushButton { background:#fda200; color:white; border:none; border-radius:9px; } QPushButton:hover { background:#ffb730; }");
+        connect(back, &QPushButton::clicked, &dlg, &QDialog::accept);
+        root->addWidget(back);
+        dlg.exec();
     });
 
     QPushButton *btnOptions = makeBtn("选项", "#fda200", "#ffb730", mCNFont, btnCol, 70);
     btnOptions->setFixedWidth(76);
     btnVbl->addWidget(btnOptions);
     connect(btnOptions, &QPushButton::clicked, this, [this]() {
-        QMessageBox::information(this, "选项",
-            "操作：\n"
-            "  · 点数 / 花色：切换自动理牌方式，之后每次补牌都会自动按该方式排序\n"
-            "  · 拖动手牌：只调整当前顺序，不会永久关闭自动理牌\n"
-            "  · 点击小丑：展开说明与售出按钮\n"
-            "  · 右下角牌组：查看剩余牌组 / 完整牌组\n"
-            "  · Esc：关闭当前窗口\n\n"
-            "调试提示：当前版本负片小丑概率仍保持 20%，方便测试槽位和重叠 UI。");
+        QDialog dlg(this);
+        dlg.setWindowTitle("选项");
+        dlg.setModal(true);
+        dlg.resize(520, 560);
+        dlg.setStyleSheet(
+            "QDialog { background:rgba(36,51,54,245); border:3px solid #dce9e9; border-radius:18px; }"
+            "QPushButton { background:#fe5f55; color:white; border:none; border-radius:10px; padding:13px 24px; font-size:20px; font-weight:bold; }"
+            "QPushButton:hover { background:#ff7066; }"
+            "QPushButton#back { background:#fda200; }"
+            "QLabel { color:white; background:transparent; }"
+        );
+        auto *v = new QVBoxLayout(&dlg);
+        v->setContentsMargins(34, 30, 34, 30);
+        v->setSpacing(14);
+        QFont titleFont = mCNFont; titleFont.setPixelSize(25); titleFont.setBold(true);
+        auto *title = new QLabel("选项", &dlg);
+        title->setFont(titleFont);
+        title->setAlignment(Qt::AlignCenter);
+        v->addWidget(title);
+
+        QStringList items = {"设置", "开始新的一局", "主菜单", "统计数据", "收藏", "定制牌组"};
+        for (const QString &txt : items) {
+            auto *b = new QPushButton(txt, &dlg);
+            b->setFont(titleFont);
+            if (txt == "开始新的一局") {
+                connect(b, &QPushButton::clicked, this, [this, &dlg]() {
+                    dlg.accept();
+                    mGameState->startGame();
+                    refreshHand(); refreshJokerSlots(); refreshConsumableSlots(); refreshCounters(); refreshScore(); refreshGold();
+                });
+            } else {
+                b->setEnabled(false);
+            }
+            v->addWidget(b);
+        }
+        auto *back = new QPushButton("返回", &dlg);
+        back->setObjectName("back");
+        connect(back, &QPushButton::clicked, &dlg, &QDialog::accept);
+        v->addWidget(back);
+        dlg.exec();
     });
 
     brl->addWidget(btnCol);
@@ -554,9 +803,9 @@ void MainWindow::setupLeftPanel() {
 
     // 出牌 / 弃牌 (横排)
     QWidget *handsRow = new QWidget(rightCol);
-    handsRow->setFixedHeight(56);
+    handsRow->setFixedHeight(66);
     handsRow->setAttribute(Qt::WA_StyledBackground, true);
-    handsRow->setStyleSheet("background:#374244; border-radius:8px;");
+    handsRow->setStyleSheet("background:#374244; border:none; border-radius:8px;");
     auto *hrl = new QHBoxLayout(handsRow);
     hrl->setContentsMargins(8, 4, 8, 4);
     hrl->setSpacing(4);
@@ -587,9 +836,9 @@ void MainWindow::setupLeftPanel() {
 
     // 金币(长横盒)
     QWidget *goldRow = new QWidget(rightCol);
-    goldRow->setFixedHeight(36);
+    goldRow->setFixedHeight(48);
     goldRow->setAttribute(Qt::WA_StyledBackground, true);
-    goldRow->setStyleSheet("background:#374244; border-radius:8px;");
+    goldRow->setStyleSheet("background:#374244; border:none; border-radius:8px;");
     auto *gbl = new QHBoxLayout(goldRow);
     gbl->setContentsMargins(10, 4, 10, 4);
     gbl->setSpacing(8);
@@ -606,9 +855,9 @@ void MainWindow::setupLeftPanel() {
     arl->setSpacing(4);
 
     QWidget *anteBox = new QWidget(anteRow2);
-    anteBox->setFixedHeight(44);
+    anteBox->setFixedHeight(54);
     anteBox->setAttribute(Qt::WA_StyledBackground, true);
-    anteBox->setStyleSheet("background:#374244; border-radius:8px;");
+    anteBox->setStyleSheet("background:#374244; border:none; border-radius:8px;");
     auto *avbl = new QVBoxLayout(anteBox);
     avbl->setContentsMargins(6, 3, 6, 3);
     avbl->setSpacing(0);
@@ -620,9 +869,9 @@ void MainWindow::setupLeftPanel() {
     arl->addWidget(anteBox);
 
     QWidget *roundBox = new QWidget(anteRow2);
-    roundBox->setFixedHeight(44);
+    roundBox->setFixedHeight(54);
     roundBox->setAttribute(Qt::WA_StyledBackground, true);
-    roundBox->setStyleSheet("background:#374244; border-radius:8px;");
+    roundBox->setStyleSheet("background:#374244; border:none; border-radius:8px;");
     auto *rvbl = new QVBoxLayout(roundBox);
     rvbl->setContentsMargins(6, 3, 6, 3);
     rvbl->setSpacing(0);
@@ -806,6 +1055,9 @@ void MainWindow::refreshHand() {
     const auto &hand = mGameState->hand();
 
     auto matches = [](const CardData &a, const CardData &b) {
+        // DNA、标准包、死神等会制造“牌面完全相同”的牌。
+        // 只按花色/点数匹配会把新牌和旧牌混成同一张，导致选中状态、拖拽状态错乱。
+        if (a.uid > 0 && b.uid > 0) return a.uid == b.uid;
         return a.rank == b.rank && a.suit == b.suit
                && a.enhancement == b.enhancement && a.seal == b.seal
                && a.edition == b.edition;
@@ -848,6 +1100,8 @@ void MainWindow::refreshHand() {
             mScene->addItem(match);
             connect(match, &CardItem::clicked,
                     this, &MainWindow::onCardClicked);
+            connect(match, &CardItem::dragMoved,
+                    this, &MainWindow::onHandCardDragMoved);
             connect(match, &CardItem::dragReleased,
                     this, &MainWindow::onHandCardDragReleased);
             connect(match, &CardItem::hoverChanged,
@@ -933,8 +1187,8 @@ void MainWindow::layoutPlayedCards() {
 
 // 分数刷新
 void MainWindow::refreshScore() {
-    mLblScore->setText(QString::number(mGameState->score()));
-    mLblTarget->setText(QString::number(mGameState->targetScore()));
+    mLblScore->setText(formatScoreNumber(mGameState->score()));
+    mLblTarget->setText(formatScoreNumber(mGameState->targetScore()));
 }
 
 // 金币刷新
@@ -1010,7 +1264,7 @@ void MainWindow::refreshCounters() {
     // 更新右下牌堆计数。放在牌背正下方，避免贴到窗口边缘。
     if (mDeckLabel) {
         mDeckLabel->setPlainText(
-            QString("%1/%2").arg(mGameState->deckRemaining()).arg(mGameState->deckTotal()));
+            QString("%1/%2").arg(formatScoreNumber(mGameState->deckRemaining())).arg(formatScoreNumber(mGameState->deckTotal())));
         QRectF br = mDeckLabel->boundingRect();
         mDeckLabel->setPos(mSceneW - CARD_W - 10 + (CARD_W - br.width()) / 2.0,
                            mSceneH - 34);
@@ -1023,8 +1277,8 @@ void MainWindow::refreshCounters() {
     }
     if (mConsCountLabel) {
         QRectF br = mConsCountLabel->boundingRect();
-        int slotCount = mGameState->consumableSlots();
-        int totalW = CARD_W + qMax(0, slotCount - 1) * (CARD_W + 14);
+        int visualSlots = Constants::MAX_CONSUMABLE_SLOTS;
+        int totalW = CARD_W + qMax(0, visualSlots - 1) * (CARD_W + 14);
         int startX = mSceneW - 8 - totalW;
         mConsCountLabel->setPos(startX + totalW - br.width() - 2, JOKER_Y + CARD_H + 24);
     }
@@ -1114,6 +1368,47 @@ void MainWindow::showCardInfo(CardItem *card)
 void MainWindow::hideCardInfo()
 {
     if (mCardInfoProxy) mCardInfoProxy->hide();
+}
+
+
+void MainWindow::onHandCardDragMoved(CardItem *card, QPointF scenePos)
+{
+    int from = mHandCards.indexOf(card);
+    if (from < 0) return;
+    int n = mHandCards.size();
+    if (n <= 1) return;
+
+    int available = mSceneW - 80;
+    int step = (available - CARD_W) / qMax(1, n - 1);
+    step = qMin(step, CARD_W - 30);
+    int totalW = (n - 1) * step + CARD_W;
+    int startX = (mSceneW - totalW) / 2;
+
+    int to = 0;
+    for (int i = 0; i < n; ++i) {
+        double center = startX + i * step + CARD_W / 2.0;
+        if (scenePos.x() > center) to = i;
+    }
+    to = qBound(0, to, n - 1);
+
+    QVector<CardItem*> visual = mHandCards;
+    visual.removeAt(from);
+    visual.insert(to, card);
+
+    for (int vi = 0; vi < visual.size(); ++vi) {
+        CardItem *ci = visual[vi];
+        if (ci == card) continue;
+        int realIdx = mHandCards.indexOf(ci);
+        bool sel = mSelected.contains(realIdx);
+        double t = (-n / 2.0 - 0.5 + (vi + 1)) / n;
+        double angleDeg = 0.2 * t * 180.0 / M_PI;
+        int x = startX + vi * step;
+        int y = mHandY + (sel ? -50 : 0);
+        ci->setBaseRotation(angleDeg);
+        ci->setZValue(10 + vi);
+        ci->moveTo(QPointF(x, y), 120);
+    }
+    card->setZValue(600);
 }
 
 void MainWindow::onHandCardDragReleased(CardItem *card, QPointF scenePos)
@@ -1251,8 +1546,8 @@ void MainWindow::onHandPlayed()
     // 原版先亮出牌型的基础筹码/倍率，再逐张牌、小丑实时累加。
     mDisplayedChips = r.baseChips;
     mDisplayedMult  = r.baseMult;
-    mLblChips->setText(QString::number(mDisplayedChips));
-    mLblMult ->setText(QString::number(mDisplayedMult));
+    mLblChips->setText(formatScoreNumber(mDisplayedChips));
+    mLblMult ->setText(formatScoreNumber(mDisplayedMult));
 
     // 总分本手结算结束前不立刻更新。
     int gained = static_cast<int>(r.chips * r.mult * r.xmult);
@@ -1271,8 +1566,8 @@ void MainWindow::onHandPlayed()
     QTimer::singleShot(finalDelay, this, [this, r, gained, finalDelay]() {
         mDisplayedChips = r.chips;
         mDisplayedMult  = qRound(r.mult * r.xmult);
-        mLblChips->setText(QString::number(r.chips));
-        mLblMult ->setText(QString::number(mDisplayedMult));
+        mLblChips->setText(formatScoreNumber(r.chips));
+        mLblMult ->setText(formatScoreNumber(mDisplayedMult));
         animateScoreTotalThenFinalize(gained, finalDelay);
     });
 }
@@ -1302,7 +1597,7 @@ void MainWindow::resizeEvent(QResizeEvent *event)
     if (mPlayPage) {
         QRect r = mPlayPage->rect();
         if (mDynamicBg) { mDynamicBg->setSceneSize(mSceneW, mSceneH); }
-        if (mBlindSelectWidget) mBlindSelectWidget->setGeometry(r);
+        if (mBlindSelectWidget) mBlindSelectWidget->setGeometry(lowerOverlayRect());
         if (mRoundEndOverlay)   mRoundEndOverlay  ->setGeometry(r);
         if (mShopWidget)        mShopWidget       ->setGeometry(lowerOverlayRect());
         if (mPackOpenWidget)    mPackOpenWidget   ->setGeometry(lowerOverlayRect());
@@ -1371,6 +1666,7 @@ void MainWindow::refreshJokerSlots()
         mScene->addItem(ji);
         mJokerItems.append(ji);
         connect(ji, &JokerItem::pressed, this, &MainWindow::onJokerPressed);
+        connect(ji, &JokerItem::dragMoved, this, &MainWindow::onJokerDragMoved);
         connect(ji, &JokerItem::dragReleased, this, &MainWindow::onJokerDragReleased);
         connect(ji, &JokerItem::hoverChanged, this, [this, ji](JokerItem *, bool hovered) {
             int idx = mJokerItems.indexOf(ji);
@@ -1384,6 +1680,8 @@ void MainWindow::showJokerInfo(int idx, bool showSellButton)
 {
     const auto &js = mGameState->jokers();
     if (idx < 0 || idx >= js.size() || idx >= mJokerItems.size()) return;
+    // 售出面板打开后，鼠标经过旁边小丑不能抢焦点，否则售出按钮会消失。
+    if (!showSellButton && mSelectedJokerIdx >= 0 && mSelectedJokerIdx != idx) return;
     if (showSellButton) mSelectedJokerIdx = idx;
     else if (mSelectedJokerIdx != idx) mSelectedJokerIdx = -1;
     const Joker &j = js[idx];
@@ -1433,8 +1731,12 @@ void MainWindow::showJokerInfo(int idx, bool showSellButton)
         );
         vbl->addWidget(mJokerSellButton);
 
-        mJokerInfoProxy = mScene->addWidget(mJokerInfoPanel);
-        mJokerInfoProxy->setZValue(900);
+        // 不能再把小丑信息框放进 QGraphicsScene：商店/开包是 QWidget overlay，
+        // QGraphicsProxyWidget 会被 overlay 挡住。改成挂在 mPlayPage 上并 raise，
+        // 这样在商店、盲注选择、开包时都能显示在最上层。
+        mJokerInfoPanel->setParent(mPlayPage);
+        mJokerInfoPanel->hide();
+        mJokerInfoProxy = nullptr;
     }
 
     mJokerInfoName->setText(j.name);
@@ -1443,8 +1745,6 @@ void MainWindow::showJokerInfo(int idx, bool showSellButton)
     QString editionEffect = editionDesc(j.edition);
     QString meta = QString("%1小丑　出售 $%2").arg(editionText).arg(qMax(1, j.sellValue));
     if (!editionEffect.isEmpty()) meta += QString("　%1").arg(editionEffect);
-    mJokerInfoMeta->setText(meta);
-
     QString desc = j.description;
     if (j.type == JokerType::Yorick) {
         desc += QString("\n当前：X%1 倍率\n还需要弃牌 [%2/23]")
@@ -1478,8 +1778,64 @@ void MainWindow::showJokerInfo(int idx, bool showSellButton)
         else
             desc += "\n当前没有可复制小丑";
     }
+    mJokerInfoName->setVisible(!showSellButton);
+    mJokerInfoDesc->setVisible(!showSellButton);
     mJokerInfoDesc->setText(desc);
-    mJokerSellButton->setText(QString("售出　+$%1").arg(qMax(1, j.sellValue)));
+
+    if (showSellButton) {
+        // 原版点击牌后只出现一个很小的操作牌片：上方价格、下方售出。
+        // 详细说明仍由 hover 面板负责，这里不要再塞大段文字。
+        if (auto *lay = mJokerInfoPanel->layout()) {
+            lay->setContentsMargins(6, 5, 6, 6);
+            lay->setSpacing(3);
+        }
+        mJokerInfoPanel->setStyleSheet(
+            "background:transparent;"
+            "border:none;"
+        );
+        mJokerInfoPanel->setFixedSize(90, 54);
+
+        QFont mf = mCNFont; mf.setPixelSize(12); mf.setBold(true);
+        mJokerInfoMeta->setFont(mf);
+        mJokerInfoMeta->setAlignment(Qt::AlignCenter);
+        mJokerInfoMeta->setStyleSheet(
+            "color:#ffd05a; background:rgba(8,11,12,220);"
+            "border:2px solid #101719; border-radius:8px; padding:0px 4px;"
+        );
+        mJokerInfoMeta->setText(QString("$%1").arg(qMax(1, j.sellValue)));
+        mJokerInfoMeta->setFixedHeight(20);
+
+        QFont sf = mCNFont; sf.setPixelSize(13); sf.setBold(true);
+        mJokerSellButton->setFont(sf);
+        mJokerSellButton->setText(QString("售出 +$%1").arg(qMax(1, j.sellValue)));
+        mJokerSellButton->setFixedSize(82, 25);
+        mJokerSellButton->setStyleSheet(
+            "QPushButton { background:#ff5b4f; color:white; border:0px;"
+            "border-radius:7px; padding:0px; }"
+            "QPushButton:hover { background:#ff7468; }"
+            "QPushButton:pressed { background:#d94b42; }"
+        );
+    } else {
+        if (auto *lay = mJokerInfoPanel->layout()) {
+            lay->setContentsMargins(12, 10, 12, 10);
+            lay->setSpacing(6);
+        }
+        mJokerInfoPanel->setMinimumSize(0, 0);
+        mJokerInfoPanel->setMaximumSize(16777215, 16777215);
+        mJokerInfoPanel->setStyleSheet(
+            "background:rgba(31,37,42,235);"
+            "border:2px solid #fda200;"
+            "border-radius:12px;"
+        );
+        QFont mf = mCNFont; mf.setPixelSize(13); mf.setBold(false);
+        mJokerInfoMeta->setFont(mf);
+        mJokerInfoMeta->setStyleSheet("color:#cbd6dc; background:transparent; border:none;");
+        mJokerInfoMeta->setMinimumHeight(0);
+        mJokerInfoMeta->setMaximumHeight(16777215);
+        mJokerInfoMeta->setText(meta);
+        mJokerSellButton->setMinimumSize(0, 0);
+        mJokerSellButton->setMaximumSize(16777215, 16777215);
+    }
     mJokerSellButton->setVisible(showSellButton);
 
     disconnect(mJokerSellButton, nullptr, this, nullptr);
@@ -1499,20 +1855,30 @@ void MainWindow::showJokerInfo(int idx, bool showSellButton)
     qreal x;
     qreal y;
     if (showSellButton) {
-        // 单击后，售出按钮出现在小丑右侧。
-        x = qMin<qreal>(jp.x() + CARD_W + 12, mSceneW - 285);
-        y = jp.y() + 14;
-        if (x <= jp.x()) {
-            x = qBound<qreal>(8, jp.x(), mSceneW - 285);
-            y = jp.y() + CARD_H + 8;
-        }
+        // 单击后，紧贴小丑右侧出现小型售出牌片；右侧空间不够时放到左侧。
+        x = jp.x() + CARD_W + 8;
+        y = jp.y() + CARD_H * 0.5 - 31;
+        if (x + 90 > mSceneW - 6) x = jp.x() - 98;
+        x = qBound<qreal>(6, x, mSceneW - 96);
+        y = qBound<qreal>(6, y, mSceneH - 60);
     } else {
-        // 悬浮说明放在小丑下方，不直接显示售出按钮。
+        // 悬浮说明默认放在小丑下方；如果商店面板挡住，就放到小丑上方。
         x = jp.x() + CARD_W / 2.0 - 140;
         x = qBound<qreal>(8, x, mSceneW - 285);
         y = jp.y() + CARD_H + 10;
+        if (mShopWidget && mShopWidget->isVisible()) {
+            qreal shopTopSceneY = lowerOverlayRect().y() + 18;
+            if (y + mJokerInfoPanel->height() > shopTopSceneY)
+                y = jp.y() - mJokerInfoPanel->height() - 12;
+        }
     }
-    mJokerInfoProxy->setPos(x, y);
+    if (mJokerInfoPanel->parentWidget() != mPlayPage) mJokerInfoPanel->setParent(mPlayPage);
+    QPoint viewPoint = mView->mapFromScene(QPointF(x, y));
+    QPoint pagePoint = mView->mapTo(mPlayPage, viewPoint);
+    pagePoint.setX(qBound(6, pagePoint.x(), qMax(6, mPlayPage->width() - mJokerInfoPanel->width() - 6)));
+    pagePoint.setY(qBound(6, pagePoint.y(), qMax(6, mPlayPage->height() - mJokerInfoPanel->height() - 6)));
+    mJokerInfoPanel->move(pagePoint);
+    mJokerInfoPanel->raise();
     mJokerInfoPanel->show();
 }
 
@@ -1533,6 +1899,44 @@ void MainWindow::onJokerPressed(JokerItem *item, Qt::MouseButton btn)
     }
 }
 
+
+void MainWindow::onJokerDragMoved(JokerItem *item, QPointF scenePos)
+{
+    int from = mJokerItems.indexOf(item);
+    if (from < 0) return;
+    int n = mJokerItems.size();
+    if (n <= 1) return;
+
+    int visualSlots = Constants::MAX_JOKER_SLOTS;
+    int visualStep = CARD_W + 14;
+    int visualW = CARD_W + qMax(0, visualSlots - 1) * visualStep;
+    int available = qMin(mSceneW - 430, 780);
+    int startX = 8;
+    if (visualW < available) startX = 8 + (available - visualW) / 2;
+    int step = (n > 1) ? (visualW - CARD_W) / qMax(1, n - 1) : visualStep;
+    step = qBound(42, step, visualStep);
+
+    int to = 0;
+    for (int i = 0; i < n; ++i) {
+        double center = startX + i * step + CARD_W / 2.0;
+        if (scenePos.x() > center) to = i;
+    }
+    to = qBound(0, to, n - 1);
+
+    QVector<JokerItem*> visual = mJokerItems;
+    visual.removeAt(from);
+    visual.insert(to, item);
+    for (int vi = 0; vi < visual.size(); ++vi) {
+        JokerItem *ji = visual[vi];
+        if (ji == item) continue;
+        int x = startX + vi * step;
+        int y = JOKER_Y + 18;
+        ji->setZValue(20 + vi);
+        ji->moveTo(QPointF(x, y), 120);
+    }
+    item->setZValue(650);
+}
+
 void MainWindow::onJokerDragReleased(JokerItem *item, QPointF scenePos)
 {
     int from = mJokerItems.indexOf(item);
@@ -1540,12 +1944,14 @@ void MainWindow::onJokerDragReleased(JokerItem *item, QPointF scenePos)
     int n = mJokerItems.size();
     if (n <= 1) { refreshJokerSlots(); return; }
 
+    int visualSlots = Constants::MAX_JOKER_SLOTS;
+    int visualStep = CARD_W + 14;
+    int visualW = CARD_W + qMax(0, visualSlots - 1) * visualStep;
     int available = qMin(mSceneW - 430, 780);
-    int step = (n > 1) ? (available - CARD_W) / qMax(1, n - 1) : CARD_W + 14;
-    step = qBound(64, step, CARD_W + 14);
-    int totalW = CARD_W + (n - 1) * step;
     int startX = 8;
-    if (totalW < available) startX = 8 + (available - totalW) / 2;
+    if (visualW < available) startX = 8 + (available - visualW) / 2;
+    int step = (n > 1) ? (visualW - CARD_W) / qMax(1, n - 1) : visualStep;
+    step = qBound(42, step, visualStep);
 
     int to = 0;
     for (int i = 0; i < n; ++i) {
@@ -1556,6 +1962,116 @@ void MainWindow::onJokerDragReleased(JokerItem *item, QPointF scenePos)
 
     if (from != to) mGameState->moveJoker(from, to);
     else refreshJokerSlots();
+}
+
+
+void MainWindow::showConsumableAction(int idx)
+{
+    const auto &cs = mGameState->consumables();
+    if (idx < 0 || idx >= cs.size() || idx >= mConsumableItems.size()) return;
+    mSelectedConsumableIdx = idx;
+    const Consumable &c = cs[idx];
+
+    if (!mConsumableActionPanel) {
+        mConsumableActionPanel = new QWidget;
+        mConsumableActionPanel->setAttribute(Qt::WA_StyledBackground, true);
+        mConsumableActionPanel->setStyleSheet(
+            "background:rgba(18,23,26,230); border:2px solid #2b3135; border-radius:8px;"
+        );
+        auto *v = new QVBoxLayout(mConsumableActionPanel);
+        v->setContentsMargins(6, 5, 6, 6);
+        v->setSpacing(3);
+
+        mConsumableActionPrice = new QLabel(mConsumableActionPanel);
+        QFont pf = mCNFont; pf.setPixelSize(12); pf.setBold(true);
+        mConsumableActionPrice->setFont(pf);
+        mConsumableActionPrice->setAlignment(Qt::AlignCenter);
+        mConsumableActionPrice->setStyleSheet(
+            "color:#ffd05a; background:rgba(0,0,0,150); border:1px solid #0d1114; border-radius:7px; padding:1px 4px;"
+        );
+        v->addWidget(mConsumableActionPrice);
+
+        auto *row = new QWidget(mConsumableActionPanel);
+        auto *h = new QHBoxLayout(row);
+        h->setContentsMargins(0,0,0,0);
+        h->setSpacing(4);
+        QFont bf = mCNFont; bf.setPixelSize(12); bf.setBold(true);
+        mConsumableUseButton = new QPushButton("使用", row);
+        mConsumableSellButton = new QPushButton("售出", row);
+        for (QPushButton *b : {mConsumableUseButton, mConsumableSellButton}) {
+            b->setFont(bf);
+            b->setFixedSize(48, 26);
+            b->setStyleSheet(
+                "QPushButton { background:#ff5b4f; color:white; border:0px; border-radius:7px; padding:0px; }"
+                "QPushButton:hover { background:#ff7468; }"
+                "QPushButton:pressed { background:#d94b42; }"
+            );
+            h->addWidget(b);
+        }
+        mConsumableUseButton->setStyleSheet(
+            "QPushButton { background:#009dff; color:white; border:0px; border-radius:7px; padding:0px; }"
+            "QPushButton:hover { background:#33b0ff; }"
+            "QPushButton:pressed { background:#007acc; }"
+        );
+        v->addWidget(row);
+
+        mConsumableActionPanel->setFixedSize(110, 62);
+        mConsumableActionProxy = mScene->addWidget(mConsumableActionPanel);
+        mConsumableActionProxy->setZValue(910);
+
+        connect(mConsumableUseButton, &QPushButton::clicked, this, [this]() {
+            if (mSelectedConsumableIdx < 0) return;
+            QVector<int> sel = mSelected;
+            std::sort(sel.begin(), sel.end());
+            if (mGameState->useConsumable(mSelectedConsumableIdx, sel)) {
+                mSelectedConsumableIdx = -1;
+                hideConsumableAction();
+                mSelected.clear();
+                refreshHand();
+                refreshGold();
+                refreshScore();
+                refreshCounters();
+                if (mShopWidget && mShopWidget->isVisible()) mShopWidget->refresh();
+            } else {
+                mConsumableActionPanel->setStyleSheet(
+                    "background:rgba(42,18,20,235); border:2px solid #ff6a6a; border-radius:8px;"
+                );
+                QTimer::singleShot(260, this, [this]() {
+                    if (mConsumableActionPanel)
+                        mConsumableActionPanel->setStyleSheet(
+                            "background:rgba(18,23,26,230); border:2px solid #2b3135; border-radius:8px;"
+                        );
+                });
+            }
+        });
+        connect(mConsumableSellButton, &QPushButton::clicked, this, [this]() {
+            if (mSelectedConsumableIdx < 0) return;
+            if (mGameState->sellConsumable(mSelectedConsumableIdx)) {
+                mSelectedConsumableIdx = -1;
+                hideConsumableAction();
+                refreshConsumableSlots();
+                refreshGold();
+                refreshCounters();
+                if (mShopWidget && mShopWidget->isVisible()) mShopWidget->refresh();
+            }
+        });
+    }
+
+    mConsumableActionPrice->setText(QString("$%1").arg(qMax(1, c.sellValue)));
+    mConsumableSellButton->setText(QString("售出"));
+    QPointF cp = mConsumableItems[idx]->pos();
+    qreal x = cp.x() + CARD_W + 8;
+    qreal y = cp.y() + CARD_H * 0.5 - 31;
+    if (x + 110 > mSceneW - 6) x = cp.x() - 118;
+    x = qBound<qreal>(6, x, mSceneW - 116);
+    y = qBound<qreal>(6, y, mSceneH - 68);
+    mConsumableActionProxy->setPos(x, y);
+    mConsumableActionPanel->show();
+}
+
+void MainWindow::hideConsumableAction()
+{
+    if (mConsumableActionPanel) mConsumableActionPanel->hide();
 }
 
 void MainWindow::refreshConsumableSlotFrames()
@@ -1586,6 +2102,10 @@ void MainWindow::refreshConsumableSlots()
     mConsumableItems.clear();
 
     const auto &cs = mGameState->consumables();
+    if (mSelectedConsumableIdx >= cs.size()) {
+        mSelectedConsumableIdx = -1;
+        hideConsumableAction();
+    }
     int slotCount = mGameState->consumableSlots();
     if (mConsCountLabel) {
         mConsCountLabel->setPlainText(QString("%1/%2").arg(cs.size()).arg(slotCount));
@@ -1622,11 +2142,13 @@ void MainWindow::onConsumableClicked(ConsumableItem *item, Qt::MouseButton btn)
 
     if (btn == Qt::RightButton) {
         mGameState->sellConsumable(idx);
+        hideConsumableAction();
         if (mShopWidget && mShopWidget->isVisible()) mShopWidget->refresh();
         return;
     }
 
-    // 开奥秘/幻灵包时，原版仍然点击右上角仓库特殊牌使用，目标是包界面的临时手牌。
+    // 开塔罗/幻灵包时，点击右上角仓库特殊牌仍然直接使用，目标是包界面的临时手牌。
+    // 平时左键点击则像原版一样选中消耗牌，并在右侧弹出小型“使用/售出”牌片。
     if (mPackOpenWidget && mPackOpenWidget->isVisible() && !mPendingPackHand.isEmpty()) {
         QVector<int> packSel = mPackOpenWidget->selectedHandIndices();
         if (mGameState->useConsumableOnPackHand(idx, packSel, mPendingPackHand)) {
@@ -1641,6 +2163,11 @@ void MainWindow::onConsumableClicked(ConsumableItem *item, Qt::MouseButton btn)
                 if (mConsCountLabel) mConsCountLabel->setDefaultTextColor(QColor("#aaddaa"));
             });
         }
+        return;
+    }
+
+    if (btn == Qt::LeftButton) {
+        showConsumableAction(idx);
         return;
     }
 
@@ -1703,7 +2230,7 @@ void MainWindow::onPackFinished()
         if (mDynamicBg) mDynamicBg->setMood(DynamicBackgroundItem::Mood::BlindSelect);
         if (mBlindSelectWidget && mPlayPage) {
             mBlindSelectWidget->refresh();
-            mBlindSelectWidget->setGeometry(mPlayPage->rect());
+            mBlindSelectWidget->setGeometry(lowerOverlayRect());
             mBlindSelectWidget->show();
             mBlindSelectWidget->raise();
             mBlindSelectWidget->arrangeCards(false);
@@ -1743,9 +2270,10 @@ void MainWindow::onLeaveShopClicked()
 QRect MainWindow::lowerOverlayRect() const
 {
     if (!mPlayPage) return QRect();
-    // 商店/开包只覆盖中下区，保留原版上方小丑槽和右上角消耗牌槽可点击。
+    // 商店/开包/盲注选择只覆盖中下区，保留上方小丑槽、右上消耗槽、右下牌组可点击。
     const int y = JOKER_Y + JOKER_H + 10;
-    return QRect(0, y, mPlayPage->width(), qMax(0, mPlayPage->height() - y));
+    const int rightDeckReserve = CARD_W + 150;
+    return QRect(0, y, qMax(600, mPlayPage->width() - rightDeckReserve), qMax(0, mPlayPage->height() - y));
 }
 
 void MainWindow::showShopOverlay()
@@ -1763,7 +2291,7 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev)
     if (obj == mPlayPage && ev->type() == QEvent::Resize) {
         QRect r = mPlayPage->rect();
         if (mDynamicBg) { mDynamicBg->setSceneSize(mSceneW, mSceneH); }
-        if (mBlindSelectWidget) mBlindSelectWidget->setGeometry(r);
+        if (mBlindSelectWidget) mBlindSelectWidget->setGeometry(lowerOverlayRect());
         if (mRoundEndOverlay)   mRoundEndOverlay  ->setGeometry(r);
         if (mShopWidget)        mShopWidget       ->setGeometry(lowerOverlayRect());
         if (mPackOpenWidget)    mPackOpenWidget   ->setGeometry(lowerOverlayRect());
@@ -1850,7 +2378,7 @@ void MainWindow::onBlindSelectEntered()
         if (mBlindSelectWidget && mPlayPage
             && mBlindSelectWidget->geometry() != mPlayPage->rect())
         {
-            mBlindSelectWidget->setGeometry(mPlayPage->rect());
+            mBlindSelectWidget->setGeometry(lowerOverlayRect());
         }
         mBlindSelectWidget->arrangeCards(!skipped);
     });
@@ -2111,13 +2639,13 @@ void MainWindow::animateScoreTotalThenFinalize(int gained, int /*delayAfterEvent
     anim->setEndValue(after);
     anim->setEasingCurve(QEasingCurve::OutCubic);
     connect(anim, &QVariantAnimation::valueChanged, this, [this](const QVariant &v) {
-        mLblScore->setText(QString::number(v.toInt()));
+        mLblScore->setText(formatScoreNumber(v.toDouble()));
         QFont f = mLblScore->font();
         f.setPixelSize(30 + (v.toInt() % 2));
         mLblScore->setFont(f);
     });
     connect(anim, &QVariantAnimation::finished, this, [this, after, gained]() {
-        mLblScore->setText(QString::number(after));
+        mLblScore->setText(formatScoreNumber(after));
         if (gained >= mGameState->targetScore()) {
             // 原版是“本手得分本身超过盲注目标”时，筹码×倍率框开始燃烧；
             // 不是累计总分达到目标就燃烧。
@@ -2290,8 +2818,8 @@ void MainWindow::updateHandPreview()
     HandResult r = mGameState->previewSelection(mSelected);
     mLblHandName ->setText(r.name);
     mLblHandLevel->setText(QString("等级%1").arg(r.level));
-    mLblChips->setText(QString::number(r.chips));
-    mLblMult ->setText(QString::number(r.mult));
+    mLblChips->setText(formatScoreNumber(r.chips));
+    mLblMult ->setText(formatScoreNumber(r.mult));
 }
 
 void MainWindow::playScoreEvent(const ScoreEvent &ev)
@@ -2324,18 +2852,18 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev)
     case ScoreEventKind::EditionChip:
     case ScoreEventKind::JokerChip:
         color = QColor("#009dff");   // 蓝
-        text = QString("+%1").arg(ev.intValue);
+        text = QString("+%1").arg(formatScoreNumber(ev.intValue));
         mDisplayedChips += ev.intValue;
-        mLblChips->setText(QString::number(mDisplayedChips));
+        mLblChips->setText(formatScoreNumber(mDisplayedChips));
         break;
 
     case ScoreEventKind::EnhancementMult:
     case ScoreEventKind::EditionMult:
     case ScoreEventKind::JokerMult:
         color = QColor("#fe5f55");   // 红
-        text = QString("+%1").arg(ev.intValue);
+        text = QString("+%1").arg(formatScoreNumber(ev.intValue));
         mDisplayedMult += ev.intValue;
-        mLblMult->setText(QString::number(mDisplayedMult));
+        mLblMult->setText(formatScoreNumber(mDisplayedMult));
         break;
 
     case ScoreEventKind::EnhancementXMult:
@@ -2346,17 +2874,34 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev)
         text = QString("×%1").arg(QString::number(ev.xmultValue, 'g', 3));
         isXMult = true;
         mDisplayedMult = qMax(1, qRound(mDisplayedMult * ev.xmultValue));
-        mLblMult->setText(QString::number(mDisplayedMult));
+        mLblMult->setText(formatScoreNumber(mDisplayedMult));
         break;
     }
 
-    // 来源 juice
-    if (sourceCard) sourceCard->juiceUp(1.15, 200);
+    // 原版计分时只有真正参与本次事件的牌/小丑会 juice_up。
+    // 计分牌向上弹一下再回位；非计分牌不会跟着动。
+    if (sourceCard) {
+        QPointF base = sourceCard->pos();
+        auto *seq = new QSequentialAnimationGroup(sourceCard);
+        auto *up = new QPropertyAnimation(sourceCard, "pos");
+        up->setDuration(90);
+        up->setStartValue(base);
+        up->setEndValue(base + QPointF(0, -26));
+        up->setEasingCurve(QEasingCurve::OutCubic);
+        auto *down = new QPropertyAnimation(sourceCard, "pos");
+        down->setDuration(140);
+        down->setStartValue(base + QPointF(0, -26));
+        down->setEndValue(base);
+        down->setEasingCurve(QEasingCurve::OutBounce);
+        seq->addAnimation(up);
+        seq->addAnimation(down);
+        up->setParent(seq); down->setParent(seq);
+        seq->start(QAbstractAnimation::DeleteWhenStopped);
+        sourceCard->juiceUp(1.18, 210);
+    }
     if (sourceJoker) {
-        // JokerItem 需要也有 juiceUp,见后面 §6
         sourceJoker->juiceUp(1.15, 200);
     }
 
-    // 浮动分(目前 spawnFloatingScore 只接受 int,扩展支持文本)
     spawnFloatingText(anchorPos, text, color);
 }

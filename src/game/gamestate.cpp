@@ -31,6 +31,9 @@ QPair<int, int> GameState::handLevelDelta(HandType t) {
 }
 
 void GameState::levelUpHand(HandType t, int times) {
+    for (Joker &j : mJokers) {
+        if (!j.isDebuffed && j.type == JokerType::Constellation) j.counter += times;
+    }
     HandLevel &lv = mHandLevels[t];
     auto d = handLevelDelta(t);
     for (int i = 0; i < times; ++i) {
@@ -58,16 +61,16 @@ static bool bossDebuffsCard(BossEffect effect, const CardData &c)
     return false;
 }
 
-// 原版 Blueprint / Brainstorm 会递归调用被复制小丑的 calculate_joker。
-// 这里用安全递归解析：蓝图复制右侧；头脑风暴复制最左侧；链式复制允许
-// Blueprint -> Blueprint -> DNA、Brainstorm -> Blueprint -> DNA 这类组合。
-static const Joker *resolveCopiedJoker(const QVector<Joker> &jokers, int idx)
+// 原版 Blueprint / Brainstorm 不只是复制计分阶段，也会复制 Perkeo、DNA 等
+// calculate_joker 风格效果。这里先把“最终被复制到的真实小丑下标”解析出来，
+// 这样计分、离开商店、提示 UI 都能复用同一套规则。
+static int resolveCopiedJokerIndex(const QVector<Joker> &jokers, int idx)
 {
     QSet<int> seen;
     int cur = idx;
-    for (int guard = 0; guard < jokers.size() + 2; ++guard) {
-        if (cur < 0 || cur >= jokers.size()) return nullptr;
-        if (seen.contains(cur)) return nullptr;
+    for (int guard = 0; guard < jokers.size() + 4; ++guard) {
+        if (cur < 0 || cur >= jokers.size()) return -1;
+        if (seen.contains(cur)) return -1;
         seen.insert(cur);
 
         const Joker &j = jokers[cur];
@@ -79,15 +82,46 @@ static const Joker *resolveCopiedJoker(const QVector<Joker> &jokers, int idx)
             cur = 0;
             continue;
         }
-        return &j;
+        return cur;
     }
-    return nullptr;
+    return -1;
+}
+
+static const Joker *resolveCopiedJoker(const QVector<Joker> &jokers, int idx)
+{
+    int resolved = resolveCopiedJokerIndex(jokers, idx);
+    if (resolved < 0 || resolved >= jokers.size()) return nullptr;
+    return &jokers[resolved];
+}
+
+
+static int countResolvedJokersOfType(const QVector<Joker> &jokers, JokerType type)
+{
+    int count = 0;
+    for (int i = 0; i < jokers.size(); ++i) {
+        if (jokers[i].isDebuffed) continue;
+        const Joker *resolved = resolveCopiedJoker(jokers, i);
+        if (resolved && !resolved->isDebuffed && resolved->type == type) ++count;
+    }
+    return count;
 }
 
 static void applyResolvedJokerEffect(const Joker &j, TriggerContext &ctx)
 {
     if (j.type == JokerType::IceCream) {
         ctx.result.chips += qMax(0, j.counter);
+        return;
+    }
+    if (j.type == JokerType::Hologram) {
+        ctx.result.xmult *= (1.0 + 0.25 * qMax(0, j.counter));
+        return;
+    }
+    if (j.type == JokerType::Constellation) {
+        ctx.result.xmult *= (1.0 + 0.1 * qMax(0, j.counter));
+        return;
+    }
+    if (j.type == JokerType::Vampire) {
+        ctx.result.xmult *= (1.0 + 0.1 * qMax(0, j.counter));
         return;
     }
     j.effect(ctx);
@@ -160,6 +194,7 @@ bool GameState::hasJokerDuplicateBypass() const
 void GameState::syncShopJokerRules()
 {
     mShop.setOwnedJokers(ownedJokerTypes(), hasJokerDuplicateBypass());
+    mShop.setGrosMichelExtinct(mGrosMichelExtinct);
 }
 
 void GameState::dealCards() {
@@ -193,6 +228,7 @@ void GameState::playCards(const QVector<int> &indices) {
     mDNAEligibleThisPlay = (!mDNAUsedThisBlind && firstHandOfBlind && sorted.size() == 1);
     if (firstHandOfBlind) mDNAUsedThisBlind = true;
     mDNACopiesCreatedThisPlay = 0;
+    mPendingDNACopies.clear();
 
     HandResult result = HandEvaluator::evaluate(played);
     if (bossBlocksPlayedHand(result, played.size())) {
@@ -207,6 +243,7 @@ void GameState::playCards(const QVector<int> &indices) {
         mPendingHandScore = 0;
         mPendingPlayedIndices = sorted;
         mPendingShattered = QVector<bool>(played.size(), false);
+        mPendingDNACopies.clear();
         mAwaitingScoreFinalize = true;
         mLastResult = result;
         emit handPlayed();
@@ -254,29 +291,87 @@ void GameState::playCards(const QVector<int> &indices) {
 
     QVector<bool> shattered(played.size(), false);
 
+    const int sockRetriggers = countResolvedJokersOfType(mJokers, JokerType::SockAndBuskin);
+    const int chadRetriggers = 2 * countResolvedJokersOfType(mJokers, JokerType::HangingChad);
+    const int hikerTriggers  = countResolvedJokersOfType(mJokers, JokerType::Hiker);
+    const int midasTriggers  = countResolvedJokersOfType(mJokers, JokerType::MidasMask);
+    const int vampireTriggers = countResolvedJokersOfType(mJokers, JokerType::Vampire);
+
+    bool firstScoringCard = true;
     for (int playedIdx : scoringPlayedIdx) {
-        const CardData &card = played[playedIdx];
-        if (card.isDebuffed) continue;
+        CardData card = played[playedIdx];
+        if (card.isDebuffed) { firstScoringCard = false; continue; }
 
         int triggers = (card.seal == Seal::Red) ? 2 : 1;
+        const bool isFace = card.rank == Rank::Jack || card.rank == Rank::Queen || card.rank == Rank::King;
+        if (isFace) triggers += sockRetriggers;
+        if (firstScoringCard) triggers += chadRetriggers;
+
+        int globalIdx = (playedIdx >= 0 && playedIdx < sorted.size()) ? sorted[playedIdx] : -1;
+
+        if (hikerTriggers > 0 && globalIdx >= 0 && globalIdx < mHand.size()) {
+            // 原版 Hiker：每张计分牌本体永久 +5 筹码；蓝图/头脑风暴复制时额外叠加。
+            mHand[globalIdx].permanentBonusChips += 5 * hikerTriggers;
+            card.permanentBonusChips = mHand[globalIdx].permanentBonusChips;
+        }
+
         for (int t = 0; t < triggers; ++t)
             scoreCard(card, result, playedIdx);
+
+        if (midasTriggers > 0 && isFace && globalIdx >= 0 && globalIdx < mHand.size()) {
+            mHand[globalIdx].enhancement = Enhancement::Gold;
+        }
+
+        if (vampireTriggers > 0 && globalIdx >= 0 && globalIdx < mHand.size()
+            && mHand[globalIdx].enhancement != Enhancement::None) {
+            mHand[globalIdx].enhancement = Enhancement::None;
+            for (Joker &vj : mJokers) {
+                if (!vj.isDebuffed && vj.type == JokerType::Vampire) vj.counter += vampireTriggers;
+            }
+        }
 
         if (card.enhancement == Enhancement::Glass
             && QRandomGenerator::global()->bounded(4) == 0) {
             shattered[playedIdx] = true;
         }
+        firstScoringCard = false;
     }
 
-    QSet<int> scoringHandIdx;
-    for (int p : scoringPlayedIdx) scoringHandIdx.insert(sorted[p]);
+    QSet<int> playedHandIdx;
+    for (int p : sorted) playedHandIdx.insert(p);
+    QVector<CardData> heldHand;
+    QVector<int> heldGlobalIdx;
     for (int i = 0; i < mHand.size(); ++i) {
-        if (scoringHandIdx.contains(i)) continue;
-        const CardData &c = mHand[i];
+        if (playedHandIdx.contains(i)) continue;
+        heldHand.append(mHand[i]);
+        heldGlobalIdx.append(i);
+    }
+
+    const int mimeRetriggers = countResolvedJokersOfType(mJokers, JokerType::Mime);
+    const int baronTriggers = countResolvedJokersOfType(mJokers, JokerType::Baron);
+    const int shootMoonTriggers = countResolvedJokersOfType(mJokers, JokerType::ShootTheMoon);
+    for (int hi = 0; hi < heldHand.size(); ++hi) {
+        const CardData &c = heldHand[hi];
+        int globalIdx = heldGlobalIdx[hi];
         if (c.isDebuffed) continue;
-        if (c.enhancement == Enhancement::Steel) {
-            result.xmult *= 1.5;
-            result.events.append({ ScoreEventKind::SteelXMult, -1, i, -1, 0, 1.5 });
+        int retriggers = 1 + mimeRetriggers;
+        for (int r = 0; r < retriggers; ++r) {
+            if (c.enhancement == Enhancement::Steel) {
+                result.xmult *= 1.5;
+                result.events.append({ ScoreEventKind::SteelXMult, -1, globalIdx, -1, 0, 1.5 });
+            }
+            if (c.rank == Rank::King) {
+                for (int b = 0; b < baronTriggers; ++b) {
+                    result.xmult *= 1.5;
+                    result.events.append({ ScoreEventKind::SteelXMult, -1, globalIdx, -1, 0, 1.5 });
+                }
+            }
+            if (c.rank == Rank::Queen) {
+                for (int sm = 0; sm < shootMoonTriggers; ++sm) {
+                    result.mult += 13;
+                    result.events.append({ ScoreEventKind::EnhancementMult, -1, globalIdx, -1, 13, 1.0 });
+                }
+            }
         }
     }
 
@@ -284,7 +379,7 @@ void GameState::playCards(const QVector<int> &indices) {
         int chipsBefore = result.chips, multBefore = result.mult;
         double xmultBefore = result.xmult;
 
-        TriggerContext ctx{ result, *this, mHand, result.scoringCards, nullptr };
+        TriggerContext ctx{ result, *this, heldHand, result.scoringCards, nullptr };
         for (int ji = 0; ji < mJokers.size(); ++ji) {
             const Joker &j = mJokers[ji];
             if (j.isDebuffed) continue;
@@ -358,6 +453,13 @@ void GameState::finalizePlayedHand()
         }
         mHand.removeAt(pr.first);
     }
+
+    // DNA 复制牌必须等本手计分动画和收牌完成后再放回手牌区。
+    // 之前在计分过程中 emit handChanged，会让新牌生成一个脱离正常手牌布局的“幽灵牌”。
+    for (const CardData &copy : mPendingDNACopies)
+        mHand.append(copy);
+    mPendingDNACopies.clear();
+
     mPendingPlayedIndices.clear();
     mPendingShattered.clear();
     mPendingHandScore = 0;
@@ -435,6 +537,8 @@ void GameState::finishWinningRound()
         if (!j.isDebuffed && j.timing == TriggerTiming::OnRoundEnd)
             j.effect(rctx);
     }
+
+    processEndOfRoundJokerExtinctions();
 
     int interest = qMin(mGold / 5, mInterestCap / 5);
     mGold += interest;
@@ -762,6 +866,7 @@ bool GameState::buyShopOffer(int idx) {
         ShopOffer t = mShop.takeShopOffer(idx);
         mGold -= t.cost;
         mDeck.addCard(t.playingCard);
+        for (Joker &j : mJokers) if (!j.isDebuffed && j.type == JokerType::Hologram) ++j.counter;
     } else {
         return false;
     }
@@ -906,13 +1011,13 @@ void GameState::createDNACopy(const CardData &card)
 {
     if (!dnaCanTriggerThisPlay()) return;
     CardData copy = card;
+    copy.assignNewUid();              // 这是新复制出的实体牌，不能沿用原牌 uid
     copy.faceUp = true;
     copy.isDebuffed = false;
-    // 原版 DNA 会永久复制到牌组，并把复制牌放入手牌。
-    // 这里先放进手牌；之后它会像普通牌一样被弃牌/回收到牌组，不再额外塞一份到摸牌堆。
-    mHand.append(copy);
+    // 原版 DNA 的复制牌在计分事件结束后才进入手牌区。这里先暂存，
+    // finalizePlayedHand() 收走本手打出的牌后，再把复制牌插到手牌右侧。
+    mPendingDNACopies.append(copy);
     ++mDNACopiesCreatedThisPlay;
-    emit handChanged();
 }
 
 void GameState::decayEndOfHandJokers()
@@ -931,7 +1036,7 @@ void GameState::scoreCard(const CardData &card, HandResult &result, int playedId
 {
     // 1) chip:Stone 不加点数 chip
     if (card.enhancement != Enhancement::Stone) {
-        int v = card.chipValue();
+        int v = card.chipValue() + qMax(0, card.permanentBonusChips);
         if (v > 0) {
             result.chips += v;
             result.events.append({ ScoreEventKind::ScoringCardChip, playedIdx, -1, -1, v, 1.0 });
@@ -1331,6 +1436,7 @@ bool GameState::applyPackChoice(const PackContent &pack, int chosenIdx,
     case PackKind::Standard:
         if (chosenIdx >= pack.standardCards.size()) return false;
         mDeck.addCard(pack.standardCards[chosenIdx]);
+        for (Joker &j : mJokers) if (!j.isDebuffed && j.type == JokerType::Hologram) ++j.counter;
         return true;
 
     case PackKind::Arcana:
@@ -1415,6 +1521,7 @@ void GameState::startGame()
     mYorickDiscardsRemaining = 23;
     mHasLastUsedConsumable = false;
     mLastUsedConsumable = ConsumableType::Tarot_Fool;
+    mGrosMichelExtinct = false;
 
     for (int i = 0; i < 3; ++i)
         mBlindStates[i] = (i == 0) ? BlindState::Current : BlindState::Upcoming;
@@ -1742,14 +1849,61 @@ void GameState::notifyDiscardedCardsForYorick(int count)
     if (changed) emit jokersChanged();
 }
 
+
+int GameState::jokerDynamicCounter(JokerType t) const
+{
+    for (const Joker &j : mJokers) if (j.type == t) return j.counter;
+    return 0;
+}
+
+void GameState::processEndOfRoundJokerExtinctions()
+{
+    bool changed = false;
+    for (int i = mJokers.size() - 1; i >= 0; --i) {
+        Joker &j = mJokers[i];
+        if (j.type == JokerType::GrosMichel) {
+            if (QRandomGenerator::global()->bounded(6) == 0) {
+                mJokers.removeAt(i);
+                mGrosMichelExtinct = true;
+                changed = true;
+            }
+        } else if (j.type == JokerType::Cavendish) {
+            if (QRandomGenerator::global()->bounded(1000) == 0) {
+                mJokers.removeAt(i);
+                changed = true;
+            }
+        }
+    }
+    if (changed) {
+        syncShopJokerRules();
+        emit jokersChanged();
+        emit shopChanged();
+    }
+}
+
 void GameState::triggerPerkeoLeavingShop()
 {
-    // 原版 Perkeo：离开商店时复制 1 张随机消耗牌，并给复制品负片版本。
-    if (!hasJokerType(JokerType::Perkeo) || mConsumables.isEmpty()) return;
-    Consumable copy = mConsumables[QRandomGenerator::global()->bounded(mConsumables.size())];
-    copy.negative = true;
-    copy.sellValue = qMax(copy.sellValue, 1);
-    mConsumables.append(copy);       // 负片消耗牌自身提供 +1 消耗牌槽，因此允许满槽追加。
+    // 原版 Perkeo 在离开商店时触发；Blueprint / Brainstorm 如果最终复制到 Perkeo，
+    // 也应当额外触发一次。所以“蓝图 + 佩克欧”会复制 2 张负片消耗牌。
+    if (mConsumables.isEmpty()) return;
+
+    int triggerCount = 0;
+    for (int ji = 0; ji < mJokers.size(); ++ji) {
+        const Joker &j = mJokers[ji];
+        if (j.isDebuffed) continue;
+        const Joker *resolved = resolveCopiedJoker(mJokers, ji);
+        if (resolved && !resolved->isDebuffed && resolved->type == JokerType::Perkeo)
+            ++triggerCount;
+    }
+    if (triggerCount <= 0) return;
+
+    for (int n = 0; n < triggerCount; ++n) {
+        if (mConsumables.isEmpty()) break;
+        Consumable copy = mConsumables[QRandomGenerator::global()->bounded(mConsumables.size())];
+        copy.negative = true;
+        copy.sellValue = qMax(copy.sellValue, 1);
+        mConsumables.append(copy);       // 负片消耗牌自身提供 +1 消耗牌槽，因此允许满槽追加。
+    }
     emit consumablesChanged();
 }
 
@@ -1760,7 +1914,9 @@ bool GameState::addRandomRareJoker()
     QVector<JokerType> rare = {
         JokerType::Blueprint, JokerType::Brainstorm, JokerType::DNA,
         JokerType::Mime, JokerType::Baron, JokerType::Bloodstone,
-        JokerType::DriversLicense, JokerType::TheDuo, JokerType::TheTrio,
+        JokerType::DriversLicense, JokerType::Hologram, JokerType::Vampire,
+        JokerType::Constellation, JokerType::MidasMask, JokerType::CardSharp,
+        JokerType::SockAndBuskin, JokerType::Photograph, JokerType::TheDuo, JokerType::TheTrio,
         JokerType::TheFamily, JokerType::TheOrder, JokerType::TheTribe
     };
     if (!hasJokerDuplicateBypass()) {

@@ -28,6 +28,55 @@ static bool legendarySoulPos(JokerType t, QPoint &out)
     return false;
 }
 
+
+static bool hologramSoulPos(JokerType t, QPoint &out)
+{
+    // 原版 game.lua: j_hologram soul_pos = {x=2, y=9}
+    if (t == JokerType::Hologram) { out = {2, 9}; return true; }
+    return false;
+}
+
+static void paintHologramFloatingSprite(QPainter *p, QPixmap *sheet, JokerType type)
+{
+    QPoint soul;
+    if (!sheet || sheet->isNull() || !hologramSoulPos(type, soul)) return;
+
+    const qreal t = QDateTime::currentMSecsSinceEpoch() / 1000.0;
+    const qreal scaleMod = 1.0 + 2.0 * (0.07 + 0.02 * std::sin(1.8 * t));
+    const qreal rotateDeg = (2.0 * (0.05 * std::sin(1.219 * t))) * 180.0 / 3.14159265358979323846;
+    const qreal yBob = std::sin(t * 1.7) * 2.0;
+    QRect src(soul.x() * JokerItem::WIDTH, soul.y() * JokerItem::HEIGHT,
+              JokerItem::WIDTH, JokerItem::HEIGHT);
+
+    auto draw = [&](qreal extraScale, qreal opacity, QPainter::CompositionMode mode, qreal dx) {
+        p->save();
+        p->setRenderHint(QPainter::SmoothPixmapTransform, true);
+        p->setCompositionMode(mode);
+        p->setOpacity(opacity);
+        p->translate(JokerItem::WIDTH / 2.0 + dx, JokerItem::HEIGHT / 2.0 + yBob);
+        p->rotate(rotateDeg);
+        p->scale(scaleMod + extraScale, scaleMod + extraScale);
+        p->translate(-JokerItem::WIDTH / 2.0, -JokerItem::HEIGHT / 2.0);
+        p->drawPixmap(QRect(0, 0, JokerItem::WIDTH, JokerItem::HEIGHT), *sheet, src);
+        p->restore();
+    };
+
+    // 近似原版 draw_shader('hologram')：多层偏移、屏幕混合、蓝紫流光。
+    draw(0.08, 0.25, QPainter::CompositionMode_Screen, -2.0);
+    draw(0.05, 0.22, QPainter::CompositionMode_Screen,  2.0);
+    draw(0.00, 0.92, QPainter::CompositionMode_SourceOver, 0.0);
+
+    p->save();
+    p->setCompositionMode(QPainter::CompositionMode_Screen);
+    QLinearGradient holo(0, 0, JokerItem::WIDTH, JokerItem::HEIGHT);
+    const qreal ph = std::fmod(t * 0.28, 1.0);
+    holo.setColorAt(0.00, QColor(80, 220, 255, 55));
+    holo.setColorAt(qBound(0.0, ph, 1.0), QColor(255, 255, 255, 100));
+    holo.setColorAt(1.00, QColor(255, 90, 220, 55));
+    p->fillRect(QRectF(0, 0, JokerItem::WIDTH, JokerItem::HEIGHT), holo);
+    p->restore();
+}
+
 static void paintEditionShine(QPainter *p, const QRectF &r, Edition e)
 {
     if (e == Edition::None) return;
@@ -173,7 +222,7 @@ QPoint JokerItem::spritePos(JokerType t) {
     case JokerType::Bootstraps:      return {9,  8};
     case JokerType::AbstractJoker:   return {3,  3};
     case JokerType::Supernova:       return {4,  2};
-    case JokerType::GrosMichel:      return {6,  7};
+    case JokerType::GrosMichel:      return {7,  6};
     case JokerType::Cavendish:       return {5, 11};
     case JokerType::IceCream:        return {4, 10};
     case JokerType::Stuntman:        return {8,  6};
@@ -197,6 +246,15 @@ QPoint JokerItem::spritePos(JokerType t) {
     case JokerType::Swashbuckler:    return {9,  5};
     case JokerType::Ramen:           return {2, 15};
     case JokerType::DriversLicense:  return {0,  7};
+    case JokerType::Hiker:           return {0, 11};
+    case JokerType::CardSharp:       return {6, 11};
+    case JokerType::Hologram:        return {4, 12};
+    case JokerType::MidasMask:       return {0, 13};
+    case JokerType::Vampire:         return {2, 12};
+    case JokerType::Constellation:   return {9, 10};
+    case JokerType::Photograph:      return {2, 13};
+    case JokerType::HangingChad:     return {9,  6};
+    case JokerType::SockAndBuskin:   return {3,  1};
     case JokerType::Blueprint:       return {0,  3};
     case JokerType::Mime:            return {4,  1};
     case JokerType::DNA:             return {5, 10};
@@ -219,7 +277,7 @@ JokerItem::JokerItem(const Joker &j, QGraphicsItem *parent)
     auto *shineTimer = new QTimer(this);
     connect(shineTimer, &QTimer::timeout, this, [this]() {
         QPoint unused;
-        if (mJoker.edition != Edition::None || legendarySoulPos(mJoker.type, unused)) update();
+        if (mJoker.edition != Edition::None || legendarySoulPos(mJoker.type, unused) || hologramSoulPos(mJoker.type, unused)) update();
     });
     shineTimer->start(80);
 }
@@ -237,6 +295,7 @@ void JokerItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) 
 
     paintEditionShine(p, QRectF(0, 0, WIDTH, HEIGHT), mJoker.edition);
     paintLegendaryFloatingSprite(p, sSheet, mJoker.type);
+    paintHologramFloatingSprite(p, sSheet, mJoker.type);
 
     if (mHovered) {
         p->setPen(QPen(QColor(255, 240, 96, 200), 4));
@@ -270,6 +329,7 @@ void JokerItem::mouseMoveEvent(QGraphicsSceneMouseEvent *e)
 
     if (mDragging) {
         setPos(e->scenePos() - QPointF(WIDTH / 2.0, HEIGHT / 2.0));
+        emit dragMoved(this, e->scenePos());
         e->accept();
         return;
     }
@@ -318,6 +378,17 @@ void JokerItem::animateScale(qreal target, int durationMs)
     auto *anim = new QPropertyAnimation(this, "scale", this);
     anim->setDuration(durationMs);
     anim->setStartValue(scale());
+    anim->setEndValue(target);
+    anim->setEasingCurve(QEasingCurve::OutCubic);
+    anim->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+
+void JokerItem::moveTo(const QPointF &target, int durationMs)
+{
+    auto *anim = new QPropertyAnimation(this, "pos", this);
+    anim->setDuration(durationMs);
+    anim->setStartValue(pos());
     anim->setEndValue(target);
     anim->setEasingCurve(QEasingCurve::OutCubic);
     anim->start(QAbstractAnimation::DeleteWhenStopped);

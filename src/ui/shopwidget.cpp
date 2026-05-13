@@ -5,6 +5,7 @@
 #include <QHBoxLayout>
 #include <QResizeEvent>
 #include <QPainter>
+#include <QGraphicsDropShadowEffect>
 
 
 static QString editionDisplayName(Edition e)
@@ -35,7 +36,7 @@ ShopWidget::ShopWidget(GameState *gs,
     : QWidget(parent), mGS(gs), mCNFont(cnFont), mPixelFont(pixelFont)
 {
     setAttribute(Qt::WA_StyledBackground, true);
-    setStyleSheet("background: rgba(0, 0, 0, 180);");   // ← 半透明
+    setStyleSheet("background: rgba(0, 0, 0, 60);");   // 商店露出动态背景
     buildUi();
 }
 
@@ -45,13 +46,13 @@ void ShopWidget::buildUi()
     mPanel->setObjectName("shopPanel");
     // 原版商店比例：上方商品区横向更宽，下方左 Voucher、右 Booster。
     // 不再固定 900×520，避免超级/巨型包贴图被面板裁掉。
-    mPanel->setMinimumSize(980, 640);
+    mPanel->setMinimumSize(900, 650);
     mPanel->setAttribute(Qt::WA_StyledBackground, true);
     mPanel->setStyleSheet(
         "QWidget#shopPanel {"
-        "  background:#374244;"
-        "  border: 3px solid #fda200;"
-        "  border-radius: 14px;"
+        "  background:rgba(35,48,51,235);"
+        "  border: 3px solid #fe5f55;"
+        "  border-radius: 18px;"
         "}"
         );
 
@@ -125,7 +126,7 @@ void ShopWidget::buildUi()
     shopBox->setObjectName("shopBox");
     shopBox->setAttribute(Qt::WA_StyledBackground, true);
     shopBox->setStyleSheet(
-        "QWidget#shopBox { background:#4f6367; border-radius:10px; }"
+        "QWidget#shopBox { background:rgba(57,72,76,230); border:3px solid #202b2e; border-radius:14px; }"
         );
     auto *shbl = new QHBoxLayout(shopBox);
     shbl->setContentsMargins(12, 12, 12, 12);
@@ -154,7 +155,7 @@ void ShopWidget::buildUi()
     voucherBox->setMinimumSize(185, 275);
     voucherBox->setAttribute(Qt::WA_StyledBackground, true);
     voucherBox->setStyleSheet(
-        "QWidget#voucherBox { background:#4f6367; border-radius:10px; }"
+        "QWidget#voucherBox { background:rgba(57,72,76,230); border:3px solid #202b2e; border-radius:14px; }"
         );
     auto *vbl = new QVBoxLayout(voucherBox);
     vbl->setContentsMargins(10, 8, 10, 8);
@@ -171,7 +172,7 @@ void ShopWidget::buildUi()
     boosterBox->setObjectName("boosterBox");
     boosterBox->setAttribute(Qt::WA_StyledBackground, true);
     boosterBox->setStyleSheet(
-        "QWidget#boosterBox { background:#4f6367; border-radius:10px; }"
+        "QWidget#boosterBox { background:rgba(57,72,76,230); border:3px solid #202b2e; border-radius:14px; }"
         );
     auto *bhbl = new QHBoxLayout(boosterBox);
     bhbl->setContentsMargins(12, 8, 12, 8);
@@ -193,7 +194,7 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
 {
     OfferUi ou;
     ou.card = new QWidget(parent);
-    if (isBooster) ou.card->setFixedSize(180, 260);
+    if (isBooster) ou.card->setFixedSize(225, 318);
     else           ou.card->setFixedSize(150, 260);
     ou.card->setStyleSheet("background:transparent;");
 
@@ -216,7 +217,7 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
     // 卡图(整张点击)
     ou.cardBtn = new QPushButton(ou.card);
     // Booster 在原版商店区使用约 1.27×牌宽的显示区域，给它单独更宽的按钮。
-    if (isBooster) ou.cardBtn->setFixedSize(156, 184);
+    if (isBooster) ou.cardBtn->setFixedSize(190, 252);
     else           ou.cardBtn->setFixedSize(126, 174);
     ou.cardBtn->setCursor(Qt::PointingHandCursor);
     ou.cardBtn->setStyleSheet(
@@ -224,7 +225,15 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
         "QPushButton:hover { background:#4f6367; }"
         "QPushButton:disabled { background:#2a3035; }"
         );
-    // 图片用 QIcon
+    if (isBooster) {
+        auto *shadow = new QGraphicsDropShadowEffect(ou.cardBtn);
+        shadow->setBlurRadius(22);
+        shadow->setOffset(10, 14);
+        shadow->setColor(QColor(0, 0, 0, 150));
+        ou.cardBtn->setGraphicsEffect(shadow);
+    }
+
+    // 图片用 QIcon，booster 贴图本身已经在 offerPixmap 里额外绘制厚度/高光。
     vbl->addWidget(ou.cardBtn, 0, Qt::AlignCenter);
 
     ou.imageLbl = nullptr;   // 没用,删掉
@@ -357,9 +366,49 @@ QPixmap ShopWidget::offerPixmap(const ShopOffer &o) const
         QPixmap sheet(":/textures/images/boosters.png");
         if (sheet.isNull()) return QPixmap();
         QPoint c = packSpritePos(o.pack, o.packSize);
-        return sheet.copy(c.x() * ConsumableItem::WIDTH,
-                          c.y() * ConsumableItem::HEIGHT,
-                          ConsumableItem::WIDTH, ConsumableItem::HEIGHT);
+        QPixmap base = sheet.copy(c.x() * ConsumableItem::WIDTH,
+                                  c.y() * ConsumableItem::HEIGHT,
+                                  ConsumableItem::WIDTH, ConsumableItem::HEIGHT);
+
+        // 原版 booster 在商店里不是死平面：有阴影、厚度和扫光。
+        // 这里在贴图外额外画一层厚度和投影，让卡包更立体。
+        // 只留少量透明边距，避免 QIcon 缩放时把卡包本体压得很小。
+        QPixmap pix(base.width() + 14, base.height() + 20);
+        pix.fill(Qt::transparent);
+        QPainter p(&pix);
+        p.setRenderHint(QPainter::Antialiasing);
+        p.setRenderHint(QPainter::SmoothPixmapTransform);
+
+        QRectF shadow(9, 12, base.width(), base.height());
+        p.setPen(Qt::NoPen);
+        p.setBrush(QColor(0, 0, 0, 135));
+        p.drawRoundedRect(shadow.adjusted(3, 8, 3, 8), 12, 12);
+
+        QRectF side(6, 5, base.width(), base.height());
+        QLinearGradient sideGrad(side.topLeft(), side.bottomRight());
+        sideGrad.setColorAt(0.0, QColor(255,255,255,55));
+        sideGrad.setColorAt(0.45, QColor(80,80,80,45));
+        sideGrad.setColorAt(1.0, QColor(0,0,0,90));
+        p.setBrush(sideGrad);
+        p.drawRoundedRect(side.adjusted(4, 6, 7, 10), 10, 10);
+
+        p.save();
+        p.translate(7 + base.width()/2.0, 5 + base.height()/2.0);
+        p.rotate(-2.0);
+        QRectF target(-base.width()/2.0, -base.height()/2.0, base.width(), base.height());
+        p.drawPixmap(target, base, base.rect());
+
+        QLinearGradient gloss(target.topLeft(), target.bottomRight());
+        gloss.setColorAt(0.0, QColor(255,255,255,0));
+        gloss.setColorAt(0.45, QColor(255,255,255,80));
+        gloss.setColorAt(0.55, QColor(255,255,255,20));
+        gloss.setColorAt(1.0, QColor(255,255,255,0));
+        p.setCompositionMode(QPainter::CompositionMode_Screen);
+        p.setBrush(gloss);
+        p.setPen(Qt::NoPen);
+        p.drawRoundedRect(target.adjusted(6, 6, -6, -6), 8, 8);
+        p.restore();
+        return pix;
     }
     if (o.kind == OfferKind::PlayingCard) {
         return playingCardPixmap(o.playingCard);
@@ -460,8 +509,9 @@ void ShopWidget::resizeEvent(QResizeEvent *e)
 void ShopWidget::layoutPanel()
 {
     if (!mPanel) return;
-    int panelW = qBound(980, int(width() * 0.86), 1220);
-    int panelH = qBound(640, int(height() * 0.82), 760);
+    // 右下角牌组要一直露出来，因此商店面板不能无限向右撑。
+    int panelW = qBound(900, int(width() * 0.84), qMax(900, width() - 28));
+    int panelH = qBound(650, int(height() * 0.84), 760);
     mPanel->resize(panelW, panelH);
     int x = (width()  - mPanel->width())  / 2;
     int y = (height() - mPanel->height()) / 2;
