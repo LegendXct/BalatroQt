@@ -54,6 +54,7 @@ public:
     Edition edition = Edition::None;
     int sellValue = 2;
     bool isDebuffed = false;
+    int counter = 0; // 动态数值：冰淇淋当前筹码等
 
     TriggerTiming timing;
     JokerEffect effect;
