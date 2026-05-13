@@ -52,9 +52,10 @@ void paintDebuff(QPainter *p, const QRectF &rect, double intensity = 1.0);
 void paintFlame(QPainter *p, const QRectF &rect, double intensity = 1.0);
 void paintGoldSealGlow(QPainter *p, const QRectF &rect, double intensity = 1.0);
 
-// The Soul 的 shared_soul 前景层：从原版 Tarots.png 的灵魂牌中心重新提取白水晶/旋涡层，
-// 再用 card.lua 的 scale_mod / rotate_mod 动画叠在牌面前方。
-void paintSoulCrystal(QPainter *p, const QRectF &rect, const QPixmap &tarotSheet);
+// The Soul 的 shared_soul 前景层：原版 game.lua 把 shared_soul 直接放在 ASSET_ATLAS["centers"]
+// (即 Enhancers.png) 的 {x=0,y=1} 格子里——是一块完整的白水晶贴图，不是从塔罗中抠像素。
+// 这里只要按 card.lua: 4503-4509 的 scale_mod / rotate_mod / dissolve glow 浮动叠层即可。
+void paintSoulCrystal(QPainter *p, const QRectF &rect, const QPixmap &enhancersSheet);
 
 // 给 shop 里平面卡包做接近 booster.fs 的立体贴图；返回的 pixmap 本体留边很小，不会再被 QIcon 压小。
 QPixmap makeBooster3DPixmap(const QPixmap &base);

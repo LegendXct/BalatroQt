@@ -37,78 +37,91 @@ static bool hologramSoulPos(JokerType t, QPoint &out)
     return false;
 }
 
-static void paintHologramFloatingSprite(QPainter *p, QPixmap *sheet, JokerType type)
+void JokerItem::drawFloatingSprite(QPainter *p, const QRectF &dst, JokerType type, bool animated)
 {
-    QPoint soul;
-    if (!sheet || sheet->isNull() || !hologramSoulPos(type, soul)) return;
+    if (!p || !sSheet || sSheet->isNull()) return;
 
-    const qreal t = QDateTime::currentMSecsSinceEpoch() / 1000.0;
-    const qreal scaleMod = 1.0 + 2.0 * (0.07 + 0.02 * std::sin(1.8 * t));
-    const qreal rotateDeg = (2.0 * (0.05 * std::sin(1.219 * t))) * 180.0 / 3.14159265358979323846;
-    const qreal yBob = std::sin(t * 1.7) * 2.0;
+    QPoint soul;
+    bool isLegendary = legendarySoulPos(type, soul);
+    bool isHologram  = !isLegendary && hologramSoulPos(type, soul);
+    if (!isLegendary && !isHologram) return;
+
+    const qreal t = animated ? (QDateTime::currentMSecsSinceEpoch() / 1000.0) : 0.0;
+
     QRect src(soul.x() * JokerItem::WIDTH, soul.y() * JokerItem::HEIGHT,
               JokerItem::WIDTH, JokerItem::HEIGHT);
 
-    auto draw = [&](qreal extraScale, qreal opacity, QPainter::CompositionMode mode, qreal dx) {
+    if (isHologram) {
+        // 原版：scale_mod = 0.07 + 0.02*sin(1.8t)；rotate_mod = 0.05*sin(1.219t)；
+        // floating_sprite 走 'hologram' shader。这里用 Qt 转写：先两层屏幕混合彩晕，再正常画主体，再叠 holo 流光。
+        const qreal scaleMod = 1.0 + 0.07 + 0.02 * std::sin(1.8 * t);
+        const qreal rotateDeg = 0.05 * std::sin(1.219 * t) * 180.0 / 3.14159265358979323846;
+        const qreal yBob = animated ? std::sin(t * 1.7) * 2.0 : 0.0;
+
+        auto draw = [&](qreal extraScale, qreal opacity, QPainter::CompositionMode mode, qreal dx) {
+            p->save();
+            p->setRenderHint(QPainter::SmoothPixmapTransform, true);
+            p->setCompositionMode(mode);
+            p->setOpacity(opacity);
+            p->translate(dst.center().x() + dx, dst.center().y() + yBob);
+            p->rotate(rotateDeg);
+            p->scale(scaleMod + extraScale, scaleMod + extraScale);
+            p->translate(-dst.width() / 2.0, -dst.height() / 2.0);
+            p->drawPixmap(QRectF(0, 0, dst.width(), dst.height()), *sSheet, src);
+            p->restore();
+        };
+
+        draw(0.06, 0.30, QPainter::CompositionMode_Screen, -2.4);
+        draw(0.04, 0.26, QPainter::CompositionMode_Screen,  2.4);
+        draw(0.00, 1.00, QPainter::CompositionMode_SourceOver, 0.0);
+
+        BalatroShaders::paintHologramShader(p, dst, 1.2);
+        return;
+    }
+
+    // 传奇小丑：scale_mod 较平缓，叠一层 dissolve 发光再画肖像。
+    const qreal scaleMod = animated ? (1.07 + 0.02 * std::sin(1.8 * t)) : 1.0;
+    const qreal rotateMod = animated ? (2.9 * std::sin(1.219 * t)) : 0.0;
+    const qreal yBob = animated ? (2.6 * std::sin(1.65 * t)) : 0.0;
+
+    auto drawLayer = [&](qreal scale, qreal opacity, QPainter::CompositionMode mode) {
         p->save();
         p->setRenderHint(QPainter::SmoothPixmapTransform, true);
         p->setCompositionMode(mode);
         p->setOpacity(opacity);
-        p->translate(JokerItem::WIDTH / 2.0 + dx, JokerItem::HEIGHT / 2.0 + yBob);
-        p->rotate(rotateDeg);
-        p->scale(scaleMod + extraScale, scaleMod + extraScale);
-        p->translate(-JokerItem::WIDTH / 2.0, -JokerItem::HEIGHT / 2.0);
-        p->drawPixmap(QRect(0, 0, JokerItem::WIDTH, JokerItem::HEIGHT), *sheet, src);
+        p->translate(dst.center().x(), dst.center().y() + yBob);
+        p->rotate(rotateMod);
+        p->scale(scale, scale);
+        p->translate(-dst.width() / 2.0, -dst.height() / 2.0);
+        p->drawPixmap(QRectF(0, 0, dst.width(), dst.height()), *sSheet, src);
         p->restore();
     };
 
-    // 近似原版 draw_shader('hologram')：多层偏移、屏幕混合、蓝紫流光。
-    draw(0.08, 0.25, QPainter::CompositionMode_Screen, -2.0);
-    draw(0.05, 0.22, QPainter::CompositionMode_Screen,  2.0);
-    draw(0.00, 0.92, QPainter::CompositionMode_SourceOver, 0.0);
+    drawLayer(scaleMod + 0.05, 0.40, QPainter::CompositionMode_Screen);
+    drawLayer(scaleMod,        1.00, QPainter::CompositionMode_SourceOver);
 
-    BalatroShaders::paintHologramShader(p, QRectF(0, 0, JokerItem::WIDTH, JokerItem::HEIGHT), 1.2);
+    p->save();
+    p->setCompositionMode(QPainter::CompositionMode_Screen);
+    p->setOpacity(animated ? (0.28 + 0.12 * std::sin(t * 2.4)) : 0.28);
+    QRadialGradient g(QPointF(dst.center().x(), dst.top() + dst.height() * 0.43 + yBob),
+                      dst.width() * 0.48);
+    g.setColorAt(0.0, QColor(255, 255, 255, 115));
+    g.setColorAt(0.45, QColor(200, 160, 255, 50));
+    g.setColorAt(1.0, QColor(255, 255, 255, 0));
+    p->fillRect(dst, g);
+    p->restore();
+}
+
+static void paintHologramFloatingSprite(QPainter *p, QPixmap *sheet, JokerType type)
+{
+    Q_UNUSED(sheet);
+    JokerItem::drawFloatingSprite(p, QRectF(0, 0, JokerItem::WIDTH, JokerItem::HEIGHT), type, true);
 }
 
 static void paintLegendaryFloatingSprite(QPainter *p, QPixmap *sheet, JokerType type)
 {
-    QPoint soul;
-    if (!sheet || sheet->isNull() || !legendarySoulPos(type, soul)) return;
-
-    const qreal t = QDateTime::currentMSecsSinceEpoch() / 1000.0;
-    const qreal scaleMod = 1.07 + 0.02 * std::sin(1.8 * t);
-    const qreal rotateMod = 2.9 * std::sin(1.219 * t);
-    const qreal yBob = 2.6 * std::sin(1.65 * t);
-    QRect src(soul.x() * JokerItem::WIDTH, soul.y() * JokerItem::HEIGHT,
-              JokerItem::WIDTH, JokerItem::HEIGHT);
-
-    auto drawLayer = [&](qreal scale, qreal opacity, qreal dx, qreal dy, QPainter::CompositionMode mode) {
-        p->save();
-        p->setRenderHint(QPainter::SmoothPixmapTransform, true);
-        p->setCompositionMode(mode);
-        p->setOpacity(opacity);
-        p->translate(JokerItem::WIDTH / 2.0 + dx, JokerItem::HEIGHT / 2.0 + dy + yBob);
-        p->rotate(rotateMod);
-        p->scale(scale, scale);
-        p->translate(-JokerItem::WIDTH / 2.0, -JokerItem::HEIGHT / 2.0);
-        p->drawPixmap(QRect(0, 0, JokerItem::WIDTH, JokerItem::HEIGHT), *sheet, src);
-        p->restore();
-    };
-
-    // 近似原版 card.lua: floating_sprite 先用 dissolve shader 画一层发光，再画主体。
-    drawLayer(scaleMod + 0.05, 0.40, 0, 0, QPainter::CompositionMode_Screen);
-    drawLayer(scaleMod,        1.00, 0, 0, QPainter::CompositionMode_SourceOver);
-
-    // 额外加一层周期性高光，让“人头像浮在背景前”的感觉更明显。
-    p->save();
-    p->setCompositionMode(QPainter::CompositionMode_Screen);
-    p->setOpacity(0.28 + 0.12 * std::sin(t * 2.4));
-    QRadialGradient g(QPointF(JokerItem::WIDTH * 0.50, JokerItem::HEIGHT * 0.43 + yBob), JokerItem::WIDTH * 0.48);
-    g.setColorAt(0.0, QColor(255, 255, 255, 115));
-    g.setColorAt(0.45, QColor(200, 160, 255, 50));
-    g.setColorAt(1.0, QColor(255, 255, 255, 0));
-    p->fillRect(QRectF(0, 0, JokerItem::WIDTH, JokerItem::HEIGHT), g);
-    p->restore();
+    Q_UNUSED(sheet);
+    JokerItem::drawFloatingSprite(p, QRectF(0, 0, JokerItem::WIDTH, JokerItem::HEIGHT), type, true);
 }
 
 void JokerItem::loadResources() {

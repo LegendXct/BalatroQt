@@ -153,6 +153,7 @@ public:
     void levelUpAllHands(int times = 1);
     void selectCurrentBlind();                       // 玩家从 BlindSelect 点"选择"
     bool justSkipped() const { return mJustSkipped; }
+    bool grosMichelExtinct() const { return mGrosMichelExtinct; }
 
     HandResult previewSelection(const QVector<int> &indices) const;
 signals:

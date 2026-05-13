@@ -16,6 +16,11 @@ public:
     static void loadResources();                  // main.cpp 里调一次
     static QPoint spritePos(JokerType type);      // 在 Jokers.png 里的(列,行)
 
+    // 在给定的 painter 上、给定的目标矩形里，画出小丑的“浮动 soul 层”（Hologram 上方的小丑、
+    // 五张传奇牌中央的肖像）。商店里 offerPixmap 也需要这一步，否则全息投影的卡只有空相框。
+    static void drawFloatingSprite(QPainter *p, const QRectF &dst, JokerType type,
+                                   bool animated = true);
+
     explicit JokerItem(const Joker &joker, QGraphicsItem *parent = nullptr);
 
     QRectF boundingRect() const override;

@@ -336,6 +336,15 @@ QPixmap ShopWidget::offerPixmap(const ShopOffer &o) const
         QPoint c = JokerItem::spritePos(o.joker);
         QPixmap pix = sheet.copy(c.x() * JokerItem::WIDTH, c.y() * JokerItem::HEIGHT,
                                  JokerItem::WIDTH, JokerItem::HEIGHT);
+        // 全息投影 / 五张传奇牌：原版 card.lua:4512-4523 走 floating_sprite 浮动层。
+        // 商店里如果只画 pos 主体，Hologram 看上去就是个空相框，传奇牌也少了肖像。
+        {
+            QPainter p(&pix);
+            p.setRenderHint(QPainter::Antialiasing, true);
+            p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+            JokerItem::drawFloatingSprite(&p, QRectF(0, 0, pix.width(), pix.height()),
+                                          o.joker, /*animated=*/false);
+        }
         if (o.jokerEdition != Edition::None) {
             QPainter p(&pix);
             p.setRenderHint(QPainter::Antialiasing, true);

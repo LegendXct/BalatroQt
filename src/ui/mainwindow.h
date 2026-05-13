@@ -233,6 +233,17 @@ private:
     int mDisplayedChips = 0;   // 当前显示中的 chips(动画过程中)
     int mDisplayedMult  = 0;
 
+    // 倍率×筹码 ≥ 目标分数时点燃的旗标，每手清空；用于火焰在分数累计过程中即时出现。
+    bool mFlameTriggered = false;
+    QWidget *mFlameOverlay = nullptr;        // 盖在 chipsRow 上方的火焰层
+    QWidget *mChipsRowWidget = nullptr;      // 引用 chipsRow 用于定位 mFlameOverlay
+    void triggerScoreFlame();                // 立即点火（带原版橙边）
+    void resetScoreFlame();                  // 复位边框与火焰
+
+    // 拖拽时记录上一次目标位置，避免每次 dragMoved 都触发 moveTo()
+    int mLastJokerDragTo = -1;
+    int mLastHandCardDragTo = -1;
+
     void updateHandPreview();
     void playScoreEvent(const ScoreEvent &ev);
     void animateScoreTotalThenFinalize(int gained, int delayAfterEvents);

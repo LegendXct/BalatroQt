@@ -1157,7 +1157,7 @@ bool GameState::buyPack(int idx, PackContent &out)
     mGold -= t.cost;
     out = generatePackContent(t.pack, t.packSize, hasVoucher(VoucherType::OmenGlobe), hasVoucher(VoucherType::Telescope),
                               ConsumableType::Planet_Pluto,
-                              ownedJokerTypes(), hasJokerDuplicateBypass());
+                              ownedJokerTypes(), hasJokerDuplicateBypass(), mGrosMichelExtinct);
 
     emit goldChanged();
     emit shopChanged();

@@ -655,6 +655,14 @@ JokerType Shop::randomJokerType(const QVector<JokerType> &alreadyRolled) const {
             continue;
         pool.append(t);
     }
+    // 退化时仅放开“重复”过滤，仍保留 gros_michel_extinct 规则。
+    if (pool.isEmpty()) {
+        for (JokerType t : jokerPool()) {
+            if (t == JokerType::GrosMichel && mGrosMichelExtinct) continue;
+            if (t == JokerType::Cavendish && !mGrosMichelExtinct) continue;
+            pool.append(t);
+        }
+    }
     if (pool.isEmpty()) pool = jokerPool();
     return pool[QRandomGenerator::global()->bounded(pool.size())];
 }

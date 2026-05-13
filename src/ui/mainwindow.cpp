@@ -29,6 +29,7 @@
 #include <QFrame>
 #include <QAbstractItemView>
 #include <cmath>
+#include "../utils/shadereffects.h"
 
 void MainWindow::loadFonts() {
     int pid = QFontDatabase::addApplicationFont(":/fonts/fonts/m6x11plus.ttf");
@@ -517,6 +518,22 @@ void MainWindow::setupLeftPanel() {
     chipsLayout->addWidget(lblX);
     chipsLayout->addWidget(mLblMult);
     layout->addWidget(chipsRow);
+
+    // 火焰层叠在 chipsRow 顶部正上方；触发时显示，按事件即时关闭。
+    // 用 QWidget 而非 QGraphicsItem，因为 chipsRow 在 mLeftPanel(QWidget)内、不在 mScene 上。
+    mChipsRowWidget = chipsRow;
+    mFlameOverlay = new QWidget(mLeftPanel);
+    mFlameOverlay->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    mFlameOverlay->setAttribute(Qt::WA_NoSystemBackground, true);
+    mFlameOverlay->setAttribute(Qt::WA_TranslucentBackground, true);
+    mFlameOverlay->hide();
+    // 把绘制委托给 BalatroShaders::paintFlame；用 60ms 定时器驱动重绘。
+    mFlameOverlay->installEventFilter(this);
+    auto *flameTimer = new QTimer(mFlameOverlay);
+    connect(flameTimer, &QTimer::timeout, mFlameOverlay, [this]() {
+        if (mFlameOverlay && mFlameOverlay->isVisible()) mFlameOverlay->update();
+    });
+    flameTimer->start(60);
 
     QWidget *bottomRow = new QWidget(mLeftPanel);
     auto *brl = new QHBoxLayout(bottomRow);
@@ -1417,6 +1434,13 @@ void MainWindow::onHandCardDragMoved(CardItem *card, QPointF scenePos)
     }
     to = qBound(0, to, n - 1);
 
+    // 只在“目标插槽改变”时让旁边的牌滑动；高频 dragMoved 触发不会再叠出抖动。
+    if (to == mLastHandCardDragTo) {
+        card->setZValue(600);
+        return;
+    }
+    mLastHandCardDragTo = to;
+
     QVector<CardItem*> visual = mHandCards;
     visual.removeAt(from);
     visual.insert(to, card);
@@ -1432,13 +1456,14 @@ void MainWindow::onHandCardDragMoved(CardItem *card, QPointF scenePos)
         int y = mHandY + (sel ? -50 : 0);
         ci->setBaseRotation(angleDeg);
         ci->setZValue(10 + vi);
-        ci->moveTo(QPointF(x, y), 120);
+        ci->moveTo(QPointF(x, y), 60);
     }
     card->setZValue(600);
 }
 
 void MainWindow::onHandCardDragReleased(CardItem *card, QPointF scenePos)
 {
+    mLastHandCardDragTo = -1;
     int from = mHandCards.indexOf(card);
     if (from < 0) { layoutHandCards(); return; }
 
@@ -1569,11 +1594,19 @@ void MainWindow::onHandPlayed()
     mLblHandName ->setText(r.name);
     mLblHandLevel->setText(QString("等级%1").arg(r.level));
 
+    // 新一手开始，先清掉上手残留的橙边/火焰，避免上一手已经达标的状态污染本手判定。
+    resetScoreFlame();
+
     // 原版先亮出牌型的基础筹码/倍率，再逐张牌、小丑实时累加。
     mDisplayedChips = r.baseChips;
     mDisplayedMult  = r.baseMult;
     mLblChips->setText(formatScoreNumber(mDisplayedChips));
     mLblMult ->setText(formatScoreNumber(mDisplayedMult));
+
+    // 极少数情况：基础筹码×倍率本身就已超过目标分（如已加多个等级的高级牌型），
+    // 也应立刻点火，不必等任何事件。
+    if (qint64(mDisplayedChips) * qint64(mDisplayedMult) >= qint64(mGameState->targetScore()))
+        triggerScoreFlame();
 
     // 总分本手结算结束前不立刻更新。
     int gained = static_cast<int>(r.chips * r.mult * r.xmult);
@@ -1953,6 +1986,14 @@ void MainWindow::onJokerDragMoved(JokerItem *item, QPointF scenePos)
     }
     to = qBound(0, to, n - 1);
 
+    // 关键：只在“目标插槽改变”时才让其他小丑滑动，dragMoved 高频触发不会再产生
+    // 重叠的 moveTo 动画导致抖动；并使用 60ms 的短动画，更接近原版即时跟手感。
+    if (to == mLastJokerDragTo) {
+        item->setZValue(650);
+        return;
+    }
+    mLastJokerDragTo = to;
+
     QVector<JokerItem*> visual = mJokerItems;
     visual.removeAt(from);
     visual.insert(to, item);
@@ -1962,13 +2003,14 @@ void MainWindow::onJokerDragMoved(JokerItem *item, QPointF scenePos)
         int x = startX + vi * step;
         int y = JOKER_Y + 18;
         ji->setZValue(20 + vi);
-        ji->moveTo(QPointF(x, y), 120);
+        ji->moveTo(QPointF(x, y), 60);
     }
     item->setZValue(650);
 }
 
 void MainWindow::onJokerDragReleased(JokerItem *item, QPointF scenePos)
 {
+    mLastJokerDragTo = -1;
     int from = mJokerItems.indexOf(item);
     if (from < 0) { refreshJokerSlots(); return; }
     int n = mJokerItems.size();
@@ -2318,6 +2360,12 @@ void MainWindow::showShopOverlay()
 
 bool MainWindow::eventFilter(QObject *obj, QEvent *ev)
 {
+    if (obj == mFlameOverlay && ev->type() == QEvent::Paint) {
+        QPainter p(mFlameOverlay);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        BalatroShaders::paintFlame(&p, QRectF(0, 0, mFlameOverlay->width(), mFlameOverlay->height()), 1.0);
+        return true;
+    }
     if (obj == mPlayPage && ev->type() == QEvent::Resize) {
         QRect r = mPlayPage->rect();
         if (mDynamicBg) {
@@ -2379,7 +2427,8 @@ void MainWindow::openImmediateTagPack(PackKind kind)
                                        mGameState->hasVoucher(VoucherType::Telescope),
                                        ConsumableType::Planet_Pluto,
                                        owned,
-                                       false);
+                                       false,
+                                       mGameState->grosMichelExtinct());
     mPendingPackHand.clear();
     if (kind == PackKind::Arcana || kind == PackKind::Spectral) {
         mPendingPackHand = mGameState->drawPackHand();
@@ -2449,6 +2498,7 @@ void MainWindow::onBlindStarted()
     mLblChips->setText("0");
     mLblMult ->setText("0");
     mScoringInProgress = false;
+    resetScoreFlame();
     if (mBtnPlay) mBtnPlay->setEnabled(true);
     if (mBtnDiscard) mBtnDiscard->setEnabled(true);
 }
@@ -2637,6 +2687,43 @@ void MainWindow::setPlayPhaseVisible(bool v)
     for (auto *c : mPlayedCards) c->setVisible(v);
 }
 
+void MainWindow::triggerScoreFlame()
+{
+    if (mFlameTriggered) return;
+    mFlameTriggered = true;
+
+    // 原版：本手 chips*mult ≥ 盲注目标分时，筹码与倍率边框立刻变成橙色，且上方有火焰。
+    const QString chipBase = "background:#009dff; color:white; border-radius:8px; padding:4px 8px;";
+    const QString multBase = "background:#fe5f55; color:white; border-radius:8px; padding:4px 8px;";
+    if (mLblChips) mLblChips->setStyleSheet(chipBase + " border:3px solid #ffb000;");
+    if (mLblMult)  mLblMult ->setStyleSheet(multBase + " border:3px solid #ffb000;");
+
+    if (!mFlameOverlay || !mChipsRowWidget || !mLeftPanel) return;
+
+    // 把火焰条贴在 chipsRow 顶部，宽度跟随 chipsRow，高度大约 chipsRow 高度的 70%
+    // 在 mLeftPanel 内坐标系下计算 chipsRow 的位置。
+    const QPoint topLeftInLeftPanel = mChipsRowWidget->mapTo(mLeftPanel, QPoint(0, 0));
+    const int w = mChipsRowWidget->width();
+    const int h = qMax(36, int(mChipsRowWidget->height() * 0.85));
+    // 火焰从顶部往上延伸；y = chipsRow.top - h*0.78（让火焰底部覆盖顶部一点点）
+    mFlameOverlay->setGeometry(topLeftInLeftPanel.x(),
+                               topLeftInLeftPanel.y() - int(h * 0.78),
+                               w, h);
+    mFlameOverlay->raise();
+    mFlameOverlay->show();
+    mFlameOverlay->update();
+}
+
+void MainWindow::resetScoreFlame()
+{
+    mFlameTriggered = false;
+    const QString chipBase = "background:#009dff; color:white; border-radius:8px; padding:4px 8px;";
+    const QString multBase = "background:#fe5f55; color:white; border-radius:8px; padding:4px 8px;";
+    if (mLblChips) mLblChips->setStyleSheet(chipBase);
+    if (mLblMult)  mLblMult ->setStyleSheet(multBase);
+    if (mFlameOverlay) mFlameOverlay->hide();
+}
+
 void MainWindow::spawnFloatingText(const QPointF &nearPos, const QString &text, const QColor &color)
 {
     auto *fs = new FloatingScore(text, color, mPixelFont);
@@ -2689,42 +2776,12 @@ void MainWindow::animateScoreTotalThenFinalize(int gained, int /*delayAfterEvent
         f.setPixelSize(30 + (v.toInt() % 2));
         mLblScore->setFont(f);
     });
-    connect(anim, &QVariantAnimation::finished, this, [this, after, gained]() {
+    connect(anim, &QVariantAnimation::finished, this, [this, after]() {
         mLblScore->setText(formatScoreNumber(after));
-        if (gained >= mGameState->targetScore()) {
-            // 原版是“本手得分本身超过盲注目标”时，筹码×倍率框开始燃烧；
-            // 不是累计总分达到目标就燃烧。
-            const QString chipBase = "background:#009dff; color:white; border-radius:8px; padding:4px 8px;";
-            const QString multBase = "background:#fe5f55; color:white; border-radius:8px; padding:4px 8px;";
-            mLblChips->setStyleSheet(chipBase + " border:3px solid #ffb000;");
-            mLblMult ->setStyleSheet(multBase + " border:3px solid #ffb000;");
-            for (int i = 0; i < 8; ++i) {
-                auto *flame = new FloatingScore("🔥", QColor("#ff9a00"), mPixelFont);
-                flame->setZValue(120);
-                flame->setPos(QPointF(18 + i * 34, 298 - (i % 3) * 10));
-                mScene->addItem(flame);
-                auto *move = new QPropertyAnimation(flame, "pos", this);
-                move->setDuration(760);
-                move->setStartValue(flame->pos());
-                move->setEndValue(flame->pos() + QPointF(0, -62));
-                auto *fade = new QPropertyAnimation(flame, "opacity", this);
-                fade->setDuration(760);
-                fade->setStartValue(1.0);
-                fade->setEndValue(0.0);
-                auto *group = new QParallelAnimationGroup(this);
-                group->addAnimation(move);
-                group->addAnimation(fade);
-                connect(group, &QParallelAnimationGroup::finished, flame, [this, flame]() {
-                    if (flame->scene()) mScene->removeItem(flame);
-                    flame->deleteLater();
-                });
-                group->start(QAbstractAnimation::DeleteWhenStopped);
-            }
-            QTimer::singleShot(900, this, [this, chipBase, multBase]() {
-                if (mLblChips) mLblChips->setStyleSheet(chipBase);
-                if (mLblMult)  mLblMult ->setStyleSheet(multBase);
-            });
-        }
+        // 火焰/橙边的触发已经由 playScoreEvent 在每个事件累加后即时完成；
+        // 收尾阶段只负责把橙边/火焰收回（出牌结算落地后再清，留出 800ms 观感）。
+        QTimer::singleShot(900, this, [this]() { resetScoreFlame(); });
+
         animatePlayedCardsToDiscardThen([this]() {
             mGameState->finalizePlayedHand();
             mScoringInProgress = false;
@@ -2949,4 +3006,13 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev)
     }
 
     spawnFloatingText(anchorPos, text, color);
+
+    // ★ 关键：每个事件更新完 displayed chips/mult 之后立刻判定。
+    // 一旦 chips × mult ≥ 目标分，立即变橙边并喷火焰；不等结算结束。
+    // 用 qint64 避免高底注阶段的整型溢出。
+    if (!mFlameTriggered &&
+        qint64(mDisplayedChips) * qint64(mDisplayedMult) >= qint64(mGameState->targetScore()))
+    {
+        triggerScoreFlame();
+    }
 }

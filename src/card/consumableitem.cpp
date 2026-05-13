@@ -101,10 +101,10 @@ QPixmap ConsumableItem::renderPixmap(ConsumableType type, bool negative)
     }
 
     // 原版 The Soul 不是单张平面图：背景牌面之外，额外绘制 G.shared_soul
-    // 这个前景白水晶层必须出现在所有地方：仓库、商店、开包选项。
+    // (来自 Enhancers.png 的 {x=0,y=1} 白水晶格)。这层必须出现在所有地方：仓库、商店、开包选项。
     if (type == ConsumableType::Spectral_Soul) {
-        static QPixmap tarotSheet(QStringLiteral(":/textures/images/Tarots.png"));
-        BalatroShaders::paintSoulCrystal(&p, QRectF(0, 0, WIDTH, HEIGHT), tarotSheet);
+        static QPixmap enhSheet(QStringLiteral(":/textures/images/Enhancers.png"));
+        BalatroShaders::paintSoulCrystal(&p, QRectF(0, 0, WIDTH, HEIGHT), enhSheet);
     }
 
     if (negative) {

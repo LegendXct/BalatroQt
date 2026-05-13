@@ -187,45 +187,15 @@ static void paintMovingStripe(QPainter *p, const QRectF &r, const QColor &c, dou
     p->fillRect(r, stripe);
 }
 
-static QPixmap makeSoulForeground(const QPixmap &tarotSheet)
+static QPixmap makeSoulForeground(const QPixmap &enhancersSheet)
 {
-    // 只从 Tarots.png 的 Spectral_Soul {x=2,y=2} 提取中心白水晶/旋涡。
-    // 这样不会使用错误的 Enhancers 白底层，比例也跟原版灵魂牌一致。
+    // 原版 game.lua:171
+    //   self.shared_soul = Sprite(0, 0, CARD_W, CARD_H, ASSET_ATLAS["centers"], P_CENTERS.soul.pos)
+    // 而 P_CENTERS.soul.pos = {x=0, y=1}（见 game.lua:699），atlas "centers" == Enhancers.png。
+    // 所以白水晶直接来自 Enhancers.png 的 (0,190)-(142,380) 这一格，不需要从塔罗里抠像素。
     constexpr int W = 142, H = 190;
-    if (tarotSheet.isNull()) return QPixmap();
-    QImage src = tarotSheet.copy(2 * W, 2 * H, W, H).toImage().convertToFormat(QImage::Format_ARGB32);
-    QImage out(W, H, QImage::Format_ARGB32);
-    out.fill(Qt::transparent);
-
-    for (int y = 0; y < H; ++y) {
-        for (int x = 0; x < W; ++x) {
-            const QColor c = QColor::fromRgba(src.pixel(x, y));
-            if (c.alpha() < 10) continue;
-
-            // 中心层范围；避开外框、牌名、顶部文字和底部边框。
-            if (x < 22 || x > 120 || y < 27 || y > 150) continue;
-
-            const int maxc = std::max({c.red(), c.green(), c.blue()});
-            const int minc = std::min({c.red(), c.green(), c.blue()});
-            const int lum = int(0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue());
-            const bool whiteCrystal = lum > 118 && (maxc - minc) < 90;
-            const bool blueSoulLine = c.blue() > 115 && c.blue() > c.red() + 12 && c.green() > 70;
-            const bool yellowSpark = c.red() > 155 && c.green() > 125 && c.blue() < 135;
-
-            if (whiteCrystal || blueSoulLine || yellowSpark) {
-                QColor o = c;
-                int alpha = c.alpha();
-                // 中心越接近，越完整；边缘渐隐，避免把整张牌抠出来。
-                const double dx = (x - W * 0.5) / (W * 0.43);
-                const double dy = (y - H * 0.48) / (H * 0.47);
-                const double radial = clamp01(1.22 - std::sqrt(dx * dx + dy * dy));
-                alpha = int(alpha * clamp01(0.20 + radial * 1.15));
-                o.setAlpha(alpha);
-                out.setPixelColor(x, y, o);
-            }
-        }
-    }
-    return QPixmap::fromImage(out);
+    if (enhancersSheet.isNull()) return QPixmap();
+    return enhancersSheet.copy(0, H, W, H);
 }
 } // namespace
 
@@ -545,40 +515,50 @@ void paintGoldSealGlow(QPainter *p, const QRectF &r, double intensity)
     p->restore();
 }
 
-void paintSoulCrystal(QPainter *p, const QRectF &rect, const QPixmap &tarotSheet)
+void paintSoulCrystal(QPainter *p, const QRectF &rect, const QPixmap &enhancersSheet)
 {
     if (!p) return;
     static QPixmap cached;
     static quint64 key = 0;
-    quint64 currentKey = tarotSheet.cacheKey();
+    quint64 currentKey = enhancersSheet.cacheKey();
     if (cached.isNull() || key != currentKey) {
-        cached = makeSoulForeground(tarotSheet);
+        cached = makeSoulForeground(enhancersSheet);
         key = currentKey;
     }
 
+    // card.lua:4504-4505：scale_mod / rotate_mod 是带高频脉动的浮动公式。
     const double t = shaderTime();
     const double frac = t - std::floor(t);
-    const double scaleMod = 0.05 + 0.05 * std::sin(1.8 * t) + 0.07 * std::sin(frac * PI * 14.0) * std::pow(1.0 - frac, 3.0);
-    const double rotateMod = 0.10 * std::sin(1.219 * t) + 0.07 * std::sin(t * PI * 5.0) * std::pow(1.0 - frac, 2.0);
+    const double scaleMod = 0.05 + 0.05 * std::sin(1.8 * t)
+                          + 0.07 * std::sin(frac * PI * 14.0) * std::pow(1.0 - frac, 3.0);
+    const double rotateMod = 0.10 * std::sin(1.219 * t)
+                           + 0.07 * std::sin(t * PI * 5.0) * std::pow(1.0 - frac, 2.0);
 
     p->save();
     p->setRenderHint(QPainter::SmoothPixmapTransform, true);
     p->setRenderHint(QPainter::Antialiasing, true);
 
-    // 原版 shared_soul 也是整卡尺寸 sprite，但只在中心有像素。必须整卡对齐，不能局部缩小。
+    // 整卡居中再做 rotate / scale，对齐原版 floating_sprite 的浮动方式。
     const QPointF c = rect.center();
     p->translate(c);
     p->rotate(rotateMod * 180.0 / PI);
     p->scale(1.0 + scaleMod, 1.0 + scaleMod);
     p->translate(-c);
 
-    paintDissolveGlow(p, rect, QColor(255,255,255,92), QColor(120,180,255,72), 1.2);
+    // 先画一层 dissolve glow 模拟 G.shared_soul:draw_shader('dissolve', 0, ..., 0.1+0.03sin(1.8t))
+    paintDissolveGlow(p, rect, QColor(255, 255, 255, 110), QColor(170, 215, 255, 80), 1.25);
+
     if (!cached.isNull()) {
-        p->setOpacity(0.98);
-        p->drawPixmap(rect, cached, QRectF(0, 0, cached.width(), cached.height()));
         p->setOpacity(1.0);
+        p->setCompositionMode(QPainter::CompositionMode_SourceOver);
+        p->drawPixmap(rect, cached, QRectF(0, 0, cached.width(), cached.height()));
+        // 再叠一层柔光让水晶看着发亮。
         p->setCompositionMode(QPainter::CompositionMode_Screen);
-        paintMovingStripe(p, rect.adjusted(12, 20, -12, -22), QColor(255,255,255,95), 0.55, 0.30);
+        QRadialGradient rg(rect.center(), rect.width() * 0.45);
+        rg.setColorAt(0.0, QColor(255, 255, 255, int(75 + 35 * std::sin(1.8 * t))));
+        rg.setColorAt(0.55, QColor(190, 220, 255, 40));
+        rg.setColorAt(1.0, QColor(255, 255, 255, 0));
+        p->fillRect(rect, rg);
     }
     p->restore();
 }
