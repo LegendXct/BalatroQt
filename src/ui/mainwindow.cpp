@@ -456,20 +456,92 @@ void MainWindow::setupLeftPanel() {
     btnInfo->setFixedWidth(76);
     btnVbl->addWidget(btnInfo);
     connect(btnInfo, &QPushButton::clicked, this, [this]() {
-        QMessageBox::information(this, "比赛信息",
-            QString("盲注目标：%1\n当前分数：%2\n底注：%3/8\n剩余出牌：%4\n剩余弃牌：%5")
-                .arg(mGameState->targetScore())
-                .arg(mGameState->score())
-                .arg(mGameState->ante())
-                .arg(mGameState->handsLeft())
-                .arg(mGameState->discardLeft()));
+        auto handName = [](HandType t) {
+            switch (t) {
+            case HandType::HighCard: return QString("高牌");
+            case HandType::Pair: return QString("对子");
+            case HandType::TwoPair: return QString("两对");
+            case HandType::ThreeOfAKind: return QString("三条");
+            case HandType::Straight: return QString("顺子");
+            case HandType::Flush: return QString("同花");
+            case HandType::FullHouse: return QString("葫芦");
+            case HandType::FourOfAKind: return QString("四条");
+            case HandType::StraightFlush: return QString("同花顺");
+            case HandType::RoyalFlush: return QString("皇家同花顺");
+            case HandType::FiveOfAKind: return QString("五条");
+            case HandType::FlushHouse: return QString("同花葫芦");
+            case HandType::FlushFive: return QString("同花五条");
+            }
+            return QString("未知");
+        };
+
+        auto baseScore = [](HandType t) -> QPair<int,int> {
+            switch (t) {
+            case HandType::HighCard: return {Constants::BASE_HIGH_CARD_CHIPS, Constants::BASE_HIGH_CARD_MULT};
+            case HandType::Pair: return {Constants::BASE_PAIR_CHIPS, Constants::BASE_PAIR_MULT};
+            case HandType::TwoPair: return {Constants::BASE_TWO_PAIR_CHIPS, Constants::BASE_TWO_PAIR_MULT};
+            case HandType::ThreeOfAKind: return {Constants::BASE_THREE_CHIPS, Constants::BASE_THREE_MULT};
+            case HandType::Straight: return {Constants::BASE_STRAIGHT_CHIPS, Constants::BASE_STRAIGHT_MULT};
+            case HandType::Flush: return {Constants::BASE_FLUSH_CHIPS, Constants::BASE_FLUSH_MULT};
+            case HandType::FullHouse: return {Constants::BASE_FULL_HOUSE_CHIPS, Constants::BASE_FULL_HOUSE_MULT};
+            case HandType::FourOfAKind: return {Constants::BASE_FOUR_CHIPS, Constants::BASE_FOUR_MULT};
+            case HandType::StraightFlush: return {Constants::BASE_STRAIGHT_FLUSH_CHIPS, Constants::BASE_STRAIGHT_FLUSH_MULT};
+            case HandType::RoyalFlush: return {Constants::BASE_ROYAL_FLUSH_CHIPS, Constants::BASE_ROYAL_FLUSH_MULT};
+            case HandType::FiveOfAKind: return {Constants::BASE_FIVE_CHIPS, Constants::BASE_FIVE_MULT};
+            case HandType::FlushHouse: return {Constants::BASE_FLUSH_HOUSE_CHIPS, Constants::BASE_FLUSH_HOUSE_MULT};
+            case HandType::FlushFive: return {Constants::BASE_FLUSH_FIVE_CHIPS, Constants::BASE_FLUSH_FIVE_MULT};
+            }
+            return {0,0};
+        };
+
+        QString text;
+        text += QString("当前盲注目标：%1\n当前分数：%2\n底注：%3/8\n剩余出牌：%4　剩余弃牌：%5\n\n")
+                    .arg(mGameState->targetScore())
+                    .arg(mGameState->score())
+                    .arg(mGameState->ante())
+                    .arg(mGameState->handsLeft())
+                    .arg(mGameState->discardLeft());
+
+        text += "牌型等级：\n";
+        QVector<HandType> order = {
+            HandType::HighCard, HandType::Pair, HandType::TwoPair, HandType::ThreeOfAKind,
+            HandType::Straight, HandType::Flush, HandType::FullHouse, HandType::FourOfAKind,
+            HandType::StraightFlush, HandType::FiveOfAKind, HandType::FlushHouse, HandType::FlushFive
+        };
+        const auto &levels = mGameState->handLevels();
+        for (HandType t : order) {
+            const HandLevel lv = levels.value(t);
+            text += QString("  等级%1　%2　%3×%4　#%5\n")
+                        .arg(lv.level).arg(handName(t))
+                        .arg(baseScore(t).first + lv.chipsBonus)
+                        .arg(baseScore(t).second + lv.multBonus)
+                        .arg(lv.played);
+        }
+
+        text += "\n已兑换优惠券：";
+        if (mGameState->redeemedVouchers().isEmpty()) {
+            text += "无";
+        } else {
+            text += "\n";
+            for (VoucherType v : mGameState->redeemedVouchers())
+                text += "  · " + voucherData(v).name + "：" + voucherData(v).description + "\n";
+        }
+
+        QMessageBox::information(this, "比赛信息", text);
     });
 
     QPushButton *btnOptions = makeBtn("选项", "#fda200", "#ffb730", mCNFont, btnCol, 70);
     btnOptions->setFixedWidth(76);
     btnVbl->addWidget(btnOptions);
     connect(btnOptions, &QPushButton::clicked, this, [this]() {
-        QMessageBox::information(this, "选项", "Esc：关闭窗口\n右下角牌组：查看剩余/完整牌组\n点数/花色：切换自动理牌模式\n拖动手牌/小丑：调整顺序");
+        QMessageBox::information(this, "选项",
+            "操作：\n"
+            "  · 点数 / 花色：切换自动理牌方式，之后每次补牌都会自动按该方式排序\n"
+            "  · 拖动手牌：只调整当前顺序，不会永久关闭自动理牌\n"
+            "  · 点击小丑：展开说明与售出按钮\n"
+            "  · 右下角牌组：查看剩余牌组 / 完整牌组\n"
+            "  · Esc：关闭当前窗口\n\n"
+            "调试提示：当前版本负片小丑概率仍保持 20%，方便测试槽位和重叠 UI。");
     });
 
     brl->addWidget(btnCol);
@@ -1388,6 +1460,23 @@ void MainWindow::showJokerInfo(int idx, bool showSellButton)
         desc += QString("\n当前增强牌 [%1/16] %2")
                     .arg(enhanced)
                     .arg(enhanced >= 16 ? "已生效：X3" : "未生效");
+    } else if (j.type == JokerType::IceCream) {
+        desc += QString("\n当前：+%1 筹码\n每次出牌后 -5 筹码").arg(qMax(0, j.counter));
+    } else if (j.type == JokerType::Stuntman) {
+        desc += "\n当前：+250 筹码；手牌上限 -2";
+    } else if (j.type == JokerType::DNA) {
+        desc += QString("\n状态：%1")
+                    .arg(mGameState->dnaCanTriggerThisPlay() ? "本次出 1 张可触发" : "仅本盲注第一次出牌且只出 1 张时触发");
+    } else if (j.type == JokerType::Blueprint) {
+        if (idx + 1 < mGameState->jokers().size())
+            desc += QString("\n当前指向右侧：%1").arg(mGameState->jokers()[idx + 1].name);
+        else
+            desc += "\n右侧没有可复制小丑";
+    } else if (j.type == JokerType::Brainstorm) {
+        if (!mGameState->jokers().isEmpty() && idx != 0)
+            desc += QString("\n当前指向最左侧：%1").arg(mGameState->jokers().first().name);
+        else
+            desc += "\n当前没有可复制小丑";
     }
     mJokerInfoDesc->setText(desc);
     mJokerSellButton->setText(QString("售出　+$%1").arg(qMax(1, j.sellValue)));

@@ -394,13 +394,14 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::IceCream:
-        j.name = "冰淇淋"; j.description = "+100 筹码";
+        j.name = "冰淇淋"; j.description = "+100 筹码，每次出牌后 -5 筹码";
+        j.counter = 100;
         j.timing = TriggerTiming::Passive;
-        j.effect = [](TriggerContext &ctx) { ctx.result.chips += 100; };
+        j.effect = [](TriggerContext &ctx) { ctx.result.chips += 100; }; // 实际数值由 GameState 根据 counter 覆盖
         break;
 
     case JokerType::Stuntman:
-        j.name = "特技演员"; j.description = "+250 筹码";
+        j.name = "特技演员"; j.description = "+250 筹码，手牌上限 -2";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &ctx) { ctx.result.chips += 250; };
         break;
@@ -622,13 +623,11 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::DNA:
-        j.name = "DNA"; j.description = "若本回合出牌只有 1 张，复制该牌到手牌";
+        j.name = "DNA"; j.description = "若本盲注第一次出牌只有 1 张，永久复制该牌并放入手牌";
         j.timing = TriggerTiming::OnPlayedHand;
         j.effect = [](TriggerContext &ctx) {
-            if (ctx.scoringCards.size() == 1) {
-                ctx.state.handMutable().append(ctx.scoringCards.first());
-                ctx.state.notifyHandChanged();
-            }
+            if (ctx.scoringCards.size() == 1)
+                ctx.state.createDNACopy(ctx.scoringCards.first());
         };
         break;
 

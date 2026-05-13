@@ -69,6 +69,7 @@ public:
     int targetScore() const {return mTargetScore;}
     int ante() const {return mAnte;}
     int jokerSlots() const;
+    int currentBlindStartingHands() const { return mBlindStartingHands; }
     BlindType blindType() const {return mBlindType;}
     GamePhase phase() const {return mPhase;}
     void addGold(int amount) {mGold += amount; emit goldChanged();}
@@ -95,6 +96,7 @@ public:
     bool canAddJokerWithEdition(Edition edition) const;
     bool buyVoucherOffer(int offerIdx);
     bool hasVoucher(VoucherType t) const;
+    const QVector<VoucherType> &redeemedVouchers() const { return mRedeemedVouchers; }
 
     const QHash<HandType, HandLevel> &handLevels() const { return mHandLevels; }
     void levelUpHand(HandType t, int times = 1);   // 行星牌用
@@ -142,6 +144,8 @@ public:
     void addPermanentHandSizeBonus(int delta);
     void immolateRandomHandCards(int destroyCount, int goldGain);
     void notifyPlayingCardDestroyed(const CardData &card);
+    bool dnaCanTriggerThisPlay() const;
+    void createDNACopy(const CardData &card);
     double cainoXMult() const { return mCainoXMult; }
     double yorickXMult() const { return mYorickXMult; }
     int yorickDiscardsRemaining() const { return mYorickDiscardsRemaining; }
@@ -223,6 +227,10 @@ private:
     int mExtraJokerSlots = 0;
     int mOneRoundHandSizeBonus = 0;
     int mPendingInvestmentBonus = 0;
+    int mBlindStartingHands = Constants::INITIAL_HANDS;
+    bool mDNAUsedThisBlind = false;
+    bool mDNAEligibleThisPlay = false;
+    int mDNACopiesCreatedThisPlay = 0;
     bool mTagVoucherNextShop = false;
     PackKind mTagFreePackKind = PackKind::Standard;
     bool mHasTagFreePack = false;
@@ -250,6 +258,7 @@ private:
     bool hasJokerDuplicateBypass() const;
     void syncShopJokerRules();
     void scoreCard(const CardData &card, HandResult &result, int playedIdx);
+    void decayEndOfHandJokers();
     static ConsumableType planetTypeFor(HandType t);
 };
 

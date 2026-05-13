@@ -58,6 +58,41 @@ static bool bossDebuffsCard(BossEffect effect, const CardData &c)
     return false;
 }
 
+// 原版 Blueprint / Brainstorm 会递归调用被复制小丑的 calculate_joker。
+// 这里用安全递归解析：蓝图复制右侧；头脑风暴复制最左侧；链式复制允许
+// Blueprint -> Blueprint -> DNA、Brainstorm -> Blueprint -> DNA 这类组合。
+static const Joker *resolveCopiedJoker(const QVector<Joker> &jokers, int idx)
+{
+    QSet<int> seen;
+    int cur = idx;
+    for (int guard = 0; guard < jokers.size() + 2; ++guard) {
+        if (cur < 0 || cur >= jokers.size()) return nullptr;
+        if (seen.contains(cur)) return nullptr;
+        seen.insert(cur);
+
+        const Joker &j = jokers[cur];
+        if (j.type == JokerType::Blueprint) {
+            cur = cur + 1;
+            continue;
+        }
+        if (j.type == JokerType::Brainstorm) {
+            cur = 0;
+            continue;
+        }
+        return &j;
+    }
+    return nullptr;
+}
+
+static void applyResolvedJokerEffect(const Joker &j, TriggerContext &ctx)
+{
+    if (j.type == JokerType::IceCream) {
+        ctx.result.chips += qMax(0, j.counter);
+        return;
+    }
+    j.effect(ctx);
+}
+
 static auto suitComp = [](const CardData &a, const CardData &b) {
     if (a.suit != b.suit) return static_cast<int>(a.suit) < static_cast<int>(b.suit);
     return static_cast<int>(a.rank) > static_cast<int>(b.rank);
@@ -151,6 +186,13 @@ void GameState::playCards(const QVector<int> &indices) {
     // 取出 played，评分动画期间暂时不补牌；补牌要等所有计分动画和收牌动画结束后再做。
     QVector<CardData> played;
     for (int i : sorted) played.append(mHand[i]);
+
+    // DNA：只有本盲注第一次出牌且只打 1 张牌时生效。
+    // 多个 DNA / 蓝图 / 头脑风暴复制 DNA 时，本次出牌可以创建多张复制牌。
+    const bool firstHandOfBlind = (mHandsLeft == mBlindStartingHands);
+    mDNAEligibleThisPlay = (!mDNAUsedThisBlind && firstHandOfBlind && sorted.size() == 1);
+    if (firstHandOfBlind) mDNAUsedThisBlind = true;
+    mDNACopiesCreatedThisPlay = 0;
 
     HandResult result = HandEvaluator::evaluate(played);
     if (bossBlocksPlayedHand(result, played.size())) {
@@ -247,22 +289,12 @@ void GameState::playCards(const QVector<int> &indices) {
             const Joker &j = mJokers[ji];
             if (j.isDebuffed) continue;
 
-            const Joker *effectJoker = &j;
-            if (j.type == JokerType::Blueprint) {
-                int target = ji + 1;
-                if (target >= mJokers.size() || mJokers[target].type == JokerType::Blueprint ||
-                    mJokers[target].type == JokerType::Brainstorm) effectJoker = nullptr;
-                else effectJoker = &mJokers[target];
-            } else if (j.type == JokerType::Brainstorm) {
-                if (mJokers.isEmpty() || ji == 0 || mJokers[0].type == JokerType::Blueprint ||
-                    mJokers[0].type == JokerType::Brainstorm) effectJoker = nullptr;
-                else effectJoker = &mJokers[0];
-            }
+            const Joker *effectJoker = resolveCopiedJoker(mJokers, ji);
 
-            if (effectJoker &&
+            if (effectJoker && !effectJoker->isDebuffed &&
                 (effectJoker->timing == TriggerTiming::Passive ||
                  effectJoker->timing == TriggerTiming::OnPlayedHand)) {
-                effectJoker->effect(ctx);
+                applyResolvedJokerEffect(*effectJoker, ctx);
             }
 
             switch (j.edition) {
@@ -329,6 +361,14 @@ void GameState::finalizePlayedHand()
     mPendingPlayedIndices.clear();
     mPendingShattered.clear();
     mPendingHandScore = 0;
+
+    if (mDNACopiesCreatedThisPlay > 0) {
+        mDNAUsedThisBlind = true;
+        mDNAEligibleThisPlay = false;
+        mDNACopiesCreatedThisPlay = 0;
+    }
+
+    decayEndOfHandJokers();
 
     applyBossPostPlay();
     applyBossDebuffs();
@@ -848,9 +888,43 @@ int GameState::consumableSlots() const {
 
 int GameState::handSize() const {
     int size = Constants::HAND_SIZE + mExtraHandSize + mOneRoundHandSizeBonus;
+    for (const Joker &j : mJokers) {
+        if (!j.isDebuffed && j.type == JokerType::Stuntman) size -= 2;
+    }
     if (mPhase == GamePhase::Blind && mBlindType == BlindType::Boss &&
         mBossEffect == BossEffect::TheManacle && !hasJokerType(JokerType::Chicot)) size -= 1;
     return qMax(1, size);
+}
+
+
+bool GameState::dnaCanTriggerThisPlay() const
+{
+    return mPhase == GamePhase::Blind && mDNAEligibleThisPlay;
+}
+
+void GameState::createDNACopy(const CardData &card)
+{
+    if (!dnaCanTriggerThisPlay()) return;
+    CardData copy = card;
+    copy.faceUp = true;
+    copy.isDebuffed = false;
+    // 原版 DNA 会永久复制到牌组，并把复制牌放入手牌。
+    // 这里先放进手牌；之后它会像普通牌一样被弃牌/回收到牌组，不再额外塞一份到摸牌堆。
+    mHand.append(copy);
+    ++mDNACopiesCreatedThisPlay;
+    emit handChanged();
+}
+
+void GameState::decayEndOfHandJokers()
+{
+    bool changed = false;
+    for (Joker &j : mJokers) {
+        if (j.type == JokerType::IceCream && j.counter > 0) {
+            j.counter = qMax(0, j.counter - 5);
+            changed = true;
+        }
+    }
+    if (changed) emit jokersChanged();
 }
 
 void GameState::scoreCard(const CardData &card, HandResult &result, int playedIdx)
@@ -919,22 +993,12 @@ void GameState::scoreCard(const CardData &card, HandResult &result, int playedId
         const Joker &j = mJokers[ji];
         if (j.isDebuffed) continue;
 
-        const Joker *effectJoker = &j;
-        if (j.type == JokerType::Blueprint) {
-            int target = ji + 1;
-            if (target >= mJokers.size() || mJokers[target].type == JokerType::Blueprint ||
-                mJokers[target].type == JokerType::Brainstorm) effectJoker = nullptr;
-            else effectJoker = &mJokers[target];
-        } else if (j.type == JokerType::Brainstorm) {
-            if (mJokers.isEmpty() || ji == 0 || mJokers[0].type == JokerType::Blueprint ||
-                mJokers[0].type == JokerType::Brainstorm) effectJoker = nullptr;
-            else effectJoker = &mJokers[0];
-        }
+        const Joker *effectJoker = resolveCopiedJoker(mJokers, ji);
 
-        if (!effectJoker || effectJoker->timing != TriggerTiming::OnScoringCard) continue;
+        if (!effectJoker || effectJoker->isDebuffed || effectJoker->timing != TriggerTiming::OnScoringCard) continue;
 
         TriggerContext ctx{ result, *this, mHand, result.scoringCards, &card };
-        effectJoker->effect(ctx);
+        applyResolvedJokerEffect(*effectJoker, ctx);
 
         if (result.chips != chipsBefore) {
             result.events.append({ ScoreEventKind::JokerChip, playedIdx, -1, ji,
@@ -1398,12 +1462,16 @@ void GameState::startBlind(BlindType type)
     mBlindType = type;
     mScore = 0;
     mHandsLeft = qMax(1, Constants::INITIAL_HANDS + mExtraHandsPerRound);
+    mBlindStartingHands = mHandsLeft;
+    mDNAUsedThisBlind = false;
+    mDNAEligibleThisPlay = false;
+    mDNACopiesCreatedThisPlay = 0;
     mDiscardLeft = qMax(0, Constants::INITIAL_DISCARDS + mExtraDiscardsPerRound);
 
     if (type == BlindType::Boss) {
         mBossEffect = mPendingBossEffect;     // 用预先确定的
         if (!hasJokerType(JokerType::Chicot)) {
-            if (mBossEffect == BossEffect::TheNeedle) mHandsLeft = 1;
+            if (mBossEffect == BossEffect::TheNeedle) { mHandsLeft = 1; mBlindStartingHands = 1; }
             if (mBossEffect == BossEffect::TheWater)  mDiscardLeft = 0;
         }
         mBossMouthHasHand = false;
