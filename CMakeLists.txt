@@ -4,7 +4,7 @@ project(BalatroQt LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets OpenGL OpenGLWidgets)
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
 find_package(Qt6 REQUIRED COMPONENTS Core)
 find_package(Qt6 REQUIRED COMPONENTS Widgets)
@@ -18,6 +18,7 @@ qt_add_executable(BalatroQt
     main.cpp
     src/ui/mainwindow.cpp src/ui/mainwindow.h src/ui/mainwindow.ui
     src/utils/constants.h
+    src/utils/shadereffects.h src/utils/shadereffects.cpp
     src/card/carddata.h src/card/carddata.cpp
     src/card/joker.h src/card/joker.cpp
     src/game/deck.h src/game/deck.cpp
@@ -52,6 +53,8 @@ target_link_libraries(BalatroQt
     PRIVATE
         Qt6::Core
         Qt6::Widgets
+        Qt6::OpenGL
+        Qt6::OpenGLWidgets
 )
 target_link_libraries(BalatroQt PRIVATE Qt6::Widgets)
 target_link_libraries(BalatroQt PRIVATE Qt6::Core)

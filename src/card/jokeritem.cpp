@@ -10,6 +10,7 @@
 #include <QTimer>
 #include <QPainterPath>
 #include <cmath>
+#include "../utils/shadereffects.h"
 
 QPixmap *JokerItem::sSheet = nullptr;
 
@@ -66,80 +67,7 @@ static void paintHologramFloatingSprite(QPainter *p, QPixmap *sheet, JokerType t
     draw(0.05, 0.22, QPainter::CompositionMode_Screen,  2.0);
     draw(0.00, 0.92, QPainter::CompositionMode_SourceOver, 0.0);
 
-    p->save();
-    p->setCompositionMode(QPainter::CompositionMode_Screen);
-    QLinearGradient holo(0, 0, JokerItem::WIDTH, JokerItem::HEIGHT);
-    const qreal ph = std::fmod(t * 0.28, 1.0);
-    holo.setColorAt(0.00, QColor(80, 220, 255, 55));
-    holo.setColorAt(qBound(0.0, ph, 1.0), QColor(255, 255, 255, 100));
-    holo.setColorAt(1.00, QColor(255, 90, 220, 55));
-    p->fillRect(QRectF(0, 0, JokerItem::WIDTH, JokerItem::HEIGHT), holo);
-    p->restore();
-}
-
-static void paintEditionShine(QPainter *p, const QRectF &r, Edition e)
-{
-    if (e == Edition::None) return;
-    const qreal phase = std::fmod(QDateTime::currentMSecsSinceEpoch() / 900.0, 1.0);
-
-    p->save();
-    p->setRenderHint(QPainter::Antialiasing, true);
-    QPainterPath clip;
-    clip.addRoundedRect(r.adjusted(2, 2, -2, -2), 9, 9);
-    p->setClipPath(clip);
-
-    if (e == Edition::Negative) {
-        p->setCompositionMode(QPainter::CompositionMode_Multiply);
-        p->fillRect(r, QColor(45, 0, 80, 155));
-        p->setCompositionMode(QPainter::CompositionMode_Screen);
-        QLinearGradient neg(r.topLeft(), r.bottomRight());
-        neg.setColorAt(0.0, QColor(40, 0, 80, 120));
-        neg.setColorAt(0.45, QColor(180, 95, 255, 105));
-        neg.setColorAt(1.0, QColor(15, 10, 25, 150));
-        p->fillRect(r, neg);
-    } else {
-        QLinearGradient g(r.topLeft(), r.bottomRight());
-        if (e == Edition::Foil) {
-            g.setColorAt(0.00, QColor(180, 235, 255, 70));
-            g.setColorAt(0.50, QColor(255, 255, 255, 112));
-            g.setColorAt(1.00, QColor(105, 170, 255, 58));
-        } else if (e == Edition::Holographic) {
-            g.setColorAt(0.00, QColor(255, 80, 185, 70));
-            g.setColorAt(0.50, QColor(115, 245, 255, 90));
-            g.setColorAt(1.00, QColor(255, 245, 120, 58));
-        } else if (e == Edition::Polychrome) {
-            g.setColorAt(0.00, QColor(255, 55, 70, 92));
-            g.setColorAt(0.25, QColor(255, 230, 70, 88));
-            g.setColorAt(0.50, QColor(70, 255, 150, 92));
-            g.setColorAt(0.75, QColor(80, 160, 255, 88));
-            g.setColorAt(1.00, QColor(210, 80, 255, 92));
-        }
-        p->setCompositionMode(QPainter::CompositionMode_Screen);
-        p->fillRect(r, g);
-    }
-
-    p->setCompositionMode(QPainter::CompositionMode_Screen);
-    qreal stripeX = r.left() - r.width() * 0.65 + phase * r.width() * 2.2;
-    QLinearGradient stripe(stripeX, r.top(), stripeX + r.width() * 0.42, r.bottom());
-    stripe.setColorAt(0.00, QColor(255, 255, 255, 0));
-    stripe.setColorAt(0.48, QColor(255, 255, 255, e == Edition::Negative ? 70 : 120));
-    stripe.setColorAt(1.00, QColor(255, 255, 255, 0));
-    p->fillRect(r, stripe);
-
-    p->setClipping(false);
-    QColor border;
-    switch (e) {
-    case Edition::Foil:        border = QColor(170, 230, 255, 225); break;
-    case Edition::Holographic: border = QColor(255, 130, 215, 225); break;
-    case Edition::Polychrome:  border = QColor(235, 245, 120, 235); break;
-    case Edition::Negative:    border = QColor(190, 100, 255, 235); break;
-    default: break;
-    }
-    p->setCompositionMode(QPainter::CompositionMode_SourceOver);
-    p->setBrush(Qt::NoBrush);
-    p->setPen(QPen(border, e == Edition::Negative ? 5 : 4));
-    p->drawRoundedRect(r.adjusted(2, 2, -2, -2), 9, 9);
-    p->restore();
+    BalatroShaders::paintHologramShader(p, QRectF(0, 0, JokerItem::WIDTH, JokerItem::HEIGHT), 1.2);
 }
 
 static void paintLegendaryFloatingSprite(QPainter *p, QPixmap *sheet, JokerType type)
@@ -293,7 +221,7 @@ void JokerItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) 
     QRect src(c.x() * WIDTH, c.y() * HEIGHT, WIDTH, HEIGHT);
     p->drawPixmap(QRect(0, 0, WIDTH, HEIGHT), *sSheet, src);
 
-    paintEditionShine(p, QRectF(0, 0, WIDTH, HEIGHT), mJoker.edition);
+    BalatroShaders::paintEdition(p, QRectF(0, 0, WIDTH, HEIGHT), mJoker.edition);
     paintLegendaryFloatingSprite(p, sSheet, mJoker.type);
     paintHologramFloatingSprite(p, sSheet, mJoker.type);
 

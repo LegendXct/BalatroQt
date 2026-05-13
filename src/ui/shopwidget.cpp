@@ -6,6 +6,7 @@
 #include <QResizeEvent>
 #include <QPainter>
 #include <QGraphicsDropShadowEffect>
+#include "../utils/shadereffects.h"
 
 
 static QString editionDisplayName(Edition e)
@@ -337,23 +338,8 @@ QPixmap ShopWidget::offerPixmap(const ShopOffer &o) const
                                  JokerItem::WIDTH, JokerItem::HEIGHT);
         if (o.jokerEdition != Edition::None) {
             QPainter p(&pix);
-            p.setRenderHint(QPainter::Antialiasing);
-            if (o.jokerEdition == Edition::Negative) {
-                p.fillRect(pix.rect(), QColor(48, 0, 72, 110));
-                p.setPen(QPen(QColor(190, 100, 255, 230), 5));
-            } else if (o.jokerEdition == Edition::Polychrome) {
-                QLinearGradient g(0, 0, pix.width(), pix.height());
-                g.setColorAt(0.0, QColor(255, 100, 100, 230));
-                g.setColorAt(0.5, QColor(100, 255, 100, 230));
-                g.setColorAt(1.0, QColor(100, 120, 255, 230));
-                p.setPen(QPen(QBrush(g), 5));
-            } else if (o.jokerEdition == Edition::Holographic) {
-                p.setPen(QPen(QColor(255, 100, 200, 230), 5));
-            } else {
-                p.setPen(QPen(QColor(120, 200, 255, 230), 5));
-            }
-            p.setBrush(Qt::NoBrush);
-            p.drawRoundedRect(2, 2, pix.width() - 4, pix.height() - 4, 8, 8);
+            p.setRenderHint(QPainter::Antialiasing, true);
+            BalatroShaders::paintEdition(&p, QRectF(0, 0, pix.width(), pix.height()), o.jokerEdition);
         }
         return pix;
     }
@@ -370,45 +356,9 @@ QPixmap ShopWidget::offerPixmap(const ShopOffer &o) const
                                   c.y() * ConsumableItem::HEIGHT,
                                   ConsumableItem::WIDTH, ConsumableItem::HEIGHT);
 
-        // 原版 booster 在商店里不是死平面：有阴影、厚度和扫光。
-        // 这里在贴图外额外画一层厚度和投影，让卡包更立体。
-        // 只留少量透明边距，避免 QIcon 缩放时把卡包本体压得很小。
-        QPixmap pix(base.width() + 14, base.height() + 20);
-        pix.fill(Qt::transparent);
-        QPainter p(&pix);
-        p.setRenderHint(QPainter::Antialiasing);
-        p.setRenderHint(QPainter::SmoothPixmapTransform);
-
-        QRectF shadow(9, 12, base.width(), base.height());
-        p.setPen(Qt::NoPen);
-        p.setBrush(QColor(0, 0, 0, 135));
-        p.drawRoundedRect(shadow.adjusted(3, 8, 3, 8), 12, 12);
-
-        QRectF side(6, 5, base.width(), base.height());
-        QLinearGradient sideGrad(side.topLeft(), side.bottomRight());
-        sideGrad.setColorAt(0.0, QColor(255,255,255,55));
-        sideGrad.setColorAt(0.45, QColor(80,80,80,45));
-        sideGrad.setColorAt(1.0, QColor(0,0,0,90));
-        p.setBrush(sideGrad);
-        p.drawRoundedRect(side.adjusted(4, 6, 7, 10), 10, 10);
-
-        p.save();
-        p.translate(7 + base.width()/2.0, 5 + base.height()/2.0);
-        p.rotate(-2.0);
-        QRectF target(-base.width()/2.0, -base.height()/2.0, base.width(), base.height());
-        p.drawPixmap(target, base, base.rect());
-
-        QLinearGradient gloss(target.topLeft(), target.bottomRight());
-        gloss.setColorAt(0.0, QColor(255,255,255,0));
-        gloss.setColorAt(0.45, QColor(255,255,255,80));
-        gloss.setColorAt(0.55, QColor(255,255,255,20));
-        gloss.setColorAt(1.0, QColor(255,255,255,0));
-        p.setCompositionMode(QPainter::CompositionMode_Screen);
-        p.setBrush(gloss);
-        p.setPen(Qt::NoPen);
-        p.drawRoundedRect(target.adjusted(6, 6, -6, -6), 8, 8);
-        p.restore();
-        return pix;
+        // 原版 booster.fs：卡包有动态蓝紫/金色波纹。这里统一走 shader 转写层，
+        // 同时修正透明边距，避免 QIcon 把卡包压小。
+        return BalatroShaders::makeBooster3DPixmap(base);
     }
     if (o.kind == OfferKind::PlayingCard) {
         return playingCardPixmap(o.playingCard);
@@ -420,10 +370,14 @@ QPixmap ShopWidget::offerPixmap(const ShopOffer &o) const
         QPixmap voucherSheet(":/textures/images/Vouchers.png");
         if (!voucherSheet.isNull()) {
             QPoint c = voucherData(o.voucher).spritePos;
-            return voucherSheet.copy(c.x() * ConsumableItem::WIDTH,
-                                     c.y() * ConsumableItem::HEIGHT,
-                                     ConsumableItem::WIDTH,
-                                     ConsumableItem::HEIGHT);
+            QPixmap pix = voucherSheet.copy(c.x() * ConsumableItem::WIDTH,
+                                           c.y() * ConsumableItem::HEIGHT,
+                                           ConsumableItem::WIDTH,
+                                           ConsumableItem::HEIGHT);
+            QPainter p(&pix);
+            p.setRenderHint(QPainter::Antialiasing, true);
+            BalatroShaders::paintVoucherShader(&p, QRectF(0, 0, pix.width(), pix.height()), 0.9);
+            return pix;
         }
 
         QPixmap pix(ConsumableItem::WIDTH, ConsumableItem::HEIGHT);
@@ -481,6 +435,12 @@ QPixmap ShopWidget::playingCardPixmap(const CardData &c) const
         }
         p.drawPixmap(QRect(0, 0, W, H), deckSheet, QRect(col*W, row*H, W, H));
     }
+    if (c.edition != Edition::None)
+        BalatroShaders::paintEdition(&p, QRectF(0, 0, W, H), c.edition);
+    if (c.seal == Seal::Gold)
+        BalatroShaders::paintGoldSealGlow(&p, QRectF(0, 0, W, H));
+    if (c.isDebuffed)
+        BalatroShaders::paintDebuff(&p, QRectF(0, 0, W, H));
     return pix;
 }
 

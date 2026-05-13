@@ -237,6 +237,11 @@ MainWindow::MainWindow(QWidget *parent)
         auto *l = new QVBoxLayout(mPlayPage);
         l->setContentsMargins(0, 0, 0, 0);
         l->addWidget(mView);
+        if (mDynamicBg) {
+            mDynamicBg->setGeometry(mPlayPage->rect());
+            mDynamicBg->lower();
+        }
+        if (mView) mView->raise();
     }
 
     // ── 整体 central:左面板 + 右半边,横向并列 ──
@@ -277,7 +282,13 @@ MainWindow::MainWindow(QWidget *parent)
     setupConnections();
     // 让所有 overlay 跟着 mPlayPage 一起 resize
     mPlayPage->installEventFilter(this);
-    mGameState->startGame();
+
+    // 等窗口和布局进入事件循环后再触发第一帧盲注选择，
+    // 避免 overlay 在默认 geometry 下先闪一下，再被 resize/动画拉走。
+    QTimer::singleShot(0, this, [this]() {
+        if (mBlindSelectWidget) mBlindSelectWidget->hide();
+        mGameState->startGame();
+    });
 }
 
 MainWindow::~MainWindow()
@@ -889,20 +900,35 @@ void MainWindow::setupLeftPanel() {
 }
 
 void MainWindow::setupScene() {
+    // 原游戏把背景当成单独的 shader 全屏层来画；不要把动态背景塞进 QGraphicsScene。
+    // 否则背景每 16ms update 一次，就会把所有卡牌、按钮、文字一起拖着重绘。
+    mDynamicBg = new DynamicBackgroundItem(mPlayPage);
+    mDynamicBg->setGeometry(mPlayPage ? mPlayPage->rect() : QRect(0, 0, mSceneW, mSceneH));
+    mDynamicBg->setSceneSize(mDynamicBg->width() > 0 ? mDynamicBg->width() : mSceneW,
+                             mDynamicBg->height() > 0 ? mDynamicBg->height() : mSceneH);
+    mDynamicBg->setMood(DynamicBackgroundItem::Mood::Default);
+    mDynamicBg->show();
+    mDynamicBg->lower();
+
     mView = new QGraphicsView(mScene, mPlayPage);
     mView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     mView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     mView->setRenderHints(QPainter::Antialiasing | QPainter::SmoothPixmapTransform);
     mView->setFrameShape(QFrame::NoFrame);
-    mView->setViewportUpdateMode(QGraphicsView::FullViewportUpdate);
+    mView->setStyleSheet("background: transparent; border: none;");
+    mView->setAttribute(Qt::WA_TranslucentBackground, true);
+    mView->setAutoFillBackground(false);
+    mView->viewport()->setAttribute(Qt::WA_TranslucentBackground, true);
+    mView->viewport()->setAutoFillBackground(false);
+    mView->setBackgroundBrush(QBrush(Qt::NoBrush));
+
+    // 前景场景只在牌/按钮变化时刷新；背景动画在下层 QWidget 自己刷新。
+    mView->setViewportUpdateMode(QGraphicsView::SmartViewportUpdate);
+    mView->setOptimizationFlag(QGraphicsView::DontAdjustForAntialiasing, true);
+    mView->setOptimizationFlag(QGraphicsView::DontSavePainterState, true);
 
     mScene->setSceneRect(0, 0, mSceneW, mSceneH);
     mScene->setBackgroundBrush(QBrush(Qt::NoBrush));
-
-    mDynamicBg = new DynamicBackgroundItem();
-    mDynamicBg->setSceneSize(mSceneW, mSceneH);
-    mDynamicBg->setMood(DynamicBackgroundItem::Mood::Default);
-    mScene->addItem(mDynamicBg);
 
     //绘制上方小丑 & 消耗牌
 
@@ -1596,12 +1622,16 @@ void MainWindow::resizeEvent(QResizeEvent *event)
 
     if (mPlayPage) {
         QRect r = mPlayPage->rect();
-        if (mDynamicBg) { mDynamicBg->setSceneSize(mSceneW, mSceneH); }
-        if (mBlindSelectWidget) mBlindSelectWidget->setGeometry(lowerOverlayRect());
-        if (mRoundEndOverlay)   mRoundEndOverlay  ->setGeometry(r);
-        if (mShopWidget)        mShopWidget       ->setGeometry(lowerOverlayRect());
-        if (mPackOpenWidget)    mPackOpenWidget   ->setGeometry(lowerOverlayRect());
-        if (mDeckViewWidget)    mDeckViewWidget   ->setGeometry(r);
+        if (mDynamicBg) {
+            mDynamicBg->setGeometry(r);
+            mDynamicBg->setSceneSize(r.width(), r.height());
+            mDynamicBg->lower();
+        }
+        if (mBlindSelectWidget) { mBlindSelectWidget->setGeometry(lowerOverlayRect()); if (mBlindSelectWidget->isVisible()) mBlindSelectWidget->raise(); }
+        if (mRoundEndOverlay)   { mRoundEndOverlay  ->setGeometry(r);                 if (mRoundEndOverlay->isVisible())   mRoundEndOverlay->raise(); }
+        if (mShopWidget)        { mShopWidget       ->setGeometry(lowerOverlayRect()); if (mShopWidget->isVisible())        mShopWidget->raise(); }
+        if (mPackOpenWidget)    { mPackOpenWidget   ->setGeometry(lowerOverlayRect()); if (mPackOpenWidget->isVisible())    mPackOpenWidget->raise(); }
+        if (mDeckViewWidget)    { mDeckViewWidget   ->setGeometry(r);                 if (mDeckViewWidget->isVisible())    mDeckViewWidget->raise(); }
     }
 }
 
@@ -2290,12 +2320,16 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev)
 {
     if (obj == mPlayPage && ev->type() == QEvent::Resize) {
         QRect r = mPlayPage->rect();
-        if (mDynamicBg) { mDynamicBg->setSceneSize(mSceneW, mSceneH); }
-        if (mBlindSelectWidget) mBlindSelectWidget->setGeometry(lowerOverlayRect());
-        if (mRoundEndOverlay)   mRoundEndOverlay  ->setGeometry(r);
-        if (mShopWidget)        mShopWidget       ->setGeometry(lowerOverlayRect());
-        if (mPackOpenWidget)    mPackOpenWidget   ->setGeometry(lowerOverlayRect());
-        if (mDeckViewWidget)    mDeckViewWidget   ->setGeometry(r);
+        if (mDynamicBg) {
+            mDynamicBg->setGeometry(r);
+            mDynamicBg->setSceneSize(r.width(), r.height());
+            mDynamicBg->lower();
+        }
+        if (mBlindSelectWidget) { mBlindSelectWidget->setGeometry(lowerOverlayRect()); if (mBlindSelectWidget->isVisible()) mBlindSelectWidget->raise(); }
+        if (mRoundEndOverlay)   { mRoundEndOverlay  ->setGeometry(r);                 if (mRoundEndOverlay->isVisible())   mRoundEndOverlay->raise(); }
+        if (mShopWidget)        { mShopWidget       ->setGeometry(lowerOverlayRect()); if (mShopWidget->isVisible())        mShopWidget->raise(); }
+        if (mPackOpenWidget)    { mPackOpenWidget   ->setGeometry(lowerOverlayRect()); if (mPackOpenWidget->isVisible())    mPackOpenWidget->raise(); }
+        if (mDeckViewWidget)    { mDeckViewWidget   ->setGeometry(r);                 if (mDeckViewWidget->isVisible())    mDeckViewWidget->raise(); }
     }
     return QMainWindow::eventFilter(obj, ev);
 }
@@ -2369,17 +2403,28 @@ void MainWindow::onBlindSelectEntered()
     setContextPage(0);
     setPlayPhaseVisible(false);       // ← 隐藏对局元素
     clearPlayedCards();                // ← 清上轮出牌
+    if (!mBlindSelectWidget || !mPlayPage) return;
+
+    const bool skipped = mGameState->justSkipped();
+    mBlindSelectWidget->hide();
+    mBlindSelectWidget->setGeometry(lowerOverlayRect());
     mBlindSelectWidget->refresh();
+
+    // 首次进入时，先把三张盲注卡放到屏幕下方，再 show。
+    // 这样不会出现“先完整显示一帧 -> 消失 -> 再滑入”的闪屏。
+    if (!skipped) {
+        mBlindSelectWidget->prepareEntrancePositions();
+    } else {
+        mBlindSelectWidget->arrangeCards(false);
+    }
+
     mBlindSelectWidget->raise();
     mBlindSelectWidget->show();
 
-    bool skipped = mGameState->justSkipped();
     QTimer::singleShot(0, this, [this, skipped]() {
-        if (mBlindSelectWidget && mPlayPage
-            && mBlindSelectWidget->geometry() != mPlayPage->rect())
-        {
+        if (!mBlindSelectWidget || !mPlayPage) return;
+        if (mBlindSelectWidget->geometry() != lowerOverlayRect())
             mBlindSelectWidget->setGeometry(lowerOverlayRect());
-        }
         mBlindSelectWidget->arrangeCards(!skipped);
     });
 }

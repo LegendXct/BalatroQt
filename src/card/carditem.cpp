@@ -9,77 +9,12 @@
 #include <QTimer>
 #include <QPainterPath>
 #include <cmath>
+#include "../utils/shadereffects.h"
 
 QPixmap *CardItem::sDeckSheet = nullptr;
 QPixmap *CardItem::sEnhSheet = nullptr;
 QPixmap *CardItem::sJokerSheet = nullptr;
 
-
-static void paintEditionShine(QPainter *p, const QRectF &r, Edition e)
-{
-    if (e == Edition::None) return;
-    const qreal phase = std::fmod(QDateTime::currentMSecsSinceEpoch() / 900.0, 1.0);
-
-    p->save();
-    p->setRenderHint(QPainter::Antialiasing, true);
-    QPainterPath clip;
-    clip.addRoundedRect(r.adjusted(2, 2, -2, -2), 9, 9);
-    p->setClipPath(clip);
-
-    if (e == Edition::Negative) {
-        p->setCompositionMode(QPainter::CompositionMode_Multiply);
-        p->fillRect(r, QColor(45, 0, 80, 155));
-        p->setCompositionMode(QPainter::CompositionMode_Screen);
-        QLinearGradient neg(r.topLeft(), r.bottomRight());
-        neg.setColorAt(0.0, QColor(40, 0, 80, 120));
-        neg.setColorAt(0.45, QColor(180, 95, 255, 105));
-        neg.setColorAt(1.0, QColor(15, 10, 25, 150));
-        p->fillRect(r, neg);
-    } else {
-        QLinearGradient g(r.topLeft(), r.bottomRight());
-        if (e == Edition::Foil) {
-            g.setColorAt(0.00, QColor(180, 235, 255, 70));
-            g.setColorAt(0.50, QColor(255, 255, 255, 112));
-            g.setColorAt(1.00, QColor(105, 170, 255, 58));
-        } else if (e == Edition::Holographic) {
-            g.setColorAt(0.00, QColor(255, 80, 185, 70));
-            g.setColorAt(0.50, QColor(115, 245, 255, 90));
-            g.setColorAt(1.00, QColor(255, 245, 120, 58));
-        } else if (e == Edition::Polychrome) {
-            g.setColorAt(0.00, QColor(255, 55, 70, 92));
-            g.setColorAt(0.25, QColor(255, 230, 70, 88));
-            g.setColorAt(0.50, QColor(70, 255, 150, 92));
-            g.setColorAt(0.75, QColor(80, 160, 255, 88));
-            g.setColorAt(1.00, QColor(210, 80, 255, 92));
-        }
-        p->setCompositionMode(QPainter::CompositionMode_Screen);
-        p->fillRect(r, g);
-    }
-
-    // 移动高光带：对应原版 shader 在卡面上持续流动的感觉。
-    p->setCompositionMode(QPainter::CompositionMode_Screen);
-    qreal stripeX = r.left() - r.width() * 0.65 + phase * r.width() * 2.2;
-    QLinearGradient stripe(stripeX, r.top(), stripeX + r.width() * 0.42, r.bottom());
-    stripe.setColorAt(0.00, QColor(255, 255, 255, 0));
-    stripe.setColorAt(0.48, QColor(255, 255, 255, e == Edition::Negative ? 70 : 120));
-    stripe.setColorAt(1.00, QColor(255, 255, 255, 0));
-    p->fillRect(r, stripe);
-
-    p->setClipping(false);
-    QColor border;
-    switch (e) {
-    case Edition::Foil:        border = QColor(170, 230, 255, 225); break;
-    case Edition::Holographic: border = QColor(255, 130, 215, 225); break;
-    case Edition::Polychrome:  border = QColor(235, 245, 120, 235); break;
-    case Edition::Negative:    border = QColor(190, 100, 255, 235); break;
-    default: break;
-    }
-    p->setCompositionMode(QPainter::CompositionMode_SourceOver);
-    p->setBrush(Qt::NoBrush);
-    p->setPen(QPen(border, e == Edition::Negative ? 5 : 4));
-    p->drawRoundedRect(r.adjusted(2, 2, -2, -2), 9, 9);
-    p->restore();
-}
 
 void CardItem::loadResources() {
     sDeckSheet = new QPixmap(":/textures/images/8BitDeck.png");
@@ -103,7 +38,7 @@ CardItem::CardItem(const CardData &data, QGraphicsItem *parent)
 
     auto *shineTimer = new QTimer(this);
     connect(shineTimer, &QTimer::timeout, this, [this]() {
-        if (mData.edition != Edition::None) update();
+        if (mData.edition != Edition::None || mData.seal == Seal::Gold || mData.isDebuffed) update();
     });
     shineTimer->start(80);
 }
@@ -171,13 +106,13 @@ void CardItem::paintFront(QPainter *painter)
     QRect seal = sealSrcRect();
     if (!seal.isNull()) painter->drawPixmap(dst, *sEnhSheet, seal);
 
-    paintEditionShine(painter, QRectF(0, 0, WIDTH, HEIGHT), mData.edition);
+    BalatroShaders::paintEdition(painter, QRectF(0, 0, WIDTH, HEIGHT), mData.edition);
+
+    if (mData.seal == Seal::Gold)
+        BalatroShaders::paintGoldSealGlow(painter, QRectF(0, 0, WIDTH, HEIGHT));
 
     if (mData.isDebuffed) {
-        painter->fillRect(0, 0, WIDTH, HEIGHT, QColor(0, 0, 0, 130));
-        painter->setPen(QPen(QColor(255, 80, 80), 3));
-        painter->drawLine(8, 8, WIDTH - 8, HEIGHT - 8);
-        painter->drawLine(WIDTH - 8, 8, 8, HEIGHT - 8);
+        BalatroShaders::paintDebuff(painter, QRectF(0, 0, WIDTH, HEIGHT));
     }
 }
 

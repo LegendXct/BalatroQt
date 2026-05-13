@@ -14,6 +14,7 @@ public:
     explicit BlindSelectWidget(GameState *gs, const QFont &cnFont,
                                const QFont &pixelFont, QWidget *parent = nullptr);
     void refresh();
+    void prepareEntrancePositions();
     void arrangeCards(bool initialFloat);
 
 signals:
