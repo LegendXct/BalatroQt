@@ -27,6 +27,7 @@ qt_add_executable(BalatroQt
     src/ui/roundendoverlay.h src/ui/roundendoverlay.cpp
     src/card/jokeritem.h src/card/jokeritem.cpp
     src/game/shop.h src/game/shop.cpp
+    src/game/tag.h src/game/tag.cpp
     src/ui/shopwidget.h src/ui/shopwidget.cpp
     src/game/bossblind.h src/game/bossblind.cpp
     src/card/consumable.h src/card/consumable.cpp
@@ -37,6 +38,7 @@ qt_add_executable(BalatroQt
     src/ui/floatingscore.h src/ui/floatingscore.cpp
     src/ui/shopsignwidget.h src/ui/shopsignwidget.cpp
     src/ui/deckviewwidget.h src/ui/deckviewwidget.cpp
+    src/ui/dynamicbackgrounditem.h src/ui/dynamicbackgrounditem.cpp
 )
 
 target_include_directories(BalatroQt

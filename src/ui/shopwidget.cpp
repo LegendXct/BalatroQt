@@ -6,6 +6,29 @@
 #include <QResizeEvent>
 #include <QPainter>
 
+
+static QString editionDisplayName(Edition e)
+{
+    switch (e) {
+    case Edition::Foil:        return "闪箔";
+    case Edition::Holographic: return "镭射";
+    case Edition::Polychrome:  return "多彩";
+    case Edition::Negative:    return "负片";
+    default:                   return "";
+    }
+}
+
+static QString editionDescription(Edition e)
+{
+    switch (e) {
+    case Edition::Foil:        return "闪箔：计分时 +50 筹码";
+    case Edition::Holographic: return "镭射：计分时 +10 倍率";
+    case Edition::Polychrome:  return "多彩：计分时 ×1.5 倍率";
+    case Edition::Negative:    return "负片：不占用小丑槽，并增加 1 个小丑槽位";
+    default:                   return "";
+    }
+}
+
 ShopWidget::ShopWidget(GameState *gs,
                        const QFont &cnFont, const QFont &pixelFont,
                        QWidget *parent)
@@ -229,7 +252,11 @@ void ShopWidget::refresh()
         QString name;
         if (o.kind == OfferKind::Joker) {
             Joker tmp = createJoker(o.joker);
-            name = tmp.name;
+            QString ed = editionDisplayName(o.jokerEdition);
+            name = ed.isEmpty() ? tmp.name : (ed + " " + tmp.name);
+            QString tip = tmp.name + "\n" + tmp.description;
+            if (!ed.isEmpty()) tip += "\n" + editionDescription(o.jokerEdition);
+            ou.cardBtn->setToolTip(tip);
         } else if (o.kind == OfferKind::Pack) {
             name = packDisplayName(o.pack, o.packSize);
         } else if (o.kind == OfferKind::Voucher) {
@@ -264,7 +291,8 @@ void ShopWidget::refresh()
         bool slotOk = true;
         const ShopOffer &o = shopOffers[i];
         if (o.kind == OfferKind::Joker)
-            slotOk = mGS->canAddJoker();
+            // 负片小丑自身提供 +1 小丑槽，原版满槽时也允许购买。
+            slotOk = mGS->canAddJokerWithEdition(o.jokerEdition);
         else if (o.kind == OfferKind::Tarot || o.kind == OfferKind::Planet || o.kind == OfferKind::Spectral)
             slotOk = mGS->canAddConsumable();
         else if (o.kind == OfferKind::PlayingCard)
@@ -296,17 +324,33 @@ QPixmap ShopWidget::offerPixmap(const ShopOffer &o) const
         QPixmap sheet(":/textures/images/Jokers.png");
         if (sheet.isNull()) return QPixmap();
         QPoint c = JokerItem::spritePos(o.joker);
-        return sheet.copy(c.x() * JokerItem::WIDTH, c.y() * JokerItem::HEIGHT,
-                          JokerItem::WIDTH, JokerItem::HEIGHT);
+        QPixmap pix = sheet.copy(c.x() * JokerItem::WIDTH, c.y() * JokerItem::HEIGHT,
+                                 JokerItem::WIDTH, JokerItem::HEIGHT);
+        if (o.jokerEdition != Edition::None) {
+            QPainter p(&pix);
+            p.setRenderHint(QPainter::Antialiasing);
+            if (o.jokerEdition == Edition::Negative) {
+                p.fillRect(pix.rect(), QColor(48, 0, 72, 110));
+                p.setPen(QPen(QColor(190, 100, 255, 230), 5));
+            } else if (o.jokerEdition == Edition::Polychrome) {
+                QLinearGradient g(0, 0, pix.width(), pix.height());
+                g.setColorAt(0.0, QColor(255, 100, 100, 230));
+                g.setColorAt(0.5, QColor(100, 255, 100, 230));
+                g.setColorAt(1.0, QColor(100, 120, 255, 230));
+                p.setPen(QPen(QBrush(g), 5));
+            } else if (o.jokerEdition == Edition::Holographic) {
+                p.setPen(QPen(QColor(255, 100, 200, 230), 5));
+            } else {
+                p.setPen(QPen(QColor(120, 200, 255, 230), 5));
+            }
+            p.setBrush(Qt::NoBrush);
+            p.drawRoundedRect(2, 2, pix.width() - 4, pix.height() - 4, 8, 8);
+        }
+        return pix;
     }
 
     if (o.kind == OfferKind::Tarot || o.kind == OfferKind::Planet || o.kind == OfferKind::Spectral) {
-        QPixmap sheet(":/textures/images/Tarots.png");
-        if (sheet.isNull()) return QPixmap();
-        QPoint c = ConsumableItem::spritePos(o.consumable);
-        return sheet.copy(c.x() * ConsumableItem::WIDTH,
-                          c.y() * ConsumableItem::HEIGHT,
-                          ConsumableItem::WIDTH, ConsumableItem::HEIGHT);
+        return ConsumableItem::renderPixmap(o.consumable);
     }
 
     if (o.kind == OfferKind::Pack) {

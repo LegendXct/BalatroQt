@@ -22,6 +22,7 @@ signals:
 
 protected:
     void resizeEvent(QResizeEvent *e) override;
+    bool eventFilter(QObject *obj, QEvent *event) override;
 
 private:
     GameState *mGS;
@@ -48,12 +49,18 @@ private:
         QLabel      *rewardSymLbl  = nullptr;    // 像素"$$$"
         QLabel      *orLbl;
         QWidget *bossPromptBox = nullptr;
+        QPushButton *bossRerollBtn = nullptr;
         QWidget     *skipBox;       // "或" + 跳过按钮容器(Boss 卡隐藏)
+        QLabel      *tagIcon = nullptr;
+        QLabel      *tagName = nullptr;
         QPushButton *skipBtn;
     };
     BlindCard mCards[3];
 
     void buildUi();
+    void showTagPopup(int idx, QWidget *anchor);
+    void hideTagPopup();
+    QLabel *mTagPopup = nullptr;
     QPixmap chipPixmap(int blindIdx) const;
     int     targetFor(int blindIdx) const;
     int     rewardFor(int blindIdx) const;

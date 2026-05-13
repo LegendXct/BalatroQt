@@ -12,15 +12,38 @@
 #include <algorithm>
 #include <QStringList>
 #include <QTimer>
+#include <QPropertyAnimation>
+#include <QEasingCurve>
 
 PackOpenWidget::PackOpenWidget(const QFont &cnFont, const QFont &pixelFont,
                                QWidget *parent)
     : QWidget(parent), mCNFont(cnFont), mPixelFont(pixelFont)
 {
     setAttribute(Qt::WA_StyledBackground, true);
-    setStyleSheet("background: rgba(0, 0, 0, 205);");
+    setStyleSheet("background: transparent;");
     hide();
     buildUi();
+
+    // 灵魂牌的白水晶是动态前景层。开包界面使用 QLabel 贴图，
+    // 所以需要定时重新渲染 Pixmap，否则只会停在第一帧。
+    mSoulAnimTimer = new QTimer(this);
+    connect(mSoulAnimTimer, &QTimer::timeout, this, [this]() {
+        if (!isVisible()) return;
+        bool hasSoul = false;
+        for (ConsumableType t : mContent.consumables) {
+            if (t == ConsumableType::Spectral_Soul) { hasSoul = true; break; }
+        }
+        if (!hasSoul) {
+            for (const Consumable &c : mInventoryConsumables) {
+                if (c.type == ConsumableType::Spectral_Soul) { hasSoul = true; break; }
+            }
+        }
+        if (hasSoul) {
+            refreshOptionUi();
+            refreshInventoryUi();
+        }
+    });
+    mSoulAnimTimer->start(60);
 }
 
 void PackOpenWidget::buildUi()
@@ -28,9 +51,8 @@ void PackOpenWidget::buildUi()
     mPanel = new QWidget(this);
     mPanel->setMinimumSize(1040, 680);
     mPanel->setStyleSheet(
-        "background: #283238;"
-        "border: 3px solid #f0c040;"
-        "border-radius: 16px;"
+        "background: transparent;"
+        "border: none;"
         );
 
     auto *root = new QVBoxLayout(mPanel);
@@ -42,21 +64,19 @@ void PackOpenWidget::buildUi()
     mLblTitle->setFont(tf);
     mLblTitle->setStyleSheet("color:#f0c040; background:transparent;");
     mLblTitle->setAlignment(Qt::AlignCenter);
-    root->addWidget(mLblTitle);
 
     mLblChoose = new QLabel("", mPanel);
     QFont cf = mCNFont; cf.setPixelSize(18);
     mLblChoose->setFont(cf);
     mLblChoose->setStyleSheet("color:white; background:transparent;");
     mLblChoose->setAlignment(Qt::AlignCenter);
-    root->addWidget(mLblChoose);
 
     // 上方临时手牌区：原版开奥秘/幻灵包时可以对这排牌使用特殊牌。
     mHandBox = new QWidget(mPanel);
     auto *handBox = mHandBox;
     handBox->setObjectName("packHandBox");
     handBox->setAttribute(Qt::WA_StyledBackground, true);
-    handBox->setStyleSheet("QWidget#packHandBox { background:#151b21; border-radius:10px; }");
+    handBox->setStyleSheet("QWidget#packHandBox { background:transparent; border:none; }");
     auto *handLayout = new QHBoxLayout(handBox);
     handLayout->setContentsMargins(10, 8, 10, 8);
     handLayout->setSpacing(6);
@@ -71,11 +91,11 @@ void PackOpenWidget::buildUi()
         vbl->setSpacing(2);
 
         hu.btn = new QPushButton(wrap);
-        hu.btn->setFixedSize(72, 96);
+        hu.btn->setFixedSize(116, 156);
         hu.btn->setCursor(Qt::PointingHandCursor);
         hu.btn->setStyleSheet(
-            "QPushButton { background:#303840; border:2px solid #55616b; border-radius:6px; }"
-            "QPushButton:hover { border:2px solid #f0c040; }"
+            "QPushButton { background:transparent; border:none; border-radius:6px; }"
+            "QPushButton:hover { margin-top:-14px; }"
             );
         connect(hu.btn, &QPushButton::clicked, this, [this, i]() { onHandCardClicked(i); });
         vbl->addWidget(hu.btn, 0, Qt::AlignCenter);
@@ -101,7 +121,7 @@ void PackOpenWidget::buildUi()
     auto *optionsBox = new QWidget(midRow);
     optionsBox->setObjectName("packOptionsBox");
     optionsBox->setAttribute(Qt::WA_StyledBackground, true);
-    optionsBox->setStyleSheet("QWidget#packOptionsBox { background:#151b21; border-radius:10px; }");
+    optionsBox->setStyleSheet("QWidget#packOptionsBox { background:transparent; border:none; }");
     auto *optionsLayout = new QHBoxLayout(optionsBox);
     optionsLayout->setContentsMargins(12, 10, 12, 10);
     optionsLayout->setSpacing(10);
@@ -110,15 +130,15 @@ void PackOpenWidget::buildUi()
     for (int i = 0; i < 5; ++i) {        // 原版普通包 3，超级/巨型包最多 5；幻灵/小丑超级最多 4
         OptUi ou;
         ou.card = new QWidget(optionsBox);
-        ou.card->setFixedSize(142, 265);
-        ou.card->setStyleSheet("background:#222b33; border-radius:10px;");
+        ou.card->setFixedSize(154, 270);
+        ou.card->setStyleSheet("background:transparent; border:none;");
 
         auto *vbl = new QVBoxLayout(ou.card);
         vbl->setContentsMargins(6, 6, 6, 6);
         vbl->setSpacing(4);
 
         ou.imageLbl = new QLabel(ou.card);
-        ou.imageLbl->setFixedSize(102, 136);
+        ou.imageLbl->setFixedSize(126, 168);
         ou.imageLbl->setAlignment(Qt::AlignCenter);
         ou.imageLbl->setStyleSheet("background:transparent;");
         vbl->addWidget(ou.imageLbl, 0, Qt::AlignCenter);
@@ -227,17 +247,36 @@ void PackOpenWidget::buildUi()
 
     root->addWidget(midRow, 1);
 
-    mBtnSkip = new QPushButton("跳过", mPanel);
-    mBtnSkip->setFixedHeight(42);
-    QFont sf = mCNFont; sf.setPixelSize(18); sf.setBold(true);
+    // 原版开包 UI：包名/选择数在下方中央，跳过按钮在右侧。
+    auto *bottomBar = new QWidget(mPanel);
+    bottomBar->setStyleSheet("background:transparent;");
+    auto *bottomLayout = new QHBoxLayout(bottomBar);
+    bottomLayout->setContentsMargins(0, 0, 0, 0);
+    bottomLayout->setSpacing(12);
+    bottomLayout->addStretch(1);
+
+    auto *titleCol = new QWidget(bottomBar);
+    titleCol->setStyleSheet("background:rgba(20,25,30,120); border-radius:12px;");
+    auto *titleLayout = new QVBoxLayout(titleCol);
+    titleLayout->setContentsMargins(18, 8, 18, 8);
+    titleLayout->setSpacing(2);
+    titleLayout->addWidget(mLblTitle);
+    titleLayout->addWidget(mLblChoose);
+    bottomLayout->addWidget(titleCol, 0, Qt::AlignCenter);
+
+    mBtnSkip = new QPushButton("跳过", bottomBar);
+    mBtnSkip->setFixedSize(110, 56);
+    QFont sf = mCNFont; sf.setPixelSize(20); sf.setBold(true);
     mBtnSkip->setFont(sf);
     mBtnSkip->setCursor(Qt::PointingHandCursor);
     mBtnSkip->setStyleSheet(
-        "QPushButton { background:#555; color:white; border:none; border-radius:8px; }"
-        "QPushButton:hover { background:#666; }"
+        "QPushButton { background:#666; color:white; border:none; border-radius:12px; }"
+        "QPushButton:hover { background:#777; }"
         );
     connect(mBtnSkip, &QPushButton::clicked, this, &PackOpenWidget::onSkip);
-    root->addWidget(mBtnSkip);
+    bottomLayout->addWidget(mBtnSkip, 0, Qt::AlignRight | Qt::AlignVCenter);
+
+    root->addWidget(bottomBar);
 }
 
 void PackOpenWidget::open(const PackContent &content,
@@ -257,6 +296,7 @@ void PackOpenWidget::open(const PackContent &content,
     show();
     raise();
     refreshAll();
+    QTimer::singleShot(0, this, &PackOpenWidget::animateCardsIn);
 }
 
 void PackOpenWidget::setPackHand(const QVector<CardData> &packHand)
@@ -272,6 +312,12 @@ void PackOpenWidget::setInventoryConsumables(const QVector<Consumable> &inventor
 {
     mInventoryConsumables = inventoryConsumables;
     refreshInventoryUi();
+    refreshOptionUi();
+}
+
+void PackOpenWidget::setFreeJokerSlots(int freeSlots)
+{
+    mFreeJokerSlots = qMax(0, freeSlots);
     refreshOptionUi();
 }
 
@@ -320,13 +366,13 @@ void PackOpenWidget::refreshHandUi()
         hu.btn->show();
         hu.nameLbl->show();
         hu.nameLbl->setText(mPackHand[i].toString());
-        hu.btn->setIcon(QIcon(renderPlayingCard(mPackHand[i], hu.btn->size() - QSize(8, 8))));
-        hu.btn->setIconSize(hu.btn->size() - QSize(8, 8));
+        hu.btn->setIcon(QIcon(renderPlayingCard(mPackHand[i], hu.btn->size() - QSize(4, 4))));
+        hu.btn->setIconSize(hu.btn->size() - QSize(4, 4));
         bool selected = mSelectedHand.contains(i);
         hu.btn->setStyleSheet(selected ?
-            "QPushButton { background:#303840; border:3px solid #f0c040; border-radius:6px; }" :
-            "QPushButton { background:#303840; border:2px solid #55616b; border-radius:6px; }"
-            "QPushButton:hover { border:2px solid #f0c040; }");
+            "QPushButton { background:transparent; border:none; border-radius:6px; margin-top:-28px; }" :
+            "QPushButton { background:transparent; border:none; border-radius:6px; }"
+            "QPushButton:hover { margin-top:-14px; }");
     }
 }
 
@@ -361,7 +407,7 @@ void PackOpenWidget::refreshInventoryUi()
         }
         iu.card->show();
         const Consumable &c = mInventoryConsumables[i];
-        iu.imageLbl->setPixmap(renderConsumable(c.type, iu.imageLbl->size()));
+        iu.imageLbl->setPixmap(ConsumableItem::renderPixmap(c.type, c.negative).scaled(iu.imageLbl->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
         iu.nameLbl->setText(c.name);
         iu.useBtn->setToolTip(c.description);
         iu.useBtn->setEnabled(!mFinishing && inventoryAvailableFor(i));
@@ -370,7 +416,7 @@ void PackOpenWidget::refreshInventoryUi()
 
 QPixmap PackOpenWidget::renderOption(int i) const
 {
-    const QSize size(102, 136);
+    const QSize size(126, 168);
 
     if (mContent.kind == PackKind::Buffoon) {
         QPixmap sheet(":/textures/images/Jokers.png");
@@ -390,14 +436,7 @@ QPixmap PackOpenWidget::renderOption(int i) const
 
 QPixmap PackOpenWidget::renderConsumable(ConsumableType type, const QSize &size) const
 {
-    QPixmap sheet(":/textures/images/Tarots.png");
-    if (sheet.isNull()) return QPixmap();
-    QPoint xy = ConsumableItem::spritePos(type);
-    QPixmap raw = sheet.copy(xy.x() * ConsumableItem::WIDTH,
-                             xy.y() * ConsumableItem::HEIGHT,
-                             ConsumableItem::WIDTH,
-                             ConsumableItem::HEIGHT);
-    return raw.scaled(size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    return ConsumableItem::renderPixmap(type).scaled(size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
 }
 
 QPixmap PackOpenWidget::renderPlayingCard(const CardData &c, const QSize &size) const
@@ -450,20 +489,34 @@ QPixmap PackOpenWidget::renderPlayingCard(const CardData &c, const QSize &size) 
     p.setBrush(Qt::NoBrush);
     switch (c.edition) {
     case Edition::Foil:
-        p.setPen(QPen(QColor(120, 200, 255, 200), 4));
+        p.fillRect(0, 0, W, H, QColor(180, 235, 255, 65));
+        p.setPen(QPen(QColor(170, 230, 255, 220), 4));
         p.drawRoundedRect(2, 2, W-4, H-4, 8, 8); break;
     case Edition::Holographic:
-        p.setPen(QPen(QColor(255, 100, 200, 200), 4));
+        p.fillRect(0, 0, W, H, QColor(255, 110, 220, 58));
+        p.setPen(QPen(QColor(255, 130, 220, 220), 4));
         p.drawRoundedRect(2, 2, W-4, H-4, 8, 8); break;
     case Edition::Polychrome: {
         QLinearGradient g(0, 0, W, H);
-        g.setColorAt(0,   QColor(255, 100, 100, 220));
-        g.setColorAt(0.5, QColor(100, 255, 100, 220));
-        g.setColorAt(1,   QColor(100, 100, 255, 220));
+        g.setColorAt(0,   QColor(255, 80, 90, 100));
+        g.setColorAt(0.5, QColor(100, 255, 160, 100));
+        g.setColorAt(1,   QColor(110, 120, 255, 100));
+        p.fillRect(0, 0, W, H, g);
         p.setPen(QPen(QBrush(g), 4));
         p.drawRoundedRect(2, 2, W-4, H-4, 8, 8); break;
     }
+    case Edition::Negative:
+        p.fillRect(0, 0, W, H, QColor(45, 0, 85, 145));
+        p.setPen(QPen(QColor(190, 100, 255, 220), 4));
+        p.drawRoundedRect(2, 2, W-4, H-4, 8, 8); break;
     default: break;
+    }
+
+    if (c.isDebuffed) {
+        p.fillRect(0, 0, W, H, QColor(0, 0, 0, 130));
+        p.setPen(QPen(QColor(255, 80, 80), 5));
+        p.drawLine(10, 10, W - 10, H - 10);
+        p.drawLine(W - 10, 10, 10, H - 10);
     }
 
     return pix.scaled(size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
@@ -559,7 +612,7 @@ bool PackOpenWidget::inventoryAvailableFor(int i) const
 int PackOpenWidget::maxCurrentSelectionLimit() const
 {
     if (!packUsesHandSelection()) return 0;
-    int limit = 5;
+    int limit = 0;
     for (int i = 0; i < optionCount(); ++i) {
         if (optionAlreadyChosen(i)) continue;
         if (mContent.kind == PackKind::Arcana || mContent.kind == PackKind::Spectral) {
@@ -570,7 +623,7 @@ int PackOpenWidget::maxCurrentSelectionLimit() const
     for (const Consumable &c : mInventoryConsumables) {
         if (c.maxSelection > 0) limit = qMax(limit, c.maxSelection);
     }
-    return limit;
+    return qMax(1, qMin(5, limit));
 }
 
 void PackOpenWidget::onHandCardClicked(int idx)
@@ -636,6 +689,39 @@ void PackOpenWidget::finishAndClose()
     emit packFinished();
 }
 
+void PackOpenWidget::animateCardsIn()
+{
+    auto animateWidget = [this](QWidget *w, const QPoint &offset, int delay) {
+        if (!w || !w->isVisible()) return;
+        QPoint end = w->pos();
+        w->move(end + offset);
+        QTimer::singleShot(delay, this, [w, end]() {
+            if (!w) return;
+            auto *anim = new QPropertyAnimation(w, "pos", w);
+            anim->setDuration(320);
+            anim->setStartValue(w->pos());
+            anim->setEndValue(end);
+            anim->setEasingCurve(QEasingCurve::OutCubic);
+            anim->start(QAbstractAnimation::DeleteWhenStopped);
+        });
+    };
+
+    int d = 0;
+    for (const HandUi &hu : mHandUi) {
+        if (hu.btn && hu.btn->isVisible()) {
+            animateWidget(hu.btn, QPoint(420, 120), d);
+            d += 35;
+        }
+    }
+    d = 60;
+    for (const OptUi &ou : mOptUi) {
+        if (ou.card && ou.card->isVisible()) {
+            animateWidget(ou.card, QPoint(0, 120), d);
+            d += 45;
+        }
+    }
+}
+
 void PackOpenWidget::resizeEvent(QResizeEvent *e)
 {
     QWidget::resizeEvent(e);
@@ -645,10 +731,10 @@ void PackOpenWidget::resizeEvent(QResizeEvent *e)
 void PackOpenWidget::layoutPanel()
 {
     if (!mPanel) return;
-    int panelW = qBound(1040, int(width() * 0.92), 1260);
-    int panelH = qBound(680, int(height() * 0.88), 820);
+    int panelW = qBound(1040, int(width() * 0.90), 1320);
+    int panelH = qBound(560, int(height() * 0.78), 820);
     mPanel->resize(panelW, panelH);
     int x = (width()  - mPanel->width())  / 2;
-    int y = (height() - mPanel->height()) / 2;
+    int y = qMax(42, int(height() * 0.08));
     mPanel->move(x, y);
 }
