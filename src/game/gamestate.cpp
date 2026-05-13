@@ -302,7 +302,8 @@ void GameState::playCards(const QVector<int> &indices) {
         CardData card = played[playedIdx];
         if (card.isDebuffed) { firstScoringCard = false; continue; }
 
-        int triggers = (card.seal == Seal::Red) ? 2 : 1;
+        const int redSealReps = (card.seal == Seal::Red) ? 1 : 0;
+        int triggers = 1 + redSealReps;
         const bool isFace = card.rank == Rank::Jack || card.rank == Rank::Queen || card.rank == Rank::King;
         if (isFace) triggers += sockRetriggers;
         if (firstScoringCard) triggers += chadRetriggers;
@@ -315,8 +316,14 @@ void GameState::playCards(const QVector<int> &indices) {
             card.permanentBonusChips = mHand[globalIdx].permanentBonusChips;
         }
 
-        for (int t = 0; t < triggers; ++t)
+        for (int t = 0; t < triggers; ++t) {
+            if (t > 0 && t <= redSealReps) {
+                // 原版红色蜡封在真正重复计算前先显示“再触发”。
+                // Sock/Chad 等小丑带来的重复不伪装成红蜡封，只保留各自的计分事件。
+                result.events.append({ ScoreEventKind::RedSealRetrigger, playedIdx, -1, -1, 0, 1.0 });
+            }
             scoreCard(card, result, playedIdx);
+        }
 
         if (midasTriggers > 0 && isFace && globalIdx >= 0 && globalIdx < mHand.size()) {
             mHand[globalIdx].enhancement = Enhancement::Gold;
@@ -333,6 +340,8 @@ void GameState::playCards(const QVector<int> &indices) {
         if (card.enhancement == Enhancement::Glass
             && QRandomGenerator::global()->bounded(4) == 0) {
             shattered[playedIdx] = true;
+            // 破碎发生在这张玻璃牌完成所有计分/重触发之后，和原版 shatter 队列一致。
+            result.events.append({ ScoreEventKind::GlassShatter, playedIdx, -1, -1, 0, 1.0 });
         }
         firstScoringCard = false;
     }
@@ -352,24 +361,36 @@ void GameState::playCards(const QVector<int> &indices) {
     const int shootMoonTriggers = countResolvedJokersOfType(mJokers, JokerType::ShootTheMoon);
     for (int hi = 0; hi < heldHand.size(); ++hi) {
         const CardData &c = heldHand[hi];
-        int globalIdx = heldGlobalIdx[hi];
+        int heldVisualIdx = hi; // UI 中 mHandCards 已经移除了打出的牌，heldHand 的顺序就是手牌显示顺序
         if (c.isDebuffed) continue;
-        int retriggers = 1 + mimeRetriggers;
+
+        // 原版手牌阶段先计算这张手牌是否真的有效果，然后红蜡封和 Mime 才能追加 repetition。
+        // 因此红钢 K + 男爵 + 蓝图/头脑风暴/哑剧时，总次数 = 1 + 红蜡封次数 + 解析后的 Mime 次数；
+        // 每一次 repetition 都重新执行钢铁、男爵、Shoot the Moon 等全部 hand-card 效果。
+        const bool hasHeldEffect = (c.enhancement == Enhancement::Steel)
+                                || (c.rank == Rank::King && baronTriggers > 0)
+                                || (c.rank == Rank::Queen && shootMoonTriggers > 0);
+        const int redSealReps = (hasHeldEffect && c.seal == Seal::Red) ? 1 : 0;
+        int retriggers = 1 + redSealReps + (hasHeldEffect ? mimeRetriggers : 0);
+
         for (int r = 0; r < retriggers; ++r) {
+            if (r > 0 && r <= redSealReps)
+                result.events.append({ ScoreEventKind::RedSealRetrigger, -1, heldVisualIdx, -1, 0, 1.0 });
+
             if (c.enhancement == Enhancement::Steel) {
                 result.xmult *= 1.5;
-                result.events.append({ ScoreEventKind::SteelXMult, -1, globalIdx, -1, 0, 1.5 });
+                result.events.append({ ScoreEventKind::SteelXMult, -1, heldVisualIdx, -1, 0, 1.5 });
             }
             if (c.rank == Rank::King) {
                 for (int b = 0; b < baronTriggers; ++b) {
                     result.xmult *= 1.5;
-                    result.events.append({ ScoreEventKind::SteelXMult, -1, globalIdx, -1, 0, 1.5 });
+                    result.events.append({ ScoreEventKind::SteelXMult, -1, heldVisualIdx, -1, 0, 1.5 });
                 }
             }
             if (c.rank == Rank::Queen) {
                 for (int sm = 0; sm < shootMoonTriggers; ++sm) {
                     result.mult += 13;
-                    result.events.append({ ScoreEventKind::EnhancementMult, -1, globalIdx, -1, 13, 1.0 });
+                    result.events.append({ ScoreEventKind::EnhancementMult, -1, heldVisualIdx, -1, 13, 1.0 });
                 }
             }
         }
@@ -498,24 +519,37 @@ void GameState::finishWinningRound()
 {
     const HandResult result = mLastResult;
 
-    // 原版 Mime 会重新触发 held-in-hand 牌的效果；
-    // 这里让每张哑剧演员额外触发一次黄金牌与蓝色蜡封。
-    int mimeRetriggers = 0;
-    for (const Joker &j : mJokers)
-        if (!j.isDebuffed && j.type == JokerType::Mime) ++mimeRetriggers;
+    // 原版 end_of_round 阶段也走“先看这张手牌有没有效果，再由红蜡封/Mime 追加 repetition”。
+    // 这里使用解析后的 Mime 数量，Blueprint / Brainstorm 指向 Mime 时也会生效。
+    // UI 事件只负责动画提示；实际金币/星球牌仍在这里立刻结算，避免破坏原有流程。
+    const int mimeRetriggers = countResolvedJokersOfType(mJokers, JokerType::Mime);
+    QVector<ScoreEvent> endRoundEvents;
 
-    for (const CardData &c : mHand) {
-        if (c.enhancement == Enhancement::Gold && !c.isDebuffed)
-            addGold(3 * (1 + mimeRetriggers));
-    }
+    for (int i = 0; i < mHand.size(); ++i) {
+        const CardData &c = mHand[i];
+        if (c.isDebuffed) continue;
+        const bool hasEndEffect = (c.enhancement == Enhancement::Gold) || (c.seal == Seal::Blue);
+        if (!hasEndEffect) continue;
 
-    for (const CardData &c : mHand) {
-        if (c.seal == Seal::Blue && !c.isDebuffed) {
-            for (int k = 0; k < 1 + mimeRetriggers; ++k) {
-                if (canAddConsumable()) addConsumable(planetTypeFor(result.type));
+        const int redSealReps = (c.seal == Seal::Red) ? 1 : 0;
+        const int reps = 1 + mimeRetriggers + redSealReps;
+        for (int r = 0; r < reps; ++r) {
+            if (r > 0 && r <= redSealReps)
+                endRoundEvents.append({ ScoreEventKind::RedSealRetrigger, -1, i, -1, 0, 1.0 });
+
+            if (c.enhancement == Enhancement::Gold) {
+                addGold(3);
+                endRoundEvents.append({ ScoreEventKind::DollarGain, -1, i, -1, 3, 1.0 });
+            }
+            if (c.seal == Seal::Blue && canAddConsumable()) {
+                addConsumable(planetTypeFor(result.type));
+                endRoundEvents.append({ ScoreEventKind::BlueSealPlanet, -1, i, -1, 0, 1.0 });
             }
         }
     }
+
+    if (!endRoundEvents.isEmpty())
+        emit endRoundCardTriggered(endRoundEvents);
 
     int blindReward = 0;
     switch (mBlindType) {
@@ -1066,7 +1100,10 @@ void GameState::scoreCard(const CardData &card, HandResult &result, int playedId
             result.mult += 20;
             result.events.append({ ScoreEventKind::EnhancementMult, playedIdx, -1, -1, 20, 1.0 });
         }
-        if (QRandomGenerator::global()->bounded(15) == 0) addGold(20);
+        if (QRandomGenerator::global()->bounded(15) == 0) {
+            addGold(20);
+            result.events.append({ ScoreEventKind::DollarGain, playedIdx, -1, -1, 20, 1.0 });
+        }
         break;
     default: break;
     }
@@ -1123,7 +1160,10 @@ void GameState::scoreCard(const CardData &card, HandResult &result, int playedId
     }
 
     // 5) Gold Seal +$3
-    if (card.seal == Seal::Gold) addGold(3);
+    if (card.seal == Seal::Gold) {
+        addGold(3);
+        result.events.append({ ScoreEventKind::DollarGain, playedIdx, -1, -1, 3, 1.0 });
+    }
 }
 
 ConsumableType GameState::planetTypeFor(HandType t)

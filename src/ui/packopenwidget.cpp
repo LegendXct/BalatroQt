@@ -1,6 +1,7 @@
 #include "packopenwidget.h"
 #include "../card/jokeritem.h"
 #include "../card/consumableitem.h"
+#include "../utils/shadereffects.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
@@ -14,6 +15,7 @@
 #include <QTimer>
 #include <QPropertyAnimation>
 #include <QEasingCurve>
+#include <QSizePolicy>
 
 PackOpenWidget::PackOpenWidget(const QFont &cnFont, const QFont &pixelFont,
                                QWidget *parent)
@@ -43,13 +45,13 @@ PackOpenWidget::PackOpenWidget(const QFont &cnFont, const QFont &pixelFont,
             refreshInventoryUi();
         }
     });
-    mSoulAnimTimer->start(60);
+    mSoulAnimTimer->start(100);
 }
 
 void PackOpenWidget::buildUi()
 {
     mPanel = new QWidget(this);
-    mPanel->setMinimumSize(1040, 680);
+    mPanel->setMinimumSize(860, 540);
     mPanel->setStyleSheet(
         "background: transparent;"
         "border: none;"
@@ -71,43 +73,24 @@ void PackOpenWidget::buildUi()
     mLblChoose->setStyleSheet("color:white; background:transparent;");
     mLblChoose->setAlignment(Qt::AlignCenter);
 
-    // 上方临时手牌区：原版开奥秘/幻灵包时可以对这排牌使用特殊牌。
+    // 上方临时手牌区：改成原版手牌式重叠排布，避免十张牌硬塞成一排导致越界/裁切。
     mHandBox = new QWidget(mPanel);
     auto *handBox = mHandBox;
     handBox->setObjectName("packHandBox");
     handBox->setAttribute(Qt::WA_StyledBackground, true);
+    handBox->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    handBox->setMinimumHeight(172);
     handBox->setStyleSheet("QWidget#packHandBox { background:transparent; border:none; }");
-    auto *handLayout = new QHBoxLayout(handBox);
-    handLayout->setContentsMargins(10, 8, 10, 8);
-    handLayout->setSpacing(6);
-    handLayout->setAlignment(Qt::AlignCenter);
 
     for (int i = 0; i < 10; ++i) {
         HandUi hu;
-        auto *wrap = new QWidget(handBox);
-        wrap->setStyleSheet("background:transparent;");
-        auto *vbl = new QVBoxLayout(wrap);
-        vbl->setContentsMargins(0, 0, 0, 0);
-        vbl->setSpacing(2);
-
-        hu.btn = new QPushButton(wrap);
-        hu.btn->setFixedSize(116, 156);
+        hu.btn = new QPushButton(handBox);
         hu.btn->setCursor(Qt::PointingHandCursor);
-        hu.btn->setStyleSheet(
-            "QPushButton { background:transparent; border:none; border-radius:6px; }"
-            "QPushButton:hover { margin-top:-14px; }"
-            );
+        hu.btn->setStyleSheet("QPushButton { background:transparent; border:none; border-radius:6px; }");
         connect(hu.btn, &QPushButton::clicked, this, [this, i]() { onHandCardClicked(i); });
-        vbl->addWidget(hu.btn, 0, Qt::AlignCenter);
 
-        hu.nameLbl = new QLabel("", wrap);
-        QFont nf = mCNFont; nf.setPixelSize(9);
-        hu.nameLbl->setFont(nf);
-        hu.nameLbl->setStyleSheet("color:#ddd; background:transparent;");
-        hu.nameLbl->setAlignment(Qt::AlignCenter);
-        vbl->addWidget(hu.nameLbl);
-
-        handLayout->addWidget(wrap);
+        hu.nameLbl = new QLabel("", handBox);
+        hu.nameLbl->hide();
         mHandUi.append(hu);
     }
     root->addWidget(handBox);
@@ -295,6 +278,7 @@ void PackOpenWidget::open(const PackContent &content,
 
     show();
     raise();
+    layoutPanel();
     refreshAll();
     QTimer::singleShot(0, this, &PackOpenWidget::animateCardsIn);
 }
@@ -347,33 +331,65 @@ int PackOpenWidget::optionCount() const
     return 0;
 }
 
+void PackOpenWidget::layoutPackHand()
+{
+    if (!mHandBox) return;
+    if (!packUsesHandSelection()) return;
+
+    const int n = qMin(mPackHand.size(), mHandUi.size());
+    const int areaW = qMax(1, mHandBox->width() > 0 ? mHandBox->width() : mPanel->width() - 44);
+    const int maxTotal = qMax(120, areaW - 24);
+
+    int cardW = 116;
+    int cardH = 156;
+    int step = (n > 1) ? qMin(68, (maxTotal - cardW) / qMax(1, n - 1)) : 0;
+    if (n > 1 && step < 42) {
+        // 在窄屏/十张临时手牌时，按原版手牌区缩小并增加重叠，保证整排不出界。
+        cardW = qBound(82, int(maxTotal / (1.0 + 0.52 * (n - 1))), 116);
+        cardH = qMax(112, int(cardW * 190.0 / 142.0));
+        step = qMin(int(cardW * 0.58), (maxTotal - cardW) / qMax(1, n - 1));
+        step = qMax(32, step);
+    }
+
+    const int totalW = n <= 0 ? 0 : cardW + qMax(0, n - 1) * step;
+    const int startX = qMax(8, (areaW - totalW) / 2);
+    const int baseY = 18;
+    mHandBox->setFixedHeight(qBound(148, cardH + 34, 190));
+
+    for (int i = 0; i < mHandUi.size(); ++i) {
+        HandUi &hu = mHandUi[i];
+        if (!hu.btn) continue;
+        if (i >= n) {
+            hu.btn->hide();
+            if (hu.nameLbl) hu.nameLbl->hide();
+            continue;
+        }
+        const bool selected = mSelectedHand.contains(i);
+        const int lift = selected ? 22 : 0;
+        hu.btn->setFixedSize(cardW, cardH);
+        hu.btn->move(startX + i * step, baseY - lift);
+        hu.btn->setIcon(QIcon(renderPlayingCard(mPackHand[i], QSize(cardW - 4, cardH - 4))));
+        hu.btn->setIconSize(QSize(cardW - 4, cardH - 4));
+        hu.btn->setStyleSheet(selected ?
+            "QPushButton { background:transparent; border:3px solid #ffe66d; border-radius:8px; }" :
+            "QPushButton { background:transparent; border:none; border-radius:8px; }"
+            "QPushButton:hover { border:2px solid rgba(255,230,109,170); }");
+        hu.btn->show();
+        hu.btn->raise();
+        if (hu.nameLbl) hu.nameLbl->hide();
+    }
+}
+
 void PackOpenWidget::refreshHandUi()
 {
     if (!packUsesHandSelection()) {
         for (HandUi &hu : mHandUi) {
-            hu.btn->hide();
-            hu.nameLbl->hide();
+            if (hu.btn) hu.btn->hide();
+            if (hu.nameLbl) hu.nameLbl->hide();
         }
         return;
     }
-    for (int i = 0; i < mHandUi.size(); ++i) {
-        HandUi &hu = mHandUi[i];
-        if (i >= mPackHand.size()) {
-            hu.btn->hide();
-            hu.nameLbl->hide();
-            continue;
-        }
-        hu.btn->show();
-        hu.nameLbl->show();
-        hu.nameLbl->setText(mPackHand[i].toString());
-        hu.btn->setIcon(QIcon(renderPlayingCard(mPackHand[i], hu.btn->size() - QSize(4, 4))));
-        hu.btn->setIconSize(hu.btn->size() - QSize(4, 4));
-        bool selected = mSelectedHand.contains(i);
-        hu.btn->setStyleSheet(selected ?
-            "QPushButton { background:transparent; border:none; border-radius:6px; margin-top:-28px; }" :
-            "QPushButton { background:transparent; border:none; border-radius:6px; }"
-            "QPushButton:hover { margin-top:-14px; }");
-    }
+    layoutPackHand();
 }
 
 void PackOpenWidget::refreshOptionUi()
@@ -446,7 +462,8 @@ QPixmap PackOpenWidget::renderPlayingCard(const CardData &c, const QSize &size) 
     QPixmap enhSheet (":/textures/images/Enhancers.png");
     QPixmap pix(W, H); pix.fill(Qt::transparent);
     QPainter p(&pix);
-    p.setRenderHint(QPainter::SmoothPixmapTransform);
+    p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    p.setRenderHint(QPainter::Antialiasing, true);
 
     int eCol = 1, eRow = 0;
     switch (c.enhancement) {
@@ -474,6 +491,10 @@ QPixmap PackOpenWidget::renderPlayingCard(const CardData &c, const QSize &size) 
         }
         p.drawPixmap(QRect(0, 0, W, H), deckSheet, QRect(col*W, row*H, W, H));
     }
+    p.end();
+
+    if (c.edition != Edition::None)
+        pix = BalatroShaders::renderEditionPixmap(pix, c.edition);
 
     int sCol = -1, sRow = 0;
     switch (c.seal) {
@@ -483,41 +504,16 @@ QPixmap PackOpenWidget::renderPlayingCard(const CardData &c, const QSize &size) 
     case Seal::Blue:   sCol = 6; sRow = 4; break;
     default: break;
     }
-    if (sCol >= 0 && !enhSheet.isNull())
-        p.drawPixmap(QRect(0, 0, W, H), enhSheet, QRect(sCol*W, sRow*H, W, H));
-
-    p.setBrush(Qt::NoBrush);
-    switch (c.edition) {
-    case Edition::Foil:
-        p.fillRect(0, 0, W, H, QColor(180, 235, 255, 65));
-        p.setPen(QPen(QColor(170, 230, 255, 220), 4));
-        p.drawRoundedRect(2, 2, W-4, H-4, 8, 8); break;
-    case Edition::Holographic:
-        p.fillRect(0, 0, W, H, QColor(255, 110, 220, 58));
-        p.setPen(QPen(QColor(255, 130, 220, 220), 4));
-        p.drawRoundedRect(2, 2, W-4, H-4, 8, 8); break;
-    case Edition::Polychrome: {
-        QLinearGradient g(0, 0, W, H);
-        g.setColorAt(0,   QColor(255, 80, 90, 100));
-        g.setColorAt(0.5, QColor(100, 255, 160, 100));
-        g.setColorAt(1,   QColor(110, 120, 255, 100));
-        p.fillRect(0, 0, W, H, g);
-        p.setPen(QPen(QBrush(g), 4));
-        p.drawRoundedRect(2, 2, W-4, H-4, 8, 8); break;
-    }
-    case Edition::Negative:
-        p.fillRect(0, 0, W, H, QColor(45, 0, 85, 145));
-        p.setPen(QPen(QColor(190, 100, 255, 220), 4));
-        p.drawRoundedRect(2, 2, W-4, H-4, 8, 8); break;
-    default: break;
+    if (sCol >= 0 && !enhSheet.isNull()) {
+        QPixmap seal = enhSheet.copy(sCol*W, sRow*H, W, H);
+        if (c.seal == Seal::Gold) seal = BalatroShaders::renderGoldSealPixmap(seal, 0.95);
+        QPainter sealPainter(&pix);
+        sealPainter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        sealPainter.drawPixmap(QRect(0, 0, W, H), seal);
     }
 
-    if (c.isDebuffed) {
-        p.fillRect(0, 0, W, H, QColor(0, 0, 0, 130));
-        p.setPen(QPen(QColor(255, 80, 80), 5));
-        p.drawLine(10, 10, W - 10, H - 10);
-        p.drawLine(W - 10, 10, 10, H - 10);
-    }
+    if (c.isDebuffed)
+        pix = BalatroShaders::renderDebuffedPixmap(pix, 0.95);
 
     return pix.scaled(size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
 }
@@ -731,10 +727,13 @@ void PackOpenWidget::resizeEvent(QResizeEvent *e)
 void PackOpenWidget::layoutPanel()
 {
     if (!mPanel) return;
-    int panelW = qBound(1040, int(width() * 0.90), 1320);
-    int panelH = qBound(560, int(height() * 0.78), 820);
+    const int maxW = qMax(860, width() - 18);
+    const int maxH = qMax(520, height() - 24);
+    int panelW = qBound(860, int(width() * 0.88), qMin(1180, maxW));
+    int panelH = qBound(520, int(height() * 0.80), qMin(740, maxH));
     mPanel->resize(panelW, panelH);
     int x = (width()  - mPanel->width())  / 2;
-    int y = qMax(42, int(height() * 0.08));
+    int y = qMax(8, (height() - mPanel->height()) / 2);
     mPanel->move(x, y);
+    layoutPackHand();
 }

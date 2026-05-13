@@ -8,9 +8,35 @@
 #include <QPainterPath>
 #include <QLinearGradient>
 #include <QRadialGradient>
+#include <QCoreApplication>
+#include <QSet>
+#include <QHash>
+#include <QStringList>
 #include <cmath>
 
 QPixmap *ConsumableItem::sSheet = nullptr;
+
+namespace {
+QSet<ConsumableItem*> sAnimatedConsumables;
+QTimer *sConsumableShaderTimer = nullptr;
+
+bool consumableNeedsShaderTick(const Consumable &c)
+{
+    return c.type == ConsumableType::Spectral_Soul || c.negative;
+}
+
+void ensureConsumableShaderTimer()
+{
+    if (sConsumableShaderTimer) return;
+    sConsumableShaderTimer = new QTimer(QCoreApplication::instance());
+    sConsumableShaderTimer->setTimerType(Qt::CoarseTimer);
+    QObject::connect(sConsumableShaderTimer, &QTimer::timeout, []() {
+        const auto items = sAnimatedConsumables.values();
+        for (ConsumableItem *item : items) if (item) item->update();
+    });
+    sConsumableShaderTimer->start(67);
+}
+}
 
 void ConsumableItem::loadResources() {
     sSheet = new QPixmap(":/textures/images/Tarots.png");
@@ -87,7 +113,18 @@ QPixmap ConsumableItem::renderPixmap(ConsumableType type, bool negative)
         loadResources();
     }
 
-    QPixmap pix(WIDTH, HEIGHT);
+    const bool animated = (type == ConsumableType::Spectral_Soul) || negative;
+    const int frame = animated ? int(BalatroShaders::shaderTime() * 15.0) : -1;
+    const QString key = QString::number(int(type)) + QLatin1Char('|')
+                      + QString::number(negative ? 1 : 0) + QLatin1Char('|')
+                      + QString::number(frame);
+
+    static QHash<QString, QPixmap> cache;
+    static QStringList order;
+    QPixmap pix = cache.value(key);
+    if (!pix.isNull()) return pix;
+
+    pix = QPixmap(WIDTH, HEIGHT);
     pix.fill(Qt::transparent);
 
     QPainter p(&pix);
@@ -100,17 +137,25 @@ QPixmap ConsumableItem::renderPixmap(ConsumableType type, bool negative)
         p.drawPixmap(QRect(0, 0, WIDTH, HEIGHT), *sSheet, src);
     }
 
-    // 原版 The Soul 不是单张平面图：背景牌面之外，额外绘制 G.shared_soul
-    // (来自 Enhancers.png 的 {x=0,y=1} 白水晶格)。这层必须出现在所有地方：仓库、商店、开包选项。
-    if (type == ConsumableType::Spectral_Soul) {
-        static QPixmap enhSheet(QStringLiteral(":/textures/images/Enhancers.png"));
-        BalatroShaders::paintSoulCrystal(&p, QRectF(0, 0, WIDTH, HEIGHT), enhSheet);
-    }
+    p.end();
 
     if (negative) {
-        BalatroShaders::paintEdition(&p, QRectF(0, 0, WIDTH, HEIGHT), Edition::Negative);
+        pix = BalatroShaders::renderEditionPixmap(pix, Edition::Negative);
     }
 
+    // 原版 The Soul 不是单张平面图：背景牌面之外，额外绘制 G.shared_soul。
+    // 这里放在 negative 之后，保证你要的白水晶不会被反相污染。
+    if (type == ConsumableType::Spectral_Soul) {
+        QPainter soulPainter(&pix);
+        soulPainter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        soulPainter.setRenderHint(QPainter::Antialiasing, true);
+        static QPixmap enhSheet(QStringLiteral(":/textures/images/Enhancers.png"));
+        BalatroShaders::paintSoulCrystal(&soulPainter, QRectF(0, 0, WIDTH, HEIGHT), enhSheet);
+    }
+
+    cache.insert(key, pix);
+    order.append(key);
+    while (order.size() > 96) cache.remove(order.takeFirst());
     return pix;
 }
 
@@ -122,10 +167,10 @@ ConsumableItem::ConsumableItem(const Consumable &c, QGraphicsItem *parent)
     setToolTip(QString("%1\n%2\n左键: 使用    右键: 卖出 (+$%3)")
                    .arg(mC.name, mC.description).arg(mC.sellValue));
 
-    if (mC.type == ConsumableType::Spectral_Soul || mC.negative) {
-        auto *timer = new QTimer(this);
-        connect(timer, &QTimer::timeout, this, [this]() { update(); });
-        timer->start(60);
+    if (consumableNeedsShaderTick(mC)) {
+        ensureConsumableShaderTimer();
+        sAnimatedConsumables.insert(this);
+        QObject::connect(this, &QObject::destroyed, [ptr = this]() { sAnimatedConsumables.remove(ptr); });
     }
 }
 

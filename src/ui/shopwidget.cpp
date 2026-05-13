@@ -6,6 +6,7 @@
 #include <QResizeEvent>
 #include <QPainter>
 #include <QGraphicsDropShadowEffect>
+#include <QEvent>
 #include "../utils/shadereffects.h"
 
 
@@ -189,6 +190,8 @@ void ShopWidget::buildUi()
     lhbl->addWidget(boosterBox, 1);
 
     root->addWidget(lowerRow);
+
+    buildInfoPanel();
 }
 
 ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
@@ -221,6 +224,7 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
     if (isBooster) ou.cardBtn->setFixedSize(190, 252);
     else           ou.cardBtn->setFixedSize(126, 174);
     ou.cardBtn->setCursor(Qt::PointingHandCursor);
+    ou.cardBtn->installEventFilter(this);
     ou.cardBtn->setStyleSheet(
         "QPushButton { background:#374244; border-radius:6px; border:none; }"
         "QPushButton:hover { background:#4f6367; }"
@@ -251,33 +255,126 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
     return ou;
 }
 
+void ShopWidget::buildInfoPanel()
+{
+    if (mInfoPanel) return;
+    mInfoPanel = new QWidget(this);
+    mInfoPanel->setAttribute(Qt::WA_StyledBackground, true);
+    mInfoPanel->setStyleSheet(
+        "background:rgba(31,37,42,245);"
+        "border:2px solid #fda200;"
+        "border-radius:12px;"
+    );
+
+    auto *vbl = new QVBoxLayout(mInfoPanel);
+    vbl->setContentsMargins(12, 10, 12, 10);
+    vbl->setSpacing(6);
+
+    mInfoTitle = new QLabel(mInfoPanel);
+    QFont tf = mCNFont; tf.setPixelSize(16); tf.setBold(true);
+    mInfoTitle->setFont(tf);
+    mInfoTitle->setAlignment(Qt::AlignCenter);
+    mInfoTitle->setStyleSheet("color:#ffe9a8; background:transparent; border:none;");
+    mInfoTitle->setWordWrap(true);
+    mInfoTitle->setFixedWidth(236);
+    vbl->addWidget(mInfoTitle);
+
+    mInfoBody = new QLabel(mInfoPanel);
+    QFont bf = mCNFont; bf.setPixelSize(12);
+    mInfoBody->setFont(bf);
+    mInfoBody->setAlignment(Qt::AlignCenter);
+    mInfoBody->setWordWrap(true);
+    mInfoBody->setStyleSheet("color:white; background:transparent; border:none;");
+    mInfoBody->setFixedWidth(236);
+    vbl->addWidget(mInfoBody);
+
+    mInfoPanel->setFixedWidth(270);
+    mInfoPanel->hide();
+}
+
+void ShopWidget::showOfferInfo(QWidget *source)
+{
+    if (!source) return;
+    buildInfoPanel();
+    const QString title = source->property("infoTitle").toString();
+    const QString body = source->property("infoBody").toString();
+    if (title.isEmpty() && body.isEmpty()) return;
+
+    mInfoTitle->setText(title);
+    mInfoBody->setText(body);
+    mInfoBody->setVisible(!body.isEmpty());
+    if (auto *lay = mInfoPanel->layout()) lay->activate();
+    mInfoPanel->adjustSize();
+    mInfoPanel->resize(270, qBound(84, mInfoPanel->height(), 260));
+
+    QPoint pos = source->mapTo(this, QPoint(source->width() + 12, 0));
+    if (pos.x() + mInfoPanel->width() > width() - 8)
+        pos.setX(source->mapTo(this, QPoint(-mInfoPanel->width() - 12, 0)).x());
+    pos.setX(qBound(6, pos.x(), qMax(6, width() - mInfoPanel->width() - 6)));
+    pos.setY(qBound(6, pos.y(), qMax(6, height() - mInfoPanel->height() - 6)));
+
+    mInfoPanel->move(pos);
+    mInfoPanel->raise();
+    mInfoPanel->show();
+}
+
+void ShopWidget::hideOfferInfo()
+{
+    if (mInfoPanel) mInfoPanel->hide();
+}
+
+bool ShopWidget::eventFilter(QObject *obj, QEvent *event)
+{
+    QWidget *w = qobject_cast<QWidget *>(obj);
+    if (w && w->property("infoTitle").isValid()) {
+        if (event->type() == QEvent::Enter) {
+            showOfferInfo(w);
+        } else if (event->type() == QEvent::Leave || event->type() == QEvent::Hide) {
+            hideOfferInfo();
+        }
+    }
+    return QWidget::eventFilter(obj, event);
+}
+
 void ShopWidget::refresh()
 {
     mLblGold->setText(QString("$%1").arg(mGS->gold()));
 
     auto fillSlot = [this](OfferUi &ou, const ShopOffer &o, bool canBuy, bool isBooster) {
-        if (o.sold) { ou.card->setVisible(false); return; }
+        if (o.sold) {
+            ou.card->setVisible(false);
+            ou.cardBtn->setToolTip(QString());
+            ou.cardBtn->setProperty("infoTitle", QString());
+            ou.cardBtn->setProperty("infoBody", QString());
+            return;
+        }
         ou.card->setVisible(true);
 
         QString name;
+        QString body;
         if (o.kind == OfferKind::Joker) {
             Joker tmp = createJoker(o.joker);
             QString ed = editionDisplayName(o.jokerEdition);
             name = ed.isEmpty() ? tmp.name : (ed + " " + tmp.name);
-            QString tip = tmp.name + "\n" + tmp.description;
-            if (!ed.isEmpty()) tip += "\n" + editionDescription(o.jokerEdition);
-            ou.cardBtn->setToolTip(tip);
+            body = tmp.description;
+            if (!ed.isEmpty()) body += "\n" + editionDescription(o.jokerEdition);
         } else if (o.kind == OfferKind::Pack) {
             name = packDisplayName(o.pack, o.packSize);
+            body = "购买后打开，选择其中的牌。";
         } else if (o.kind == OfferKind::Voucher) {
             name = voucherData(o.voucher).name;
-            ou.cardBtn->setToolTip(voucherData(o.voucher).description);
+            body = voucherData(o.voucher).description;
         } else if (o.kind == OfferKind::PlayingCard) {
             name = o.playingCard.toString();
+            body = "购买后加入牌组。";
         } else {
             Consumable tmp = createConsumable(o.consumable);
             name = tmp.name;
+            body = tmp.description;
         }
+        ou.cardBtn->setToolTip(QString());
+        ou.cardBtn->setProperty("infoTitle", name);
+        ou.cardBtn->setProperty("infoBody", body);
         ou.nameLbl->setText(name);
         ou.priceLbl->setText(QString("$%1").arg(o.cost));
 
@@ -345,11 +442,8 @@ QPixmap ShopWidget::offerPixmap(const ShopOffer &o) const
             JokerItem::drawFloatingSprite(&p, QRectF(0, 0, pix.width(), pix.height()),
                                           o.joker, /*animated=*/false);
         }
-        if (o.jokerEdition != Edition::None) {
-            QPainter p(&pix);
-            p.setRenderHint(QPainter::Antialiasing, true);
-            BalatroShaders::paintEdition(&p, QRectF(0, 0, pix.width(), pix.height()), o.jokerEdition);
-        }
+        if (o.jokerEdition != Edition::None)
+            pix = BalatroShaders::renderEditionPixmap(pix, o.jokerEdition);
         return pix;
     }
 
@@ -383,10 +477,7 @@ QPixmap ShopWidget::offerPixmap(const ShopOffer &o) const
                                            c.y() * ConsumableItem::HEIGHT,
                                            ConsumableItem::WIDTH,
                                            ConsumableItem::HEIGHT);
-            QPainter p(&pix);
-            p.setRenderHint(QPainter::Antialiasing, true);
-            BalatroShaders::paintVoucherShader(&p, QRectF(0, 0, pix.width(), pix.height()), 0.9);
-            return pix;
+            return BalatroShaders::renderVoucherPixmap(pix, 0.9);
         }
 
         QPixmap pix(ConsumableItem::WIDTH, ConsumableItem::HEIGHT);
@@ -444,12 +535,35 @@ QPixmap ShopWidget::playingCardPixmap(const CardData &c) const
         }
         p.drawPixmap(QRect(0, 0, W, H), deckSheet, QRect(col*W, row*H, W, H));
     }
+    p.end();
+
     if (c.edition != Edition::None)
-        BalatroShaders::paintEdition(&p, QRectF(0, 0, W, H), c.edition);
-    if (c.seal == Seal::Gold)
-        BalatroShaders::paintGoldSealGlow(&p, QRectF(0, 0, W, H));
+        pix = BalatroShaders::renderEditionPixmap(pix, c.edition);
+
+    if (c.seal != Seal::None && !enhSheet.isNull()) {
+        int sCol = 0, sRow = 0;
+        switch (c.seal) {
+        case Seal::Gold:   sCol = 2; sRow = 0; break;
+        case Seal::Purple: sCol = 4; sRow = 4; break;
+        case Seal::Red:    sCol = 5; sRow = 4; break;
+        case Seal::Blue:   sCol = 6; sRow = 4; break;
+        default: break;
+        }
+        QPixmap sealPix(W, H);
+        sealPix.fill(Qt::transparent);
+        {
+            QPainter sp(&sealPix);
+            sp.setRenderHint(QPainter::SmoothPixmapTransform, true);
+            sp.drawPixmap(QRect(0, 0, W, H), enhSheet, QRect(sCol * W, sRow * H, W, H));
+        }
+        if (c.seal == Seal::Gold)
+            sealPix = BalatroShaders::renderVoucherPixmap(sealPix, 0.95);
+        QPainter fp(&pix);
+        fp.drawPixmap(QRect(0, 0, W, H), sealPix);
+    }
+
     if (c.isDebuffed)
-        BalatroShaders::paintDebuff(&p, QRectF(0, 0, W, H));
+        pix = BalatroShaders::renderDebuffedPixmap(pix);
     return pix;
 }
 

@@ -163,6 +163,7 @@ signals:
     void roundWon(int blindReward, int handBonus, int interest);
     void gameOver(bool won);
     void handPlayed();
+    void endRoundCardTriggered(const QVector<ScoreEvent> &events);
     void jokersChanged();
     void shopChanged();
     void handLevelsChanged();

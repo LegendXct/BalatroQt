@@ -5,11 +5,6 @@ set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets OpenGL OpenGLWidgets)
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
-find_package(Qt6 REQUIRED COMPONENTS Core)
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
-find_package(Qt6 REQUIRED COMPONENTS Widgets)
 
 qt_standard_project_setup()
 
@@ -56,11 +51,6 @@ target_link_libraries(BalatroQt
         Qt6::OpenGL
         Qt6::OpenGLWidgets
 )
-target_link_libraries(BalatroQt PRIVATE Qt6::Widgets)
-target_link_libraries(BalatroQt PRIVATE Qt6::Core)
-target_link_libraries(BalatroQt PRIVATE Qt6::Widgets)
-target_link_libraries(BalatroQt PRIVATE Qt6::Widgets)
-target_link_libraries(BalatroQt PRIVATE Qt6::Widgets)
 
 qt_add_resources(BalatroQt "textures"
     PREFIX "/textures"
@@ -79,6 +69,32 @@ qt_add_resources(BalatroQt "textures"
         resources/images/balatro.png
         resources/images/ShopSignAnimation.png
         resources/images/Vouchers.png
+)
+
+
+qt_add_resources(BalatroQt "shader_sources"
+    PREFIX "/shaders"
+    BASE "resources"
+    FILES
+        resources/shaders/CRT.fs
+        resources/shaders/background.fs
+        resources/shaders/booster.fs
+        resources/shaders/debuff.fs
+        resources/shaders/dissolve.fs
+        resources/shaders/flame.fs
+        resources/shaders/flash.fs
+        resources/shaders/foil.fs
+        resources/shaders/gold_seal.fs
+        resources/shaders/holo.fs
+        resources/shaders/hologram.fs
+        resources/shaders/negative.fs
+        resources/shaders/negative_shine.fs
+        resources/shaders/played.fs
+        resources/shaders/polychrome.fs
+        resources/shaders/skew.fs
+        resources/shaders/splash.fs
+        resources/shaders/vortex.fs
+        resources/shaders/voucher.fs
 )
 
 qt_add_resources(BalatroQt "fonts"

@@ -39,6 +39,14 @@ void paintBackground(QPainter *p,
 
 void paintCrtOverlay(QPainter *p, const QRectF &rect, double opacity = 0.18);
 
+QPixmap renderEditionPixmap(const QPixmap &base, Edition edition, double intensity = 1.0);
+QPixmap renderBoosterPixmap(const QPixmap &base, double intensity = 1.0);
+QPixmap renderVoucherPixmap(const QPixmap &base, double intensity = 1.0);
+QPixmap renderGoldSealPixmap(const QPixmap &base, double intensity = 1.0);
+QPixmap renderDebuffedPixmap(const QPixmap &base, double intensity = 1.0);
+QPixmap renderHologramPixmap(const QPixmap &base, double intensity = 1.0);
+QPixmap renderPlayedPixmap(const QPixmap &base, double intensity = 1.0);
+QPixmap renderDissolvePixmap(const QPixmap &base, double dissolve, const QColor &burn1 = QColor(255, 255, 255, 80), const QColor &burn2 = QColor(120, 180, 255, 50), double intensity = 1.0);
 void paintEdition(QPainter *p, const QRectF &rect, Edition edition, double intensity = 1.0);
 void paintNegativeShine(QPainter *p, const QRectF &rect, double intensity = 1.0);
 void paintBoosterShader(QPainter *p, const QRectF &rect, double intensity = 1.0);

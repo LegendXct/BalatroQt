@@ -8,12 +8,43 @@
 #include <QDateTime>
 #include <QTimer>
 #include <QPainterPath>
+#include <QCoreApplication>
+#include <QSet>
+#include <QHash>
+#include <QStringList>
 #include <cmath>
 #include "../utils/shadereffects.h"
 
 QPixmap *CardItem::sDeckSheet = nullptr;
 QPixmap *CardItem::sEnhSheet = nullptr;
 QPixmap *CardItem::sJokerSheet = nullptr;
+
+namespace {
+QSet<CardItem*> sAnimatedCards;
+QTimer *sCardShaderTimer = nullptr;
+
+bool cardNeedsShaderTick(const CardData &d)
+{
+    return d.edition != Edition::None || d.seal == Seal::Gold || d.isDebuffed;
+}
+
+void ensureCardShaderTimer()
+{
+    if (sCardShaderTimer) return;
+    sCardShaderTimer = new QTimer(QCoreApplication::instance());
+    sCardShaderTimer->setTimerType(Qt::CoarseTimer);
+    QObject::connect(sCardShaderTimer, &QTimer::timeout, []() {
+        const auto items = sAnimatedCards.values();
+        for (CardItem *item : items) if (item) item->update();
+    });
+    sCardShaderTimer->start(67);
+}
+
+int cardShaderCacheFrame()
+{
+    return int(BalatroShaders::shaderTime() * 15.0);
+}
+}
 
 
 void CardItem::loadResources() {
@@ -35,12 +66,12 @@ CardItem::CardItem(const CardData &data, QGraphicsItem *parent)
 {
     setAcceptHoverEvents(true);
     setCursor(Qt::PointingHandCursor);
+    QObject::connect(this, &QObject::destroyed, [ptr = this]() { sAnimatedCards.remove(ptr); });
 
-    auto *shineTimer = new QTimer(this);
-    connect(shineTimer, &QTimer::timeout, this, [this]() {
-        if (mData.edition != Edition::None || mData.seal == Seal::Gold || mData.isDebuffed) update();
-    });
-    shineTimer->start(80);
+    if (cardNeedsShaderTick(mData)) {
+        ensureCardShaderTimer();
+        sAnimatedCards.insert(this);
+    }
 }
 
 QRectF CardItem::boundingRect() const {
@@ -97,23 +128,65 @@ void CardItem::paintFront(QPainter *painter)
 {
     QRect dst(0, 0, WIDTH, HEIGHT);
 
-    QRect enh = enhanceSrcRect();
-    if (!enh.isNull()) painter->drawPixmap(dst, *sEnhSheet, enh);
+    const bool animated = cardNeedsShaderTick(mData);
+    const int frame = animated ? cardShaderCacheFrame() : -1;
+    const QString key = QString::number(int(mData.suit)) + QLatin1Char('|')
+                      + QString::number(int(mData.rank)) + QLatin1Char('|')
+                      + QString::number(int(mData.enhancement)) + QLatin1Char('|')
+                      + QString::number(int(mData.edition)) + QLatin1Char('|')
+                      + QString::number(int(mData.seal)) + QLatin1Char('|')
+                      + QString::number(mData.isDebuffed ? 1 : 0) + QLatin1Char('|')
+                      + QString::number(frame);
 
-    if (mData.enhancement != Enhancement::Stone)
-        painter->drawPixmap(dst, *sDeckSheet, deckSrcRect());
+    static QHash<QString, QPixmap> cache;
+    static QStringList order;
+    QPixmap finalPix = cache.value(key);
+    if (finalPix.isNull()) {
+        finalPix = QPixmap(WIDTH, HEIGHT);
+        finalPix.fill(Qt::transparent);
 
-    QRect seal = sealSrcRect();
-    if (!seal.isNull()) painter->drawPixmap(dst, *sEnhSheet, seal);
+        QPixmap body(WIDTH, HEIGHT);
+        body.fill(Qt::transparent);
+        {
+            QPainter bp(&body);
+            bp.setRenderHint(QPainter::SmoothPixmapTransform, true);
+            QRect enh = enhanceSrcRect();
+            if (!enh.isNull()) bp.drawPixmap(dst, *sEnhSheet, enh);
+            if (mData.enhancement != Enhancement::Stone)
+                bp.drawPixmap(dst, *sDeckSheet, deckSrcRect());
+        }
 
-    BalatroShaders::paintEdition(painter, QRectF(0, 0, WIDTH, HEIGHT), mData.edition);
+        if (mData.edition != Edition::None)
+            body = BalatroShaders::renderEditionPixmap(body, mData.edition);
+        if (mData.isDebuffed)
+            body = BalatroShaders::renderDebuffedPixmap(body);
 
-    if (mData.seal == Seal::Gold)
-        BalatroShaders::paintGoldSealGlow(painter, QRectF(0, 0, WIDTH, HEIGHT));
+        {
+            QPainter fp(&finalPix);
+            fp.setRenderHint(QPainter::SmoothPixmapTransform, true);
+            fp.drawPixmap(dst, body);
 
-    if (mData.isDebuffed) {
-        BalatroShaders::paintDebuff(painter, QRectF(0, 0, WIDTH, HEIGHT));
+            QRect seal = sealSrcRect();
+            if (!seal.isNull()) {
+                QPixmap sealPix(WIDTH, HEIGHT);
+                sealPix.fill(Qt::transparent);
+                {
+                    QPainter sp(&sealPix);
+                    sp.setRenderHint(QPainter::SmoothPixmapTransform, true);
+                    sp.drawPixmap(dst, *sEnhSheet, seal);
+                }
+                if (mData.seal == Seal::Gold)
+                    sealPix = BalatroShaders::renderGoldSealPixmap(sealPix, 0.95);
+                fp.drawPixmap(dst, sealPix);
+            }
+        }
+
+        cache.insert(key, finalPix);
+        order.append(key);
+        while (order.size() > 256) cache.remove(order.takeFirst());
     }
+
+    painter->drawPixmap(dst, finalPix);
 }
 
 void CardItem::paintBack(QPainter *painter) {
@@ -124,7 +197,15 @@ void CardItem::paintBack(QPainter *painter) {
 }
 
 void CardItem::setCardData(const CardData &data) {
+    const bool wasAnimated = cardNeedsShaderTick(mData);
     mData = data;
+    const bool nowAnimated = cardNeedsShaderTick(mData);
+    if (nowAnimated && !wasAnimated) {
+        ensureCardShaderTimer();
+        sAnimatedCards.insert(this);
+    } else if (!nowAnimated && wasAnimated) {
+        sAnimatedCards.remove(this);
+    }
     update();
 }
 

@@ -34,6 +34,10 @@ enum class ScoreEventKind {
     JokerChip,          // 小丑加 chip(蓝)
     JokerMult,          // 小丑加 mult(红)
     JokerXMult,         // 小丑加 xmult(红)
+    DollarGain,         // 幸运牌/金色蜡封/黄金牌等获得金钱
+    RedSealRetrigger,   // 红色蜡封重新触发
+    GlassShatter,       // 玻璃牌破碎动画
+    BlueSealPlanet,     // 蓝色蜡封生成星球牌提示
 };
 
 struct ScoreEvent {

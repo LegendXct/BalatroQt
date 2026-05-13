@@ -89,6 +89,7 @@ private:
 
     void buildUi();
     void layoutPanel();
+    void layoutPackHand();
     void refreshAll();
     void refreshHandUi();
     void refreshOptionUi();

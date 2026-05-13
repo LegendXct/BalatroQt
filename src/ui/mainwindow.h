@@ -12,6 +12,7 @@
 #include <QPushButton>
 #include <QVBoxLayout>
 #include <QVector>
+#include <QSet>
 #include "../game/gamestate.h"
 #include "../card/carditem.h"
 #include "roundendoverlay.h"
@@ -74,6 +75,7 @@ private:
 
     QVector<CardItem *> mHandCards; // 手牌
     QVector<CardItem *> mPlayedCards; // 出牌区
+    QSet<int> mShatteredPlayedIndices;
     QVector <int> mSelected; // 选中的手牌下标
 
     RoundEndOverlay *mRoundEndOverlay = nullptr;
@@ -96,6 +98,7 @@ private:
 
     bool mGameOverHandled = false;
     bool mScoringInProgress = false;
+    int mEndRoundAnimationDelay = 260;
 
     QVector<ConsumableItem*> mConsumableItems;
 

@@ -7,6 +7,8 @@
 #include "../game/gamestate.h"
 #include "../card/consumable.h"
 
+class QEvent;
+
 class ShopWidget : public QWidget
 {
     Q_OBJECT
@@ -22,6 +24,7 @@ signals:
 
 protected:
     void resizeEvent(QResizeEvent *e) override;
+    bool eventFilter(QObject *obj, QEvent *event) override;
 
 private slots:
     void onReroll();
@@ -37,6 +40,9 @@ private:
 
     void buildUi();
     void layoutPanel();
+    void buildInfoPanel();
+    void showOfferInfo(QWidget *source);
+    void hideOfferInfo();
     OfferUi createOfferSlot(QWidget *parent, bool isBooster);
     QPixmap offerPixmap(const ShopOffer &o) const;
 
@@ -53,6 +59,10 @@ private:
     QPushButton *mBtnNextRound = nullptr;
     QPushButton *mBtnReroll    = nullptr;
     QLabel      *mLblGold      = nullptr;
+
+    QWidget *mInfoPanel = nullptr;
+    QLabel *mInfoTitle = nullptr;
+    QLabel *mInfoBody = nullptr;
 
     QVector<OfferUi> mShopUi;
     QVector<OfferUi> mVoucherUi;

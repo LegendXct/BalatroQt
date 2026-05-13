@@ -940,7 +940,9 @@ void MainWindow::setupScene() {
     mView->setBackgroundBrush(QBrush(Qt::NoBrush));
 
     // 前景场景只在牌/按钮变化时刷新；背景动画在下层 QWidget 自己刷新。
-    mView->setViewportUpdateMode(QGraphicsView::SmartViewportUpdate);
+    // 动态 shader 小丑会频繁请求局部重绘，必须强制按 item 边界更新，
+    // 不能让 SmartViewport 在透明视口 + 背景层时退化成大面积刷新。
+    mView->setViewportUpdateMode(QGraphicsView::BoundingRectViewportUpdate);
     mView->setOptimizationFlag(QGraphicsView::DontAdjustForAntialiasing, true);
     mView->setOptimizationFlag(QGraphicsView::DontSavePainterState, true);
 
@@ -1065,6 +1067,17 @@ void MainWindow::setupConnections() {
     connect(mGameState, &GameState::scoreChanged, this, &MainWindow::refreshScore);
     connect(mGameState, &GameState::goldChanged, this, &MainWindow::refreshGold);
     connect(mGameState, &GameState::handPlayed, this, &MainWindow::onHandPlayed);
+    connect(mGameState, &GameState::endRoundCardTriggered, this, [this](const QVector<ScoreEvent> &events) {
+        // 黄金牌 / 蓝蜡封 / 红蜡封 / 哑剧的回合结束触发，走和计分阶段同一套 juice 动画。
+        // 这些牌属于手牌阶段：只在原地弹一下，不能像打出的牌一样越触发越往上走。
+        mEndRoundAnimationDelay = qMax(260, 260 + events.size() * 150);
+        for (int i = 0; i < events.size(); ++i) {
+            const ScoreEvent ev = events[i];
+            QTimer::singleShot(i * 150, this, [this, ev]() {
+                playScoreEvent(ev);
+            });
+        }
+    });
 
     connect(mGameState, &GameState::roundWon, this, &MainWindow::onRoundWon);
     connect(mGameState, &GameState::gameOver, this, &MainWindow::onGameOver);
@@ -1590,6 +1603,7 @@ void MainWindow::onDiscardClicked() {
 void MainWindow::onHandPlayed()
 {
     const HandResult &r = mGameState->lastResult();
+    mShatteredPlayedIndices.clear();
 
     mLblHandName ->setText(r.name);
     mLblHandLevel->setText(QString("等级%1").arg(r.level));
@@ -1890,16 +1904,26 @@ void MainWindow::showJokerInfo(int idx, bool showSellButton)
             "border:2px solid #fda200;"
             "border-radius:12px;"
         );
+        mJokerInfoPanel->setFixedWidth(286);
+        mJokerInfoName->setFixedWidth(250);
+        mJokerInfoMeta->setFixedWidth(250);
+        mJokerInfoDesc->setFixedWidth(250);
         QFont mf = mCNFont; mf.setPixelSize(13); mf.setBold(false);
         mJokerInfoMeta->setFont(mf);
         mJokerInfoMeta->setStyleSheet("color:#cbd6dc; background:transparent; border:none;");
         mJokerInfoMeta->setMinimumHeight(0);
         mJokerInfoMeta->setMaximumHeight(16777215);
+        mJokerInfoMeta->setWordWrap(true);
         mJokerInfoMeta->setText(meta);
         mJokerSellButton->setMinimumSize(0, 0);
         mJokerSellButton->setMaximumSize(16777215, 16777215);
     }
     mJokerSellButton->setVisible(showSellButton);
+    if (!showSellButton) {
+        if (auto *lay = mJokerInfoPanel->layout()) lay->activate();
+        mJokerInfoPanel->adjustSize();
+        mJokerInfoPanel->resize(286, qBound(112, mJokerInfoPanel->height(), 286));
+    }
 
     disconnect(mJokerSellButton, nullptr, this, nullptr);
     connect(mJokerSellButton, &QPushButton::clicked, this, [this]() {
@@ -2573,8 +2597,11 @@ void MainWindow::onRoundWon(int blindReward, int handBonus, int interest)
         interest
         );
 
-    // 本手计分动画已经结束并加分；胜利后先自动收回剩余手牌，再从下方弹出提现面板。
-    QTimer::singleShot(260, this, [this]() {
+    // 本手计分动画已经结束并加分；胜利后先等黄金牌/蓝蜡封/Mime 等手牌回合结束动画播完，
+    // 再自动收回剩余手牌并从下方弹出提现面板。
+    const int delay = mEndRoundAnimationDelay;
+    mEndRoundAnimationDelay = 260;
+    QTimer::singleShot(delay, this, [this]() {
         animateCollectRoundCardsThen([this]() {
             if (!mRoundEndOverlay || !mPlayPage) return;
             mRoundEndOverlay->showFromBottom(mPlayPage->rect());
@@ -2803,16 +2830,35 @@ void MainWindow::animatePlayedCardsToDiscardThen(std::function<void()> after)
         CardItem *c = cards[i];
         if (!c) continue;
         c->setZValue(90 + i);
-        c->moveTo(deckPos, duration);
-        auto *fade = new QPropertyAnimation(c, "opacity", this);
-        fade->setDuration(duration);
-        fade->setStartValue(c->opacity());
-        fade->setEndValue(0.0);
-        fade->setEasingCurve(QEasingCurve::InQuad);
-        fade->start(QAbstractAnimation::DeleteWhenStopped);
+
+        if (mShatteredPlayedIndices.contains(i)) {
+            // 玻璃牌破碎后不飞回牌堆：原地快速碎裂/淡出，然后由 GameState 从牌组里销毁。
+            auto *scale = new QPropertyAnimation(c, "scale", this);
+            scale->setDuration(duration);
+            scale->setStartValue(c->scale());
+            scale->setEndValue(0.65);
+            scale->setEasingCurve(QEasingCurve::InBack);
+            scale->start(QAbstractAnimation::DeleteWhenStopped);
+
+            auto *fade = new QPropertyAnimation(c, "opacity", this);
+            fade->setDuration(duration);
+            fade->setStartValue(c->opacity());
+            fade->setEndValue(0.0);
+            fade->setEasingCurve(QEasingCurve::InQuad);
+            fade->start(QAbstractAnimation::DeleteWhenStopped);
+        } else {
+            c->moveTo(deckPos, duration);
+            auto *fade = new QPropertyAnimation(c, "opacity", this);
+            fade->setDuration(duration);
+            fade->setStartValue(c->opacity());
+            fade->setEndValue(0.0);
+            fade->setEasingCurve(QEasingCurve::InQuad);
+            fade->start(QAbstractAnimation::DeleteWhenStopped);
+        }
     }
     QTimer::singleShot(duration + 40, this, [this, after]() {
         clearPlayedCards();
+        mShatteredPlayedIndices.clear();
         if (after) after();
     });
 }
@@ -2948,6 +2994,7 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev)
     QColor color;
     QString text;
     bool isXMult = false;
+    bool isHeldCardEvent = (ev.sourceHandIdx >= 0 && ev.sourceCardIdx < 0);
 
     switch (ev.kind) {
     case ScoreEventKind::ScoringCardChip:
@@ -2978,28 +3025,74 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev)
         mDisplayedMult = qMax(1, qRound(mDisplayedMult * ev.xmultValue));
         mLblMult->setText(formatScoreNumber(mDisplayedMult));
         break;
+
+    case ScoreEventKind::DollarGain:
+        color = QColor("#f3b958");
+        text = QString("+$%1").arg(ev.intValue);
+        refreshGold();
+        break;
+
+    case ScoreEventKind::RedSealRetrigger:
+        color = QColor("#ff5f55");
+        text = QStringLiteral("再触发");
+        break;
+
+    case ScoreEventKind::GlassShatter:
+        color = QColor("#9ee7ff");
+        text = QStringLiteral("碎裂");
+        if (ev.sourceCardIdx >= 0) mShatteredPlayedIndices.insert(ev.sourceCardIdx);
+        break;
+
+    case ScoreEventKind::BlueSealPlanet:
+        color = QColor("#5aa7ff");
+        text = QStringLiteral("+星球牌");
+        refreshConsumableSlots();
+        break;
     }
 
     // 原版计分时只有真正参与本次事件的牌/小丑会 juice_up。
-    // 计分牌向上弹一下再回位；非计分牌不会跟着动。
+    // 打出的计分牌会向上弹一下；手牌阶段的钢铁/男爵/Mime/蜡封只在原地 juice，不能越触发越往上走。
     if (sourceCard) {
-        QPointF base = sourceCard->pos();
-        auto *seq = new QSequentialAnimationGroup(sourceCard);
-        auto *up = new QPropertyAnimation(sourceCard, "pos");
-        up->setDuration(90);
-        up->setStartValue(base);
-        up->setEndValue(base + QPointF(0, -26));
-        up->setEasingCurve(QEasingCurve::OutCubic);
-        auto *down = new QPropertyAnimation(sourceCard, "pos");
-        down->setDuration(140);
-        down->setStartValue(base + QPointF(0, -26));
-        down->setEndValue(base);
-        down->setEasingCurve(QEasingCurve::OutBounce);
-        seq->addAnimation(up);
-        seq->addAnimation(down);
-        up->setParent(seq); down->setParent(seq);
-        seq->start(QAbstractAnimation::DeleteWhenStopped);
-        sourceCard->juiceUp(1.18, 210);
+        if (ev.kind == ScoreEventKind::GlassShatter) {
+            sourceCard->juiceUp(1.28, 260);
+            auto *shake = new QSequentialAnimationGroup(sourceCard);
+            QPointF base = sourceCard->pos();
+            for (int i = 0; i < 4; ++i) {
+                auto *a = new QPropertyAnimation(sourceCard, "pos");
+                a->setDuration(28);
+                a->setStartValue(i == 0 ? base : base + QPointF((i % 2 ? -1 : 1) * 5, 0));
+                a->setEndValue(base + QPointF((i % 2 ? 1 : -1) * 5, 0));
+                shake->addAnimation(a);
+                a->setParent(shake);
+            }
+            auto *back = new QPropertyAnimation(sourceCard, "pos");
+            back->setDuration(40);
+            back->setStartValue(base + QPointF(5, 0));
+            back->setEndValue(base);
+            shake->addAnimation(back);
+            back->setParent(shake);
+            shake->start(QAbstractAnimation::DeleteWhenStopped);
+        } else if (isHeldCardEvent || ev.kind == ScoreEventKind::RedSealRetrigger || ev.kind == ScoreEventKind::DollarGain || ev.kind == ScoreEventKind::BlueSealPlanet) {
+            sourceCard->juiceUp(1.18, 210);
+        } else {
+            QPointF base = sourceCard->pos();
+            auto *seq = new QSequentialAnimationGroup(sourceCard);
+            auto *up = new QPropertyAnimation(sourceCard, "pos");
+            up->setDuration(90);
+            up->setStartValue(base);
+            up->setEndValue(base + QPointF(0, -26));
+            up->setEasingCurve(QEasingCurve::OutCubic);
+            auto *down = new QPropertyAnimation(sourceCard, "pos");
+            down->setDuration(140);
+            down->setStartValue(base + QPointF(0, -26));
+            down->setEndValue(base);
+            down->setEasingCurve(QEasingCurve::OutBounce);
+            seq->addAnimation(up);
+            seq->addAnimation(down);
+            up->setParent(seq); down->setParent(seq);
+            seq->start(QAbstractAnimation::DeleteWhenStopped);
+            sourceCard->juiceUp(1.18, 210);
+        }
     }
     if (sourceJoker) {
         sourceJoker->juiceUp(1.15, 200);
