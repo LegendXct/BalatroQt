@@ -1,144 +1,27 @@
 #include "packopenwidget.h"
+#include "../card/carditem.h"
 #include "../card/jokeritem.h"
 #include "../card/consumableitem.h"
 #include "../utils/shadereffects.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
-#include <QGridLayout>
 #include <QResizeEvent>
 #include <QLabel>
 #include <QPushButton>
 #include <QPainter>
-#include <QIcon>
-#include <algorithm>
+#include <QGraphicsScene>
+#include <QGraphicsView>
 #include <QStringList>
 #include <QTimer>
 #include <QPropertyAnimation>
 #include <QEasingCurve>
 #include <QSizePolicy>
-#include <QMouseEvent>
-#include <QLineF>
-#include <QEnterEvent>
-#include <QTransform>
+#include <algorithm>
 #include <cmath>
 
-class PackHandCardWidget : public QWidget
-{
-    Q_OBJECT
-public:
-    explicit PackHandCardWidget(int index, QWidget *parent = nullptr)
-        : QWidget(parent), mIndex(index)
-    {
-        setMouseTracking(true);
-        setCursor(Qt::PointingHandCursor);
-        setAttribute(Qt::WA_TranslucentBackground, true);
-    }
-
-    void setIndex(int index) { mIndex = index; }
-    void setPixmap(const QPixmap &pix) { mPixmap = pix; update(); }
-    void setSelected(bool s) { mSelected = s; update(); }
-    void setBaseRotation(qreal deg) { mBaseRotation = deg; update(); }
-
-signals:
-    void clicked(int index);
-    void dragged(int index, QPoint parentPos);
-    void released(int index, QPoint parentPos);
-
-protected:
-    void paintEvent(QPaintEvent *) override
-    {
-        QPainter p(this);
-        p.setRenderHint(QPainter::Antialiasing, true);
-        p.setRenderHint(QPainter::SmoothPixmapTransform, true);
-        const QRectF r = rect().adjusted(3, 3, -3, -3);
-        const qreal cx = width() / 2.0;
-        const qreal cy = height() / 2.0;
-        QTransform t;
-        t.translate(cx, cy);
-        t.rotate(mBaseRotation + mHoverTiltY * 0.18);
-        t.shear(mHoverTiltY / 260.0, -mHoverTiltX / 280.0);
-        t.translate(-cx, -cy);
-        p.setTransform(t, true);
-        if (!mPixmap.isNull()) p.drawPixmap(r, mPixmap, QRectF(mPixmap.rect()));
-        if (mSelected || mHovered) {
-            p.setPen(QPen(mSelected ? QColor(255, 230, 109, 230) : QColor(255, 230, 109, 140), mSelected ? 4 : 2));
-            p.setBrush(Qt::NoBrush);
-            p.drawRoundedRect(r, 9, 9);
-        }
-    }
-
-    void mousePressEvent(QMouseEvent *e) override
-    {
-        if (e->button() != Qt::LeftButton) return QWidget::mousePressEvent(e);
-        mPressed = true;
-        mDragging = false;
-        mPressPos = e->pos();
-        mStartPos = pos();
-        raise();
-        e->accept();
-    }
-
-    void mouseMoveEvent(QMouseEvent *e) override
-    {
-        const qreal nx = (e->pos().x() / qMax(1.0, double(width()))) - 0.5;
-        const qreal ny = (e->pos().y() / qMax(1.0, double(height()))) - 0.5;
-        mHoverTiltY = nx * 18.0;
-        mHoverTiltX = ny * 18.0;
-        update();
-
-        if (!mPressed) return QWidget::mouseMoveEvent(e);
-        if (!mDragging && QLineF(e->pos(), mPressPos).length() > 7.0) mDragging = true;
-        if (mDragging) {
-            QPoint parentP = mapToParent(e->pos());
-            move(parentP - mPressPos);
-            emit dragged(mIndex, parentP);
-            e->accept();
-            return;
-        }
-        QWidget::mouseMoveEvent(e);
-    }
-
-    void mouseReleaseEvent(QMouseEvent *e) override
-    {
-        if (e->button() == Qt::LeftButton && mPressed) {
-            QPoint parentP = mapToParent(e->pos());
-            mPressed = false;
-            if (mDragging) {
-                mDragging = false;
-                emit released(mIndex, parentP);
-            } else {
-                emit clicked(mIndex);
-            }
-            e->accept();
-            return;
-        }
-        QWidget::mouseReleaseEvent(e);
-    }
-
-    void enterEvent(QEnterEvent *e) override
-    {
-        mHovered = true; update(); QWidget::enterEvent(e);
-    }
-
-    void leaveEvent(QEvent *e) override
-    {
-        if (!mPressed) { mHovered = false; mHoverTiltX = mHoverTiltY = 0; update(); }
-        QWidget::leaveEvent(e);
-    }
-
-private:
-    int mIndex = 0;
-    QPixmap mPixmap;
-    bool mSelected = false;
-    bool mHovered = false;
-    bool mPressed = false;
-    bool mDragging = false;
-    QPoint mPressPos;
-    QPoint mStartPos;
-    qreal mBaseRotation = 0;
-    qreal mHoverTiltX = 0;
-    qreal mHoverTiltY = 0;
-};
+#ifndef M_PI
+#define M_PI 3.14159265358979323846
+#endif
 
 PackOpenWidget::PackOpenWidget(const QFont &cnFont, const QFont &pixelFont,
                                QWidget *parent)
@@ -149,19 +32,16 @@ PackOpenWidget::PackOpenWidget(const QFont &cnFont, const QFont &pixelFont,
     hide();
     buildUi();
 
-    // 灵魂牌的白水晶是动态前景层。开包界面使用 QLabel 贴图，
-    // 所以需要定时重新渲染 Pixmap，否则只会停在第一帧。
+    // 灵魂牌动效定时刷新
     mSoulAnimTimer = new QTimer(this);
     connect(mSoulAnimTimer, &QTimer::timeout, this, [this]() {
         if (!isVisible()) return;
         bool hasSoul = false;
-        for (ConsumableType t : mContent.consumables) {
+        for (ConsumableType t : mContent.consumables)
             if (t == ConsumableType::Spectral_Soul) { hasSoul = true; break; }
-        }
         if (!hasSoul) {
-            for (const Consumable &c : mInventoryConsumables) {
+            for (const Consumable &c : mInventoryConsumables)
                 if (c.type == ConsumableType::Spectral_Soul) { hasSoul = true; break; }
-            }
         }
         if (hasSoul) {
             refreshOptionUi();
@@ -174,11 +54,8 @@ PackOpenWidget::PackOpenWidget(const QFont &cnFont, const QFont &pixelFont,
 void PackOpenWidget::buildUi()
 {
     mPanel = new QWidget(this);
-    mPanel->setMinimumSize(860, 540);
-    mPanel->setStyleSheet(
-        "background: transparent;"
-        "border: none;"
-        );
+    mPanel->setMinimumSize(900, 720);
+    mPanel->setStyleSheet("background: transparent; border: none;");
 
     auto *root = new QVBoxLayout(mPanel);
     root->setContentsMargins(22, 16, 22, 16);
@@ -196,29 +73,22 @@ void PackOpenWidget::buildUi()
     mLblChoose->setStyleSheet("color:white; background:transparent;");
     mLblChoose->setAlignment(Qt::AlignCenter);
 
-    // 上方临时手牌区：改成原版手牌式重叠排布，避免十张牌硬塞成一排导致越界/裁切。
-    mHandBox = new QWidget(mPanel);
-    auto *handBox = mHandBox;
-    handBox->setObjectName("packHandBox");
-    handBox->setAttribute(Qt::WA_StyledBackground, true);
-    handBox->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    handBox->setMinimumHeight(172);
-    handBox->setStyleSheet("QWidget#packHandBox { background:transparent; border:none; }");
+    // ── 临时手牌区:QGraphicsView + QGraphicsScene + CardItem ──
+    mHandScene = new QGraphicsScene(this);
+    mHandView  = new QGraphicsView(mHandScene, mPanel);
+    mHandView->setRenderHints(QPainter::Antialiasing | QPainter::SmoothPixmapTransform);
+    mHandView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    mHandView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    mHandView->setFrameShape(QFrame::NoFrame);
+    mHandView->setStyleSheet("background: transparent;");
+    mHandView->setAttribute(Qt::WA_TranslucentBackground);
+    mHandView->viewport()->setAttribute(Qt::WA_TranslucentBackground);
+    mHandView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    mHandView->setMinimumHeight(240);
+    mHandView->setMouseTracking(true);
+    root->addWidget(mHandView);
 
-    for (int i = 0; i < 10; ++i) {
-        HandUi hu;
-        hu.btn = new PackHandCardWidget(i, handBox);
-        connect(hu.btn, &PackHandCardWidget::clicked, this, &PackOpenWidget::onHandCardClicked);
-        connect(hu.btn, &PackHandCardWidget::dragged, this, &PackOpenWidget::onHandCardDragged);
-        connect(hu.btn, &PackHandCardWidget::released, this, &PackOpenWidget::onHandCardReleased);
-
-        hu.nameLbl = new QLabel("", handBox);
-        hu.nameLbl->hide();
-        mHandUi.append(hu);
-    }
-    root->addWidget(handBox);
-
-    // 中间：左侧包内牌，右侧仓库特殊牌。
+    // ── 中间:左侧包内牌选项,右侧仓库特殊牌 ──
     auto *midRow = new QWidget(mPanel);
     auto *midLayout = new QHBoxLayout(midRow);
     midLayout->setContentsMargins(0, 0, 0, 0);
@@ -233,10 +103,10 @@ void PackOpenWidget::buildUi()
     optionsLayout->setSpacing(10);
     optionsLayout->setAlignment(Qt::AlignCenter);
 
-    for (int i = 0; i < 5; ++i) {        // 原版普通包 3，超级/巨型包最多 5；幻灵/小丑超级最多 4
+    for (int i = 0; i < 5; ++i) {
         OptUi ou;
         ou.card = new QWidget(optionsBox);
-        ou.card->setFixedSize(154, 270);
+        ou.card->setFixedSize(154, 320);
         ou.card->setStyleSheet("background:transparent; border:none;");
 
         auto *vbl = new QVBoxLayout(ou.card);
@@ -348,12 +218,11 @@ void PackOpenWidget::buildUi()
     }
     ivbl->addStretch();
     midLayout->addWidget(invBox);
-    // 原版开包时仍然使用右上角仓库区；这里不再在包界面右侧重复做仓库侧栏。
     invBox->hide();
 
     root->addWidget(midRow, 1);
 
-    // 原版开包 UI：包名/选择数在下方中央，跳过按钮在右侧。
+    // ── 底部:包名 + 跳过 ──
     auto *bottomBar = new QWidget(mPanel);
     bottomBar->setStyleSheet("background:transparent;");
     auto *bottomLayout = new QHBoxLayout(bottomBar);
@@ -398,26 +267,30 @@ void PackOpenWidget::open(const PackContent &content,
     mChosenOptions.clear();
     mSelectedHand.clear();
     mFinishing = false;
+    mLastDragTo = -1;
 
     show();
     raise();
     layoutPanel();
     refreshAll();
-    QTimer::singleShot(0, this, &PackOpenWidget::animateCardsIn);
+    QTimer::singleShot(0, this, [this]() {
+        layoutPackHand(-1, /*instant=*/true);
+        animateCardsIn();
+    });
 }
 
 void PackOpenWidget::setPackHand(const QVector<CardData> &packHand)
 {
     mPackHand = packHand;
-    mSelectedHand.erase(std::remove_if(mSelectedHand.begin(), mSelectedHand.end(), [this](int idx) {
-        return idx < 0 || idx >= mPackHand.size();
-    }), mSelectedHand.end());
+    mSelectedHand.erase(std::remove_if(mSelectedHand.begin(), mSelectedHand.end(),
+                                       [this](int idx) { return idx < 0 || idx >= mPackHand.size(); }),
+                        mSelectedHand.end());
     refreshAll();
 }
 
-void PackOpenWidget::setInventoryConsumables(const QVector<Consumable> &inventoryConsumables)
+void PackOpenWidget::setInventoryConsumables(const QVector<Consumable> &inv)
 {
-    mInventoryConsumables = inventoryConsumables;
+    mInventoryConsumables = inv;
     refreshInventoryUi();
     refreshOptionUi();
 }
@@ -433,10 +306,8 @@ void PackOpenWidget::refreshAll()
     int remain = qMax(0, mContent.choicesAllowed - mChoicesUsed);
     mLblTitle->setText(packDisplayName(mContent.kind, mContent.size));
     mLblChoose->setText(QString("选择 %1 / %2　　剩余 %3 次")
-                            .arg(mChoicesUsed)
-                            .arg(mContent.choicesAllowed)
-                            .arg(remain));
-    if (mHandBox) mHandBox->setVisible(packUsesHandSelection());
+                            .arg(mChoicesUsed).arg(mContent.choicesAllowed).arg(remain));
+    if (mHandView) mHandView->setVisible(packUsesHandSelection());
     refreshHandUi();
     refreshOptionUi();
     refreshInventoryUi();
@@ -454,64 +325,179 @@ int PackOpenWidget::optionCount() const
     return 0;
 }
 
-void PackOpenWidget::layoutPackHand()
+void PackOpenWidget::refreshHandUi()
 {
-    if (!mHandBox) return;
+    // 清除旧 CardItem
+    for (CardItem *c : mPackHandItems) {
+        mHandScene->removeItem(c);
+        c->deleteLater();
+    }
+    mPackHandItems.clear();
+
     if (!packUsesHandSelection()) return;
 
-    const int n = qMin(mPackHand.size(), mHandUi.size());
-    const int areaW = qMax(1, mHandBox->width() > 0 ? mHandBox->width() : mPanel->width() - 44);
-    const int maxTotal = qMax(120, areaW - 24);
+    // 创建新 CardItem
+    for (int i = 0; i < mPackHand.size(); ++i) {
+        auto *card = new CardItem(mPackHand[i]);
+        mHandScene->addItem(card);
+        mPackHandItems.append(card);
 
-    int cardW = 116;
-    int cardH = 156;
-    int step = (n > 1) ? qMin(68, (maxTotal - cardW) / qMax(1, n - 1)) : 0;
-    if (n > 1 && step < 42) {
-        // 在窄屏/十张临时手牌时，按原版手牌区缩小并增加重叠，保证整排不出界。
-        cardW = qBound(82, int(maxTotal / (1.0 + 0.52 * (n - 1))), 116);
-        cardH = qMax(112, int(cardW * 190.0 / 142.0));
-        step = qMin(int(cardW * 0.58), (maxTotal - cardW) / qMax(1, n - 1));
-        step = qMax(32, step);
+        connect(card, &CardItem::clicked,
+                this, &PackOpenWidget::onPackCardClicked);
+        connect(card, &CardItem::dragMoved,
+                this, &PackOpenWidget::onPackCardDragMoved);
+        connect(card, &CardItem::dragReleased,
+                this, &PackOpenWidget::onPackCardDragReleased);
     }
 
-    const int totalW = n <= 0 ? 0 : cardW + qMax(0, n - 1) * step;
-    const int startX = qMax(8, (areaW - totalW) / 2);
-    const int baseY = 18;
-    mHandBox->setFixedHeight(qBound(148, cardH + 34, 190));
+    layoutPackHand();
+}
 
-    for (int i = 0; i < mHandUi.size(); ++i) {
-        HandUi &hu = mHandUi[i];
-        if (!hu.btn) continue;
-        if (i >= n) {
-            hu.btn->hide();
-            if (hu.nameLbl) hu.nameLbl->hide();
-            continue;
-        }
-        const bool selected = mSelectedHand.contains(i);
-        const int lift = selected ? 22 : 0;
-        hu.btn->setIndex(i);
-        hu.btn->setFixedSize(cardW, cardH);
-        hu.btn->move(startX + i * step, baseY - lift);
-        hu.btn->setPixmap(renderPlayingCard(mPackHand[i], QSize(cardW - 4, cardH - 4)));
-        hu.btn->setSelected(selected);
-        double t = n > 0 ? (-n / 2.0 - 0.5 + (i + 1)) / double(n) : 0.0;
-        hu.btn->setBaseRotation(0.2 * t * 180.0 / 3.14159265358979323846);
-        hu.btn->show();
-        hu.btn->raise();
-        if (hu.nameLbl) hu.nameLbl->hide();
+void PackOpenWidget::layoutPackHand(int skipIdx, bool instant)
+{
+    if (!mHandView || !packUsesHandSelection()) return;
+
+    int n = mPackHandItems.size();
+    if (n == 0) return;
+
+    int areaW = qMax(1, mHandView->viewport()->width());
+    int areaH = qMax(1, mHandView->viewport()->height());
+    mHandScene->setSceneRect(0, 0, areaW, areaH);
+
+    int available = areaW - 80;
+    int step = (n > 1) ? (available - CardItem::WIDTH) / (n - 1) : 0;
+    step = qMin(step, CardItem::WIDTH - 30);
+    if (step < 30) step = 30;
+    int totalW = (n - 1) * step + CardItem::WIDTH;
+    int startX = qMax(8, (areaW - totalW) / 2);
+    int baseY = qMax(48, (areaH - CardItem::HEIGHT) / 2 + 20);
+
+    for (int i = 0; i < n; ++i) {
+        if (i == skipIdx) continue;
+        CardItem *c = mPackHandItems[i];
+        if (!c) continue;
+
+        bool sel = mSelectedHand.contains(i);
+        double t = (-n / 2.0 - 0.5 + (i + 1)) / n;
+        double angleDeg = 0.2 * t * 180.0 / M_PI;
+
+        int x = startX + i * step;
+        int y = baseY + (sel ? -40 : 0);
+
+        c->setBaseRotation(angleDeg);
+        c->setZValue(i);   // ← 见下面问题 2
+        c->setCardSelected(sel);
+
+        if (instant) c->setPos(QPointF(x, y));   // ← 瞬时
+        else         c->moveTo(QPointF(x, y), 180);
     }
 }
 
-void PackOpenWidget::refreshHandUi()
+void PackOpenWidget::onPackCardClicked(CardItem *card)
 {
-    if (!packUsesHandSelection()) {
-        for (HandUi &hu : mHandUi) {
-            if (hu.btn) hu.btn->hide();
-            if (hu.nameLbl) hu.nameLbl->hide();
-        }
-        return;
+    if (!packUsesHandSelection()) return;
+    int idx = mPackHandItems.indexOf(card);
+    if (idx < 0 || idx >= mPackHand.size()) return;
+
+    if (mSelectedHand.contains(idx)) {
+        mSelectedHand.removeAll(idx);
+    } else {
+        int limit = qMax(1, maxCurrentSelectionLimit());
+        if (mSelectedHand.size() >= limit) mSelectedHand.removeFirst();
+        mSelectedHand.append(idx);
+        std::sort(mSelectedHand.begin(), mSelectedHand.end());
     }
     layoutPackHand();
+    refreshOptionUi();
+    refreshInventoryUi();
+}
+
+void PackOpenWidget::onPackCardDragMoved(CardItem *card, QPointF scenePos)
+{
+    if (!packUsesHandSelection()) return;
+    int from = mPackHandItems.indexOf(card);
+    if (from < 0) return;
+    int n = mPackHandItems.size();
+    if (n <= 1) return;
+
+    int areaW = qMax(1, mHandView->viewport()->width());
+    int available = areaW - 80;
+    int step = (n > 1) ? (available - CardItem::WIDTH) / (n - 1) : 0;
+    step = qMin(step, CardItem::WIDTH - 30);
+    if (step < 30) step = 30;
+    int totalW = (n - 1) * step + CardItem::WIDTH;
+    int startX = qMax(8, (areaW - totalW) / 2);
+
+    int to = 0;
+    for (int i = 0; i < n; ++i) {
+        double center = startX + i * step + CardItem::WIDTH / 2.0;
+        if (scenePos.x() > center) to = i;
+    }
+    to = qBound(0, to, n - 1);
+
+    if (to == mLastDragTo) {
+        card->setZValue(600);
+        return;
+    }
+    mLastDragTo = to;
+
+    // 计算被拖卡片在视觉上"应该插入"的位置后,旁边的卡平滑滑到新位置
+    QVector<CardItem*> visual = mPackHandItems;
+    visual.removeAt(from);
+    visual.insert(to, card);
+
+    int areaH = qMax(1, mHandView->viewport()->height());
+    int baseY = qMax(48, (areaH - CardItem::HEIGHT) / 2 + 20);
+
+    for (int vi = 0; vi < visual.size(); ++vi) {
+        CardItem *ci = visual[vi];
+        if (ci == card) continue;
+        int realIdx = mPackHandItems.indexOf(ci);
+        bool sel = mSelectedHand.contains(realIdx);
+        double t = (-n / 2.0 - 0.5 + (vi + 1)) / n;
+        double angleDeg = 0.2 * t * 180.0 / M_PI;
+        int x = startX + vi * step;
+        int y = baseY + (sel ? -40 : 0);
+        ci->setBaseRotation(angleDeg);
+        ci->setZValue(vi);   // 10 + vi → vi
+        ci->moveTo(QPointF(x, y), 80);
+    }
+    card->setZValue(600);
+}
+
+void PackOpenWidget::onPackCardDragReleased(CardItem *card, QPointF scenePos)
+{
+    mLastDragTo = -1;
+    int from = mPackHandItems.indexOf(card);
+    if (from < 0) { layoutPackHand(); return; }
+
+    int n = mPackHandItems.size();
+    if (n <= 1) { layoutPackHand(); return; }
+
+    int areaW = qMax(1, mHandView->viewport()->width());
+    int available = areaW - 80;
+    int step = (n > 1) ? (available - CardItem::WIDTH) / (n - 1) : 0;
+    step = qMin(step, CardItem::WIDTH - 30);
+    if (step < 30) step = 30;
+    int totalW = (n - 1) * step + CardItem::WIDTH;
+    int startX = qMax(8, (areaW - totalW) / 2);
+
+    int to = 0;
+    for (int i = 0; i < n; ++i) {
+        double center = startX + i * step + CardItem::WIDTH / 2.0;
+        if (scenePos.x() > center) to = i;
+    }
+    to = qBound(0, to, n - 1);
+
+    if (from != to) {
+        // 更新数据模型 + mSelectedHand 索引调整
+        applyPackHandOrderMove(from, to);
+        // 同步 mPackHandItems 顺序
+        CardItem *moved = mPackHandItems.takeAt(from);
+        mPackHandItems.insert(to, moved);
+    }
+
+    layoutPackHand();   // 所有卡(含刚拖的)动画归位
 }
 
 void PackOpenWidget::refreshOptionUi()
@@ -519,18 +505,18 @@ void PackOpenWidget::refreshOptionUi()
     int total = optionCount();
     for (int i = 0; i < mOptUi.size(); ++i) {
         OptUi &ou = mOptUi[i];
-        if (i >= total) {
-            ou.card->hide();
-            continue;
-        }
+        if (i >= total) { ou.card->hide(); continue; }
         ou.card->show();
         ou.imageLbl->setPixmap(renderOption(i));
         ou.nameLbl->setText(optionName(i));
         ou.descLbl->setText(optionDesc(i));
 
         bool chosen = optionAlreadyChosen(i);
-        ou.takeBtn->setText(chosen ? "已选" : (mContent.kind == PackKind::Arcana || mContent.kind == PackKind::Spectral ? "使用" : "选择"));
-        ou.takeBtn->setEnabled(!mFinishing && !chosen && mChoicesUsed < mContent.choicesAllowed && optionAvailableFor(i));
+        ou.takeBtn->setText(chosen ? "已选" :
+                                (mContent.kind == PackKind::Arcana || mContent.kind == PackKind::Spectral ? "使用" : "选择"));
+        ou.takeBtn->setEnabled(!mFinishing && !chosen
+                               && mChoicesUsed < mContent.choicesAllowed
+                               && optionAvailableFor(i));
     }
 }
 
@@ -539,13 +525,12 @@ void PackOpenWidget::refreshInventoryUi()
     if (mInventoryBox) mInventoryBox->hide();
     for (int i = 0; i < mInvUi.size(); ++i) {
         InvUi &iu = mInvUi[i];
-        if (i >= mInventoryConsumables.size()) {
-            iu.card->hide();
-            continue;
-        }
+        if (i >= mInventoryConsumables.size()) { iu.card->hide(); continue; }
         iu.card->show();
         const Consumable &c = mInventoryConsumables[i];
-        iu.imageLbl->setPixmap(ConsumableItem::renderPixmap(c.type, c.negative).scaled(iu.imageLbl->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        iu.imageLbl->setPixmap(ConsumableItem::renderPixmap(c.type, c.negative)
+                                   .scaled(iu.imageLbl->size(), Qt::KeepAspectRatio,
+                                           Qt::SmoothTransformation));
         iu.nameLbl->setText(c.name);
         iu.useBtn->setToolTip(c.description);
         iu.useBtn->setEnabled(!mFinishing && inventoryAvailableFor(i));
@@ -564,17 +549,16 @@ QPixmap PackOpenWidget::renderOption(int i) const
                                  JokerItem::WIDTH, JokerItem::HEIGHT);
         return raw.scaled(size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     }
-
-    if (mContent.kind == PackKind::Arcana || mContent.kind == PackKind::Celestial || mContent.kind == PackKind::Spectral) {
+    if (mContent.kind == PackKind::Arcana || mContent.kind == PackKind::Celestial
+        || mContent.kind == PackKind::Spectral)
         return renderConsumable(mContent.consumables[i], size);
-    }
-
     return renderPlayingCard(mContent.standardCards[i], size);
 }
 
 QPixmap PackOpenWidget::renderConsumable(ConsumableType type, const QSize &size) const
 {
-    return ConsumableItem::renderPixmap(type).scaled(size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    return ConsumableItem::renderPixmap(type)
+    .scaled(size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
 }
 
 QPixmap PackOpenWidget::renderPlayingCard(const CardData &c, const QSize &size) const
@@ -705,12 +689,9 @@ bool PackOpenWidget::optionAvailableFor(int i) const
 {
     if (i < 0 || i >= optionCount()) return false;
     switch (mContent.kind) {
-    case PackKind::Standard:
-        return true;
-    case PackKind::Buffoon:
-        return mFreeJokerSlots > 0;
-    case PackKind::Celestial:
-        return true;    // 行星牌从包里直接使用，不占仓库槽，也不显示临时手牌
+    case PackKind::Standard:  return true;
+    case PackKind::Buffoon:   return mFreeJokerSlots > 0;
+    case PackKind::Celestial: return true;
     case PackKind::Arcana:
     case PackKind::Spectral: {
         Consumable c = createConsumable(mContent.consumables[i]);
@@ -723,8 +704,7 @@ bool PackOpenWidget::optionAvailableFor(int i) const
 bool PackOpenWidget::inventoryAvailableFor(int i) const
 {
     if (i < 0 || i >= mInventoryConsumables.size()) return false;
-    const Consumable &c = mInventoryConsumables[i];
-    return selectionValidFor(c);
+    return selectionValidFor(mInventoryConsumables[i]);
 }
 
 int PackOpenWidget::maxCurrentSelectionLimit() const
@@ -738,9 +718,8 @@ int PackOpenWidget::maxCurrentSelectionLimit() const
             if (c.maxSelection > 0) limit = qMax(limit, c.maxSelection);
         }
     }
-    for (const Consumable &c : mInventoryConsumables) {
+    for (const Consumable &c : mInventoryConsumables)
         if (c.maxSelection > 0) limit = qMax(limit, c.maxSelection);
-    }
     return qMax(1, qMin(5, limit));
 }
 
@@ -763,43 +742,6 @@ void PackOpenWidget::applyPackHandOrderMove(int from, int to)
     emit packHandReordered(mPackHand);
 }
 
-void PackOpenWidget::onHandCardDragged(int idx, QPoint localPos)
-{
-    if (!packUsesHandSelection() || idx < 0 || idx >= mPackHand.size()) return;
-    const int n = qMin(mPackHand.size(), mHandUi.size());
-    if (n <= 1) return;
-    int to = 0;
-    for (int i = 0; i < n; ++i) {
-        if (!mHandUi[i].btn || !mHandUi[i].btn->isVisible()) continue;
-        double center = mHandUi[i].btn->geometry().center().x();
-        if (localPos.x() > center) to = i;
-    }
-    to = qBound(0, to, n - 1);
-    if (to == idx) return;
-    applyPackHandOrderMove(idx, to);
-    layoutPackHand();
-}
-
-void PackOpenWidget::onHandCardReleased(int, QPoint)
-{
-    layoutPackHand();
-}
-
-void PackOpenWidget::onHandCardClicked(int idx)
-{
-    if (!packUsesHandSelection()) return;
-    if (idx < 0 || idx >= mPackHand.size()) return;
-    if (mSelectedHand.contains(idx)) {
-        mSelectedHand.removeAll(idx);
-    } else {
-        int limit = qMax(1, maxCurrentSelectionLimit());
-        if (mSelectedHand.size() >= limit) mSelectedHand.removeFirst();
-        mSelectedHand.append(idx);
-        std::sort(mSelectedHand.begin(), mSelectedHand.end());
-    }
-    refreshAll();
-}
-
 void PackOpenWidget::onChoose(int idx)
 {
     if (mFinishing) return;
@@ -816,12 +758,12 @@ void PackOpenWidget::onChoose(int idx)
     mSelectedHand.clear();
 
     if (mChoicesUsed >= mContent.choicesAllowed) {
-        // 塔罗/幻灵包使用后先让玩家看到牌面增强、印章或版本变化，再退出二级界面。
         mFinishing = true;
         refreshAll();
         mLblChoose->setText("已使用，正在收起...");
-        QTimer::singleShot((mContent.kind == PackKind::Arcana || mContent.kind == PackKind::Spectral) ? 1000 : 350,
-                           this, &PackOpenWidget::finishAndClose);
+        QTimer::singleShot(
+            (mContent.kind == PackKind::Arcana || mContent.kind == PackKind::Spectral) ? 1000 : 350,
+            this, &PackOpenWidget::finishAndClose);
     } else {
         refreshAll();
     }
@@ -865,19 +807,26 @@ void PackOpenWidget::animateCardsIn()
         });
     };
 
-    int d = 0;
-    for (const HandUi &hu : mHandUi) {
-        if (hu.btn && hu.btn->isVisible()) {
-            animateWidget(hu.btn, QPoint(420, 120), d);
-            d += 35;
-        }
-    }
-    d = 60;
+    // 选项区滑入(包内 5 张选项)
+    int d = 60;
     for (const OptUi &ou : mOptUi) {
         if (ou.card && ou.card->isVisible()) {
             animateWidget(ou.card, QPoint(0, 120), d);
             d += 45;
         }
+    }
+
+    // 手牌区:让 CardItem 从右下飞入起始位置
+    int areaW = mHandView ? mHandView->viewport()->width() : 800;
+    int areaH = mHandView ? mHandView->viewport()->height() : 240;
+    QPointF deckPos(areaW + 100, areaH + 100);
+    for (int i = 0; i < mPackHandItems.size(); ++i) {
+        CardItem *c = mPackHandItems[i];
+        QPointF target = c->pos();
+        c->setPos(deckPos);
+        QTimer::singleShot(80 + i * 35, this, [c, target]() {
+            if (c) c->moveTo(target, 320);
+        });
     }
 }
 
@@ -890,14 +839,13 @@ void PackOpenWidget::resizeEvent(QResizeEvent *e)
 void PackOpenWidget::layoutPanel()
 {
     if (!mPanel) return;
-    const int maxW = qMax(860, width() - 18);
-    const int maxH = qMax(520, height() - 24);
-    int panelW = qBound(860, int(width() * 0.88), qMin(1180, maxW));
-    int panelH = qBound(520, int(height() * 0.80), qMin(740, maxH));
+    const int maxW = qMax(900, width() - 18);
+    const int maxH = qMax(720, height() - 24);
+    int panelW = qBound(900, int(width()  * 0.88), qMin(1200, maxW));
+    int panelH = qBound(720, int(height() * 0.85), qMin(960,  maxH));
     mPanel->resize(panelW, panelH);
     int x = (width()  - mPanel->width())  / 2;
     int y = qMax(8, (height() - mPanel->height()) / 2);
     mPanel->move(x, y);
     layoutPackHand();
 }
-#include "packopenwidget.moc"

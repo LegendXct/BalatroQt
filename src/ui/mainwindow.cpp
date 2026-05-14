@@ -1550,7 +1550,8 @@ void MainWindow::onPlayClicked() {
         int idx = sortedIdx[i];
         CardItem *c = mHandCards.takeAt(idx);
         c->setCardSelected(false);
-        c->setZValue(20);
+        c->setZValue(500);
+        c->setBaseRotation(0);            // ← 加这一行,出牌区无旋转
         playedCards.prepend(c);
     }
     mPlayedCards = playedCards;

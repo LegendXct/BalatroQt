@@ -5,7 +5,6 @@
 #include <QHBoxLayout>
 #include <QResizeEvent>
 #include <QPainter>
-#include <QGraphicsDropShadowEffect>
 #include <QEvent>
 #include <QPainterPath>
 #include <QPaintEvent>
@@ -329,13 +328,6 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
         "QPushButton:hover { background:#4f6367; }"
         "QPushButton:disabled { background:#2a3035; }"
         );
-    if (isBooster) {
-        auto *shadow = new QGraphicsDropShadowEffect(ou.cardBtn);
-        shadow->setBlurRadius(22);
-        shadow->setOffset(10, 14);
-        shadow->setColor(QColor(0, 0, 0, 150));
-        ou.cardBtn->setGraphicsEffect(shadow);
-    }
 
     // 图片用 QIcon，booster 贴图本身已经在 offerPixmap 里额外绘制厚度/高光。
     vbl->addWidget(ou.cardBtn, 0, Qt::AlignCenter);
