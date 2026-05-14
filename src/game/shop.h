@@ -134,6 +134,7 @@ public:
     void setRerollDiscount(int v) { mRerollDiscount = v; resetForNewBlind(); }
     void setRedeemedVouchers(const QVector<VoucherType> &v) { mRedeemedVouchers = v; }
     void setOwnedJokers(const QVector<JokerType> &owned, bool allowDuplicates);
+    void setGrosMichelExtinct(bool v) { mGrosMichelExtinct = v; }
 
     int shopSlots() const { return mShopSlots; }
     const ShopRates &rates() const { return mRates; }
@@ -156,6 +157,7 @@ private:
     bool mNextShopFree = false;
     double mJokerEditionRate = 1.0;
     QVector<Edition> mPendingEditionJokers;
+    bool mGrosMichelExtinct = false;
 
     ShopOffer makeEditionJokerOffer(Edition e, const QVector<ShopOffer> &alreadyRolled = {}) const;
     ShopOffer randomShopOffer(const QVector<ShopOffer> &alreadyRolled = {}) const;

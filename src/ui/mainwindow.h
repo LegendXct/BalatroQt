@@ -12,6 +12,7 @@
 #include <QPushButton>
 #include <QVBoxLayout>
 #include <QVector>
+#include <QSet>
 #include "../game/gamestate.h"
 #include "../card/carditem.h"
 #include "roundendoverlay.h"
@@ -74,12 +75,13 @@ private:
 
     QVector<CardItem *> mHandCards; // 手牌
     QVector<CardItem *> mPlayedCards; // 出牌区
+    QSet<int> mShatteredPlayedIndices;
     QVector <int> mSelected; // 选中的手牌下标
 
     RoundEndOverlay *mRoundEndOverlay = nullptr;
 
     // 布局常量
-    int mLeftW = 340;
+    int mLeftW = 390;
     int mWinW = 1920;
     int mWinH = 1080;
     int mSceneW = 1620;
@@ -96,6 +98,7 @@ private:
 
     bool mGameOverHandled = false;
     bool mScoringInProgress = false;
+    int mEndRoundAnimationDelay = 260;
 
     QVector<ConsumableItem*> mConsumableItems;
 
@@ -142,6 +145,7 @@ private:
     void setBackgroundMoodForPack(PackKind kind);
     void onDeckClicked(CardItem *card);
     void onJokerPressed(JokerItem *item, Qt::MouseButton btn);
+    void onJokerDragMoved(JokerItem *item, QPointF scenePos);
     void onJokerDragReleased(JokerItem *item, QPointF scenePos);
     void showJokerInfo(int idx, bool showSellButton = false);
     void hideJokerInfo();
@@ -164,6 +168,7 @@ private:
     void layoutPlayedCards();
 
     void onCardClicked(CardItem *card);
+    void onHandCardDragMoved(CardItem *card, QPointF scenePos);
     void onHandCardDragReleased(CardItem *card, QPointF scenePos);
     void showCardInfo(CardItem *card);
     void hideCardInfo();
@@ -190,6 +195,16 @@ private:
     QLabel *mJokerInfoDesc = nullptr;
     QLabel *mJokerInfoMeta = nullptr;
     QPushButton *mJokerSellButton = nullptr;
+
+    // 消耗牌点击后的原版式小操作牌片（使用 / 售出）
+    int mSelectedConsumableIdx = -1;
+    QGraphicsProxyWidget *mConsumableActionProxy = nullptr;
+    QWidget *mConsumableActionPanel = nullptr;
+    QLabel *mConsumableActionPrice = nullptr;
+    QPushButton *mConsumableUseButton = nullptr;
+    QPushButton *mConsumableSellButton = nullptr;
+    void showConsumableAction(int idx);
+    void hideConsumableAction();
 
     QGraphicsProxyWidget *mGameOverProxy = nullptr;
     QWidget *mGameOverPanel = nullptr;
@@ -221,12 +236,24 @@ private:
     int mDisplayedChips = 0;   // 当前显示中的 chips(动画过程中)
     int mDisplayedMult  = 0;
 
+    // 倍率×筹码 ≥ 目标分数时点燃的旗标，每手清空；用于火焰在分数累计过程中即时出现。
+    bool mFlameTriggered = false;
+    QWidget *mFlameOverlay = nullptr;        // 盖在 chipsRow 上方的火焰层
+    QWidget *mChipsRowWidget = nullptr;      // 引用 chipsRow 用于定位 mFlameOverlay
+    void triggerScoreFlame();                // 立即点火（带原版橙边）
+    void resetScoreFlame();                  // 复位边框与火焰
+
+    // 拖拽时记录上一次目标位置，避免每次 dragMoved 都触发 moveTo()
+    int mLastJokerDragTo = -1;
+    int mLastHandCardDragTo = -1;
+
     void updateHandPreview();
     void playScoreEvent(const ScoreEvent &ev);
     void animateScoreTotalThenFinalize(int gained, int delayAfterEvents);
     void animatePlayedCardsToDiscardThen(std::function<void()> after);
     void showGameOverOverlay(bool won);
     void hideGameOverOverlay();
+    void resetTransientOverlaysForNewRun();
 
 protected:
     void resizeEvent(QResizeEvent *event) override;

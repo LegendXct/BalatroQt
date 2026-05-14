@@ -43,6 +43,7 @@ PackContent generatePackContent(PackKind k,
                                 bool telescope = false,
                                 ConsumableType telescopePlanet = ConsumableType::Planet_Pluto,
                                 const QVector<JokerType> &ownedJokers = QVector<JokerType>(),
-                                bool allowDuplicateJokers = false);
+                                bool allowDuplicateJokers = false,
+                                bool grosMichelExtinct = false);
 
 #endif

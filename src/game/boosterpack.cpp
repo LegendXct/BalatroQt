@@ -139,6 +139,11 @@ static QVector<JokerType> allBuffoonJokers() {
         JokerType::Baron,           JokerType::FlowerPot,
         JokerType::Acrobat,         JokerType::Swashbuckler,
         JokerType::Ramen,           JokerType::DriversLicense,
+        JokerType::Hiker,           JokerType::CardSharp,
+        JokerType::Hologram,        JokerType::MidasMask,
+        JokerType::Vampire,         JokerType::Constellation,
+        JokerType::Photograph,      JokerType::HangingChad,
+        JokerType::SockAndBuskin,
         JokerType::Blueprint,       JokerType::Brainstorm,
         JokerType::DNA,             JokerType::Mime,
     };
@@ -146,11 +151,25 @@ static QVector<JokerType> allBuffoonJokers() {
 
 static JokerType randomBuffoonJoker(const QVector<JokerType> &owned,
                                     const QVector<JokerType> &alreadyRolled,
-                                    bool allowDuplicates) {
+                                    bool allowDuplicates,
+                                    bool grosMichelExtinct) {
     QVector<JokerType> pool;
     for (JokerType t : allBuffoonJokers()) {
+        // 原版 no_pool_flag/yes_pool_flag：
+        //   - 大麦克：灭绝后不再出现
+        //   - 卡文迪什：仅在大麦克灭绝后出现
+        if (t == JokerType::GrosMichel && grosMichelExtinct) continue;
+        if (t == JokerType::Cavendish && !grosMichelExtinct) continue;
         if (!allowDuplicates && (owned.contains(t) || alreadyRolled.contains(t))) continue;
         pool.append(t);
+    }
+    // 退化时仅放开“重复”过滤，仍保留 gros_michel_extinct 规则，防止把卡文迪什/大麦克同框刷出。
+    if (pool.isEmpty()) {
+        for (JokerType t : allBuffoonJokers()) {
+            if (t == JokerType::GrosMichel && grosMichelExtinct) continue;
+            if (t == JokerType::Cavendish && !grosMichelExtinct) continue;
+            pool.append(t);
+        }
     }
     if (pool.isEmpty()) pool = allBuffoonJokers();
     return pool[QRandomGenerator::global()->bounded(pool.size())];
@@ -231,7 +250,8 @@ static ConsumableType randomPackConsumableWithSpecials(PackKind kind, QVector<Co
 PackContent generatePackContent(PackKind k, PackSize s, bool omenGlobe,
                                 bool telescope, ConsumableType telescopePlanet,
                                 const QVector<JokerType> &ownedJokers,
-                                bool allowDuplicateJokers) {
+                                bool allowDuplicateJokers,
+                                bool grosMichelExtinct) {
     Q_UNUSED(telescope);
     Q_UNUSED(telescopePlanet);
 
@@ -257,7 +277,7 @@ PackContent generatePackContent(PackKind k, PackSize s, bool omenGlobe,
         break;
     case PackKind::Buffoon:
         for (int i = 0; i < pc.optionsToShow; ++i) {
-            JokerType j = randomBuffoonJoker(ownedJokers, usedJokers, allowDuplicateJokers);
+            JokerType j = randomBuffoonJoker(ownedJokers, usedJokers, allowDuplicateJokers, grosMichelExtinct);
             pc.jokers.append(j);
             usedJokers.append(j);
         }

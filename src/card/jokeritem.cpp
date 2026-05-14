@@ -9,9 +9,48 @@
 #include <QDateTime>
 #include <QTimer>
 #include <QPainterPath>
+#include <QCoreApplication>
+#include <QSet>
+#include <QHash>
+#include <QStringList>
 #include <cmath>
+#include <QtMath>
+#include "../utils/shadereffects.h"
 
 QPixmap *JokerItem::sSheet = nullptr;
+
+static bool legendarySoulPos(JokerType t, QPoint &out);
+static bool hologramSoulPos(JokerType t, QPoint &out);
+
+namespace {
+QSet<JokerItem*> sAnimatedJokers;
+QTimer *sJokerShaderTimer = nullptr;
+
+bool jokerNeedsShaderTick(const Joker &j)
+{
+    // 原版版本效果是 GPU shader，不应该因为闪箔/镭射/多彩/负片本身
+    // 让每张小丑进入 CPU 定时刷新。这里只有真正会浮动的 soul 层需要 tick。
+    QPoint unused;
+    return legendarySoulPos(j.type, unused) || hologramSoulPos(j.type, unused);
+}
+
+void ensureJokerShaderTimer()
+{
+    if (sJokerShaderTimer) return;
+    sJokerShaderTimer = new QTimer(QCoreApplication::instance());
+    sJokerShaderTimer->setTimerType(Qt::CoarseTimer);
+    QObject::connect(sJokerShaderTimer, &QTimer::timeout, []() {
+        const auto items = sAnimatedJokers.values();
+        for (JokerItem *item : items) if (item) item->update();
+    });
+    sJokerShaderTimer->start(67);
+}
+
+int shaderCacheFrame()
+{
+    return int(BalatroShaders::shaderTime() * 15.0);
+}
+}
 
 static bool legendarySoulPos(JokerType t, QPoint &out)
 {
@@ -28,110 +67,86 @@ static bool legendarySoulPos(JokerType t, QPoint &out)
     return false;
 }
 
-static void paintEditionShine(QPainter *p, const QRectF &r, Edition e)
+
+static bool hologramSoulPos(JokerType t, QPoint &out)
 {
-    if (e == Edition::None) return;
-    const qreal phase = std::fmod(QDateTime::currentMSecsSinceEpoch() / 900.0, 1.0);
-
-    p->save();
-    p->setRenderHint(QPainter::Antialiasing, true);
-    QPainterPath clip;
-    clip.addRoundedRect(r.adjusted(2, 2, -2, -2), 9, 9);
-    p->setClipPath(clip);
-
-    if (e == Edition::Negative) {
-        p->setCompositionMode(QPainter::CompositionMode_Multiply);
-        p->fillRect(r, QColor(45, 0, 80, 155));
-        p->setCompositionMode(QPainter::CompositionMode_Screen);
-        QLinearGradient neg(r.topLeft(), r.bottomRight());
-        neg.setColorAt(0.0, QColor(40, 0, 80, 120));
-        neg.setColorAt(0.45, QColor(180, 95, 255, 105));
-        neg.setColorAt(1.0, QColor(15, 10, 25, 150));
-        p->fillRect(r, neg);
-    } else {
-        QLinearGradient g(r.topLeft(), r.bottomRight());
-        if (e == Edition::Foil) {
-            g.setColorAt(0.00, QColor(180, 235, 255, 70));
-            g.setColorAt(0.50, QColor(255, 255, 255, 112));
-            g.setColorAt(1.00, QColor(105, 170, 255, 58));
-        } else if (e == Edition::Holographic) {
-            g.setColorAt(0.00, QColor(255, 80, 185, 70));
-            g.setColorAt(0.50, QColor(115, 245, 255, 90));
-            g.setColorAt(1.00, QColor(255, 245, 120, 58));
-        } else if (e == Edition::Polychrome) {
-            g.setColorAt(0.00, QColor(255, 55, 70, 92));
-            g.setColorAt(0.25, QColor(255, 230, 70, 88));
-            g.setColorAt(0.50, QColor(70, 255, 150, 92));
-            g.setColorAt(0.75, QColor(80, 160, 255, 88));
-            g.setColorAt(1.00, QColor(210, 80, 255, 92));
-        }
-        p->setCompositionMode(QPainter::CompositionMode_Screen);
-        p->fillRect(r, g);
-    }
-
-    p->setCompositionMode(QPainter::CompositionMode_Screen);
-    qreal stripeX = r.left() - r.width() * 0.65 + phase * r.width() * 2.2;
-    QLinearGradient stripe(stripeX, r.top(), stripeX + r.width() * 0.42, r.bottom());
-    stripe.setColorAt(0.00, QColor(255, 255, 255, 0));
-    stripe.setColorAt(0.48, QColor(255, 255, 255, e == Edition::Negative ? 70 : 120));
-    stripe.setColorAt(1.00, QColor(255, 255, 255, 0));
-    p->fillRect(r, stripe);
-
-    p->setClipping(false);
-    QColor border;
-    switch (e) {
-    case Edition::Foil:        border = QColor(170, 230, 255, 225); break;
-    case Edition::Holographic: border = QColor(255, 130, 215, 225); break;
-    case Edition::Polychrome:  border = QColor(235, 245, 120, 235); break;
-    case Edition::Negative:    border = QColor(190, 100, 255, 235); break;
-    default: break;
-    }
-    p->setCompositionMode(QPainter::CompositionMode_SourceOver);
-    p->setBrush(Qt::NoBrush);
-    p->setPen(QPen(border, e == Edition::Negative ? 5 : 4));
-    p->drawRoundedRect(r.adjusted(2, 2, -2, -2), 9, 9);
-    p->restore();
+    // 原版 game.lua: j_hologram soul_pos = {x=2, y=9}
+    if (t == JokerType::Hologram) { out = {2, 9}; return true; }
+    return false;
 }
 
-static void paintLegendaryFloatingSprite(QPainter *p, QPixmap *sheet, JokerType type)
+void JokerItem::drawFloatingSprite(QPainter *p, const QRectF &dst, JokerType type, bool animated)
 {
-    QPoint soul;
-    if (!sheet || sheet->isNull() || !legendarySoulPos(type, soul)) return;
+    if (!p || !sSheet || sSheet->isNull()) return;
 
-    const qreal t = QDateTime::currentMSecsSinceEpoch() / 1000.0;
-    const qreal scaleMod = 1.07 + 0.02 * std::sin(1.8 * t);
-    const qreal rotateMod = 2.9 * std::sin(1.219 * t);
-    const qreal yBob = 2.6 * std::sin(1.65 * t);
+    QPoint soul;
+    bool isLegendary = legendarySoulPos(type, soul);
+    bool isHologram  = !isLegendary && hologramSoulPos(type, soul);
+    if (!isLegendary && !isHologram) return;
+
+    const qreal t = animated ? (QDateTime::currentMSecsSinceEpoch() / 1000.0) : 0.0;
+
     QRect src(soul.x() * JokerItem::WIDTH, soul.y() * JokerItem::HEIGHT,
               JokerItem::WIDTH, JokerItem::HEIGHT);
 
-    auto drawLayer = [&](qreal scale, qreal opacity, qreal dx, qreal dy, QPainter::CompositionMode mode) {
+    if (isHologram) {
+        const qreal scaleMod = 1.0 + 0.07 + 0.02 * std::sin(1.8 * t);
+        const qreal rotateDeg = 0.05 * std::sin(1.219 * t) * 180.0 / 3.14159265358979323846;
+        const qreal yBob = animated ? std::sin(t * 1.7) * 2.0 : 0.0;
+
+        QPixmap sprite(JokerItem::WIDTH, JokerItem::HEIGHT);
+        sprite.fill(Qt::transparent);
+        {
+            QPainter sp(&sprite);
+            sp.setRenderHint(QPainter::SmoothPixmapTransform, true);
+            sp.drawPixmap(QRect(0, 0, JokerItem::WIDTH, JokerItem::HEIGHT), *sSheet, src);
+        }
+        sprite = BalatroShaders::renderHologramPixmap(sprite, 1.2);
+
+        p->save();
+        p->setRenderHint(QPainter::SmoothPixmapTransform, true);
+        p->translate(dst.center().x(), dst.center().y() + yBob);
+        p->rotate(rotateDeg);
+        p->scale(scaleMod, scaleMod);
+        p->translate(-dst.width() / 2.0, -dst.height() / 2.0);
+        p->drawPixmap(QRectF(0, 0, dst.width(), dst.height()), sprite, QRectF(0, 0, sprite.width(), sprite.height()));
+        p->restore();
+        return;
+    }
+
+    // 传奇小丑：scale_mod 较平缓，叠一层 dissolve 发光再画肖像。
+    const qreal scaleMod = animated ? (1.07 + 0.02 * std::sin(1.8 * t)) : 1.0;
+    const qreal rotateMod = animated ? (2.9 * std::sin(1.219 * t)) : 0.0;
+    const qreal yBob = animated ? (2.6 * std::sin(1.65 * t)) : 0.0;
+
+    auto drawLayer = [&](qreal scale, qreal opacity, QPainter::CompositionMode mode) {
         p->save();
         p->setRenderHint(QPainter::SmoothPixmapTransform, true);
         p->setCompositionMode(mode);
         p->setOpacity(opacity);
-        p->translate(JokerItem::WIDTH / 2.0 + dx, JokerItem::HEIGHT / 2.0 + dy + yBob);
+        p->translate(dst.center().x(), dst.center().y() + yBob);
         p->rotate(rotateMod);
         p->scale(scale, scale);
-        p->translate(-JokerItem::WIDTH / 2.0, -JokerItem::HEIGHT / 2.0);
-        p->drawPixmap(QRect(0, 0, JokerItem::WIDTH, JokerItem::HEIGHT), *sheet, src);
+        p->translate(-dst.width() / 2.0, -dst.height() / 2.0);
+        p->drawPixmap(QRectF(0, 0, dst.width(), dst.height()), *sSheet, src);
         p->restore();
     };
 
-    // 近似原版 card.lua: floating_sprite 先用 dissolve shader 画一层发光，再画主体。
-    drawLayer(scaleMod + 0.05, 0.40, 0, 0, QPainter::CompositionMode_Screen);
-    drawLayer(scaleMod,        1.00, 0, 0, QPainter::CompositionMode_SourceOver);
+    drawLayer(scaleMod + 0.05, 0.40, QPainter::CompositionMode_Screen);
+    drawLayer(scaleMod,        1.00, QPainter::CompositionMode_SourceOver);
 
-    // 额外加一层周期性高光，让“人头像浮在背景前”的感觉更明显。
-    p->save();
-    p->setCompositionMode(QPainter::CompositionMode_Screen);
-    p->setOpacity(0.28 + 0.12 * std::sin(t * 2.4));
-    QRadialGradient g(QPointF(JokerItem::WIDTH * 0.50, JokerItem::HEIGHT * 0.43 + yBob), JokerItem::WIDTH * 0.48);
-    g.setColorAt(0.0, QColor(255, 255, 255, 115));
-    g.setColorAt(0.45, QColor(200, 160, 255, 50));
-    g.setColorAt(1.0, QColor(255, 255, 255, 0));
-    p->fillRect(QRectF(0, 0, JokerItem::WIDTH, JokerItem::HEIGHT), g);
-    p->restore();
+}
+
+static void paintHologramFloatingSprite(QPainter *p, QPixmap *sheet, JokerType type)
+{
+    Q_UNUSED(sheet);
+    JokerItem::drawFloatingSprite(p, QRectF(0, 0, JokerItem::WIDTH, JokerItem::HEIGHT), type, true);
+}
+
+static void paintLegendaryFloatingSprite(QPainter *p, QPixmap *sheet, JokerType type)
+{
+    Q_UNUSED(sheet);
+    JokerItem::drawFloatingSprite(p, QRectF(0, 0, JokerItem::WIDTH, JokerItem::HEIGHT), type, true);
 }
 
 void JokerItem::loadResources() {
@@ -173,7 +188,7 @@ QPoint JokerItem::spritePos(JokerType t) {
     case JokerType::Bootstraps:      return {9,  8};
     case JokerType::AbstractJoker:   return {3,  3};
     case JokerType::Supernova:       return {4,  2};
-    case JokerType::GrosMichel:      return {6,  7};
+    case JokerType::GrosMichel:      return {7,  6};
     case JokerType::Cavendish:       return {5, 11};
     case JokerType::IceCream:        return {4, 10};
     case JokerType::Stuntman:        return {8,  6};
@@ -197,6 +212,15 @@ QPoint JokerItem::spritePos(JokerType t) {
     case JokerType::Swashbuckler:    return {9,  5};
     case JokerType::Ramen:           return {2, 15};
     case JokerType::DriversLicense:  return {0,  7};
+    case JokerType::Hiker:           return {0, 11};
+    case JokerType::CardSharp:       return {6, 11};
+    case JokerType::Hologram:        return {4, 12};
+    case JokerType::MidasMask:       return {0, 13};
+    case JokerType::Vampire:         return {2, 12};
+    case JokerType::Constellation:   return {9, 10};
+    case JokerType::Photograph:      return {2, 13};
+    case JokerType::HangingChad:     return {9,  6};
+    case JokerType::SockAndBuskin:   return {3,  1};
     case JokerType::Blueprint:       return {0,  3};
     case JokerType::Mime:            return {4,  1};
     case JokerType::DNA:             return {5, 10};
@@ -216,12 +240,11 @@ JokerItem::JokerItem(const Joker &j, QGraphicsItem *parent)
     setAcceptHoverEvents(true);
     setCursor(Qt::PointingHandCursor);
 
-    auto *shineTimer = new QTimer(this);
-    connect(shineTimer, &QTimer::timeout, this, [this]() {
-        QPoint unused;
-        if (mJoker.edition != Edition::None || legendarySoulPos(mJoker.type, unused)) update();
-    });
-    shineTimer->start(80);
+    if (jokerNeedsShaderTick(mJoker)) {
+        ensureJokerShaderTimer();
+        sAnimatedJokers.insert(this);
+        QObject::connect(this, &QObject::destroyed, [ptr = this]() { sAnimatedJokers.remove(ptr); });
+    }
 }
 
 QRectF JokerItem::boundingRect() const {
@@ -229,14 +252,36 @@ QRectF JokerItem::boundingRect() const {
 }
 
 void JokerItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) {
-    p->setRenderHint(QPainter::SmoothPixmapTransform);
+    p->setRenderHint(QPainter::SmoothPixmapTransform, false);
 
-    QPoint c = spritePos(mJoker.type);
-    QRect src(c.x() * WIDTH, c.y() * HEIGHT, WIDTH, HEIGHT);
-    p->drawPixmap(QRect(0, 0, WIDTH, HEIGHT), *sSheet, src);
+    const bool floatingAnimated = jokerNeedsShaderTick(mJoker);
+    const int frame = floatingAnimated ? shaderCacheFrame() : -1;
+    const QString key = QString::number(int(mJoker.type)) + QLatin1Char('|')
+                      + QString::number(int(mJoker.edition)) + QLatin1Char('|')
+                      + QString::number(frame);
+    static QHash<QString, QPixmap> cache;
+    static QStringList order;
 
-    paintEditionShine(p, QRectF(0, 0, WIDTH, HEIGHT), mJoker.edition);
-    paintLegendaryFloatingSprite(p, sSheet, mJoker.type);
+    QPixmap pix = cache.value(key);
+    if (pix.isNull()) {
+        pix = QPixmap(WIDTH, HEIGHT);
+        pix.fill(Qt::transparent);
+        QPainter cp(&pix);
+        cp.setRenderHint(QPainter::SmoothPixmapTransform, false);
+        cp.setRenderHint(QPainter::Antialiasing, true);
+        QPoint c = spritePos(mJoker.type);
+        QRect src(c.x() * WIDTH, c.y() * HEIGHT, WIDTH, HEIGHT);
+        QPixmap body = sSheet->copy(src);
+        if (mJoker.edition != Edition::None)
+            body = BalatroShaders::renderEditionPixmap(body, mJoker.edition);
+        cp.drawPixmap(QRect(0, 0, WIDTH, HEIGHT), body);
+        paintLegendaryFloatingSprite(&cp, sSheet, mJoker.type);
+        paintHologramFloatingSprite(&cp, sSheet, mJoker.type);
+        cache.insert(key, pix);
+        order.append(key);
+        while (order.size() > 160) cache.remove(order.takeFirst());
+    }
+    p->drawPixmap(QRect(0, 0, WIDTH, HEIGHT), pix);
 
     if (mHovered) {
         p->setPen(QPen(QColor(255, 240, 96, 200), 4));
@@ -250,6 +295,9 @@ void JokerItem::mousePressEvent(QGraphicsSceneMouseEvent *e)
     if (e->button() == Qt::LeftButton || e->button() == Qt::RightButton) {
         mPressed = true;
         mDragging = false;
+        mHoverTiltX = 0.0;
+        mHoverTiltY = 0.0;
+        applyHoverTransform();
         mPressScenePos = e->scenePos();
         mRestZ = zValue();
         setZValue(500);
@@ -270,6 +318,7 @@ void JokerItem::mouseMoveEvent(QGraphicsSceneMouseEvent *e)
 
     if (mDragging) {
         setPos(e->scenePos() - QPointF(WIDTH / 2.0, HEIGHT / 2.0));
+        emit dragMoved(this, e->scenePos());
         e->accept();
         return;
     }
@@ -294,20 +343,64 @@ void JokerItem::mouseReleaseEvent(QGraphicsSceneMouseEvent *e)
     QGraphicsObject::mouseReleaseEvent(e);
 }
 
+void JokerItem::applyHoverTransform()
+{
+    const qreal cx = WIDTH / 2.0;
+    const qreal cy = HEIGHT / 2.0;
+    const qreal tiltX = qDegreesToRadians(mHoverTiltX);
+    const qreal tiltY = qDegreesToRadians(mHoverTiltY);
+
+    const qreal cosY = std::cos(tiltY);
+    const qreal cosX = std::cos(tiltX);
+    const qreal sinY = std::sin(tiltY);
+    const qreal sinX = std::sin(tiltX);
+
+    QTransform t;
+    t.translate(cx, cy);
+    QTransform persp;
+    persp.setMatrix(
+        cosY,           sinY * sinX,    0.0048 * sinY,
+        0,              cosX,           0.0048 * sinX,
+        0,              0,              1
+    );
+    t = persp * t;
+    t.translate(-cx, -cy);
+    setTransform(t);
+}
+
 void JokerItem::hoverEnterEvent(QGraphicsSceneHoverEvent *e)
 {
     mHovered = true;
     setTransformOriginPoint(WIDTH / 2.0, HEIGHT / 2.0);
-    animateScale(1.10, 120);
+    setZValue(qMax<qreal>(zValue(), 120));
+    animateScale(1.08, 100);
     emit hoverChanged(this, true);
     update();
     QGraphicsObject::hoverEnterEvent(e);
 }
 
+void JokerItem::hoverMoveEvent(QGraphicsSceneHoverEvent *e)
+{
+    if (!mHovered || mDragging) {
+        QGraphicsObject::hoverMoveEvent(e);
+        return;
+    }
+    const qreal nx = e->pos().x() / WIDTH - 0.5;
+    const qreal ny = e->pos().y() / HEIGHT - 0.5;
+    // 对齐原版 shader 顶点阶段的 hover 透视感：只是改变投影，不重绘像素贴图。
+    mHoverTiltY = qBound(-10.0, nx * 20.0, 10.0);
+    mHoverTiltX = qBound(-10.0, ny * 20.0, 10.0);
+    applyHoverTransform();
+    QGraphicsObject::hoverMoveEvent(e);
+}
+
 void JokerItem::hoverLeaveEvent(QGraphicsSceneHoverEvent *e)
 {
     mHovered = false;
-    animateScale(1.0, 120);
+    mHoverTiltX = 0.0;
+    mHoverTiltY = 0.0;
+    applyHoverTransform();
+    animateScale(1.0, 110);
     emit hoverChanged(this, false);
     update();
     QGraphicsObject::hoverLeaveEvent(e);
@@ -318,6 +411,17 @@ void JokerItem::animateScale(qreal target, int durationMs)
     auto *anim = new QPropertyAnimation(this, "scale", this);
     anim->setDuration(durationMs);
     anim->setStartValue(scale());
+    anim->setEndValue(target);
+    anim->setEasingCurve(QEasingCurve::OutCubic);
+    anim->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+
+void JokerItem::moveTo(const QPointF &target, int durationMs)
+{
+    auto *anim = new QPropertyAnimation(this, "pos", this);
+    anim->setDuration(durationMs);
+    anim->setStartValue(pos());
     anim->setEndValue(target);
     anim->setEasingCurve(QEasingCurve::OutCubic);
     anim->start(QAbstractAnimation::DeleteWhenStopped);

@@ -560,6 +560,18 @@ QPoint BlindSelectWidget::cardTargetPos(int idx) const
     return QPoint(x, y);
 }
 
+
+void BlindSelectWidget::prepareEntrancePositions()
+{
+    hideTagPopup();
+    for (int i = 0; i < 3; ++i) {
+        BlindCard &b = mCards[i];
+        if (!b.card) continue;
+        const QPoint target = cardTargetPos(i);
+        b.card->move(target.x(), height() + 8);
+    }
+}
+
 void BlindSelectWidget::arrangeCards(bool initialFloat)
 {
     for (int i = 0; i < 3; ++i) {

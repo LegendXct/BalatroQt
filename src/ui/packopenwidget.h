@@ -9,6 +9,7 @@
 class QLabel;
 class QPushButton;
 class QTimer;
+class PackHandCardWidget;
 
 class PackOpenWidget : public QWidget
 {
@@ -29,10 +30,12 @@ public:
     void setInventoryConsumables(const QVector<Consumable> &inventoryConsumables);
     void setFreeJokerSlots(int freeSlots);
     QVector<int> selectedHandIndices() const { return mSelectedHand; }
+    const QVector<CardData> &packHand() const { return mPackHand; }
 
 signals:
     void choiceMade(int chosenIdx, QVector<int> selectedHandIdx);    // 选择/使用包里的第 chosenIdx 张
     void inventoryConsumableRequested(int inventoryIdx, QVector<int> selectedHandIdx);
+    void packHandReordered(QVector<CardData> packHand);
     void packFinished();                                             // 达到 choose 数或跳过
 
 protected:
@@ -42,6 +45,8 @@ private slots:
     void onChoose(int idx);
     void onUseInventory(int idx);
     void onHandCardClicked(int idx);
+    void onHandCardDragged(int idx, QPoint localPos);
+    void onHandCardReleased(int idx, QPoint localPos);
     void onSkip();
 
 private:
@@ -65,7 +70,7 @@ private:
     QPushButton *mBtnSkip = nullptr;
 
     struct HandUi {
-        QPushButton *btn = nullptr;
+        PackHandCardWidget *btn = nullptr;
         QLabel *nameLbl = nullptr;
     };
     QVector<HandUi> mHandUi;
@@ -89,12 +94,14 @@ private:
 
     void buildUi();
     void layoutPanel();
+    void layoutPackHand();
     void refreshAll();
     void refreshHandUi();
     void refreshOptionUi();
     void refreshInventoryUi();
     void finishAndClose();
     void animateCardsIn();
+    void applyPackHandOrderMove(int from, int to);
 
     int optionCount() const;
     QPixmap renderOption(int i) const;

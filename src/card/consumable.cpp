@@ -230,7 +230,7 @@ Consumable createConsumable(ConsumableType type) {
 
     switch (type) {
     case ConsumableType::Tarot_Fool:
-        c.name = "愚者"; c.description = "生成上一张使用过的塔罗/星球/幻灵牌（不包括愚者）";
+        c.name = "愚者"; c.description = "生成上一张使用过的塔罗/星球牌（不包括愚者和幻灵牌）";
         c.effect = [](UseContext &ctx) { ctx.state.addFoolCopyConsumable(); };
         break;
     case ConsumableType::Tarot_Magician:

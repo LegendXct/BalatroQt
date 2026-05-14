@@ -5,6 +5,12 @@
 #include <QHBoxLayout>
 #include <QResizeEvent>
 #include <QPainter>
+#include <QGraphicsDropShadowEffect>
+#include <QEvent>
+#include <QPainterPath>
+#include <QPaintEvent>
+#include <QMouseEvent>
+#include "../utils/shadereffects.h"
 
 
 static QString editionDisplayName(Edition e)
@@ -29,13 +35,109 @@ static QString editionDescription(Edition e)
     }
 }
 
+
+namespace {
+class ShopCardButton : public QPushButton
+{
+public:
+    explicit ShopCardButton(QWidget *parent = nullptr) : QPushButton(parent)
+    {
+        setMouseTracking(true);
+        setIcon(QIcon());
+        setText(QString());
+        setFlat(true);
+    }
+
+    void setDisplayPixmap(const QPixmap &pix)
+    {
+        mPixmap = pix;
+        update();
+    }
+
+protected:
+    void enterEvent(QEnterEvent *event) override
+    {
+        mHovered = true;
+        QPushButton::enterEvent(event);
+        update();
+    }
+
+    void leaveEvent(QEvent *event) override
+    {
+        mHovered = false;
+        mTiltX = 0.0;
+        mTiltY = 0.0;
+        QPushButton::leaveEvent(event);
+        update();
+    }
+
+    void mouseMoveEvent(QMouseEvent *event) override
+    {
+        if (mHovered && !mPixmap.isNull()) {
+            const qreal nx = event->position().x() / qMax(1, width()) - 0.5;
+            const qreal ny = event->position().y() / qMax(1, height()) - 0.5;
+            // 原版 hover 不是改变贴图像素，而是顶点阶段做轻微透视。
+            // 这里保持原始清晰贴图，只变换最终四边形。
+            mTiltY = qBound(-0.12, nx * 0.24, 0.12);
+            mTiltX = qBound(-0.10, ny * 0.20, 0.10);
+        }
+        QPushButton::mouseMoveEvent(event);
+        update();
+    }
+
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        p.setRenderHint(QPainter::SmoothPixmapTransform, false);
+
+        const QColor bg = !isEnabled() ? QColor("#2a3035") : (mHovered ? QColor("#4f6367") : QColor("#374244"));
+        p.setPen(Qt::NoPen);
+        p.setBrush(bg);
+        p.drawRoundedRect(rect().adjusted(0, 0, -1, -1), 7, 7);
+
+        if (mPixmap.isNull()) return;
+        QSize target = size() - QSize(10, 10);
+        QSize pixSize = mPixmap.size();
+        pixSize.scale(target, Qt::KeepAspectRatio);
+        QRectF pr(QPointF(-pixSize.width() / 2.0, -pixSize.height() / 2.0), pixSize);
+
+        p.save();
+        p.setOpacity(isEnabled() ? 1.0 : 0.42);
+        p.translate(width() / 2.0, height() / 2.0 + (mHovered ? -4.0 : 0.0));
+
+        QTransform t;
+        t.shear(mTiltY, -mTiltX);
+        t.scale(1.0 + (mHovered ? 0.035 : 0.0), 1.0 + (mHovered ? 0.035 : 0.0));
+        p.setTransform(t, true);
+
+        // 先画投影，再画原始像素贴图；不对贴图做降采样处理。
+        p.save();
+        p.setOpacity(isEnabled() ? 0.32 : 0.16);
+        p.translate(6, 8);
+        p.setBrush(QColor(0,0,0,180));
+        p.drawRoundedRect(pr.adjusted(4, 5, -4, -2), 8, 8);
+        p.restore();
+
+        p.drawPixmap(pr, mPixmap, QRectF(0, 0, mPixmap.width(), mPixmap.height()));
+        p.restore();
+    }
+
+private:
+    QPixmap mPixmap;
+    bool mHovered = false;
+    qreal mTiltX = 0.0;
+    qreal mTiltY = 0.0;
+};
+}
+
 ShopWidget::ShopWidget(GameState *gs,
                        const QFont &cnFont, const QFont &pixelFont,
                        QWidget *parent)
     : QWidget(parent), mGS(gs), mCNFont(cnFont), mPixelFont(pixelFont)
 {
     setAttribute(Qt::WA_StyledBackground, true);
-    setStyleSheet("background: rgba(0, 0, 0, 180);");   // ← 半透明
+    setStyleSheet("background: rgba(0, 0, 0, 60);");   // 商店露出动态背景
     buildUi();
 }
 
@@ -45,13 +147,13 @@ void ShopWidget::buildUi()
     mPanel->setObjectName("shopPanel");
     // 原版商店比例：上方商品区横向更宽，下方左 Voucher、右 Booster。
     // 不再固定 900×520，避免超级/巨型包贴图被面板裁掉。
-    mPanel->setMinimumSize(980, 640);
+    mPanel->setMinimumSize(900, 650);
     mPanel->setAttribute(Qt::WA_StyledBackground, true);
     mPanel->setStyleSheet(
         "QWidget#shopPanel {"
-        "  background:#374244;"
-        "  border: 3px solid #fda200;"
-        "  border-radius: 14px;"
+        "  background:rgba(35,48,51,235);"
+        "  border: 3px solid #fe5f55;"
+        "  border-radius: 18px;"
         "}"
         );
 
@@ -125,7 +227,7 @@ void ShopWidget::buildUi()
     shopBox->setObjectName("shopBox");
     shopBox->setAttribute(Qt::WA_StyledBackground, true);
     shopBox->setStyleSheet(
-        "QWidget#shopBox { background:#4f6367; border-radius:10px; }"
+        "QWidget#shopBox { background:rgba(57,72,76,230); border:3px solid #202b2e; border-radius:14px; }"
         );
     auto *shbl = new QHBoxLayout(shopBox);
     shbl->setContentsMargins(12, 12, 12, 12);
@@ -154,7 +256,7 @@ void ShopWidget::buildUi()
     voucherBox->setMinimumSize(185, 275);
     voucherBox->setAttribute(Qt::WA_StyledBackground, true);
     voucherBox->setStyleSheet(
-        "QWidget#voucherBox { background:#4f6367; border-radius:10px; }"
+        "QWidget#voucherBox { background:rgba(57,72,76,230); border:3px solid #202b2e; border-radius:14px; }"
         );
     auto *vbl = new QVBoxLayout(voucherBox);
     vbl->setContentsMargins(10, 8, 10, 8);
@@ -171,7 +273,7 @@ void ShopWidget::buildUi()
     boosterBox->setObjectName("boosterBox");
     boosterBox->setAttribute(Qt::WA_StyledBackground, true);
     boosterBox->setStyleSheet(
-        "QWidget#boosterBox { background:#4f6367; border-radius:10px; }"
+        "QWidget#boosterBox { background:rgba(57,72,76,230); border:3px solid #202b2e; border-radius:14px; }"
         );
     auto *bhbl = new QHBoxLayout(boosterBox);
     bhbl->setContentsMargins(12, 8, 12, 8);
@@ -187,13 +289,15 @@ void ShopWidget::buildUi()
     lhbl->addWidget(boosterBox, 1);
 
     root->addWidget(lowerRow);
+
+    buildInfoPanel();
 }
 
 ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
 {
     OfferUi ou;
     ou.card = new QWidget(parent);
-    if (isBooster) ou.card->setFixedSize(180, 260);
+    if (isBooster) ou.card->setFixedSize(225, 318);
     else           ou.card->setFixedSize(150, 260);
     ou.card->setStyleSheet("background:transparent;");
 
@@ -214,17 +318,26 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
     vbl->addWidget(ou.priceLbl, 0, Qt::AlignCenter);
 
     // 卡图(整张点击)
-    ou.cardBtn = new QPushButton(ou.card);
+    ou.cardBtn = new ShopCardButton(ou.card);
     // Booster 在原版商店区使用约 1.27×牌宽的显示区域，给它单独更宽的按钮。
-    if (isBooster) ou.cardBtn->setFixedSize(156, 184);
+    if (isBooster) ou.cardBtn->setFixedSize(190, 252);
     else           ou.cardBtn->setFixedSize(126, 174);
     ou.cardBtn->setCursor(Qt::PointingHandCursor);
+    ou.cardBtn->installEventFilter(this);
     ou.cardBtn->setStyleSheet(
         "QPushButton { background:#374244; border-radius:6px; border:none; }"
         "QPushButton:hover { background:#4f6367; }"
         "QPushButton:disabled { background:#2a3035; }"
         );
-    // 图片用 QIcon
+    if (isBooster) {
+        auto *shadow = new QGraphicsDropShadowEffect(ou.cardBtn);
+        shadow->setBlurRadius(22);
+        shadow->setOffset(10, 14);
+        shadow->setColor(QColor(0, 0, 0, 150));
+        ou.cardBtn->setGraphicsEffect(shadow);
+    }
+
+    // 图片用 QIcon，booster 贴图本身已经在 offerPixmap 里额外绘制厚度/高光。
     vbl->addWidget(ou.cardBtn, 0, Qt::AlignCenter);
 
     ou.imageLbl = nullptr;   // 没用,删掉
@@ -241,43 +354,136 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
     return ou;
 }
 
+void ShopWidget::buildInfoPanel()
+{
+    if (mInfoPanel) return;
+    mInfoPanel = new QWidget(this);
+    mInfoPanel->setAttribute(Qt::WA_StyledBackground, true);
+    mInfoPanel->setStyleSheet(
+        "background:rgba(31,37,42,245);"
+        "border:2px solid #fda200;"
+        "border-radius:12px;"
+    );
+
+    auto *vbl = new QVBoxLayout(mInfoPanel);
+    vbl->setContentsMargins(12, 10, 12, 10);
+    vbl->setSpacing(6);
+
+    mInfoTitle = new QLabel(mInfoPanel);
+    QFont tf = mCNFont; tf.setPixelSize(16); tf.setBold(true);
+    mInfoTitle->setFont(tf);
+    mInfoTitle->setAlignment(Qt::AlignCenter);
+    mInfoTitle->setStyleSheet("color:#ffe9a8; background:transparent; border:none;");
+    mInfoTitle->setWordWrap(true);
+    mInfoTitle->setFixedWidth(236);
+    vbl->addWidget(mInfoTitle);
+
+    mInfoBody = new QLabel(mInfoPanel);
+    QFont bf = mCNFont; bf.setPixelSize(12);
+    mInfoBody->setFont(bf);
+    mInfoBody->setAlignment(Qt::AlignCenter);
+    mInfoBody->setWordWrap(true);
+    mInfoBody->setStyleSheet("color:white; background:transparent; border:none;");
+    mInfoBody->setFixedWidth(236);
+    vbl->addWidget(mInfoBody);
+
+    mInfoPanel->setFixedWidth(270);
+    mInfoPanel->hide();
+}
+
+void ShopWidget::showOfferInfo(QWidget *source)
+{
+    if (!source) return;
+    buildInfoPanel();
+    const QString title = source->property("infoTitle").toString();
+    const QString body = source->property("infoBody").toString();
+    if (title.isEmpty() && body.isEmpty()) return;
+
+    mInfoTitle->setText(title);
+    mInfoBody->setText(body);
+    mInfoBody->setVisible(!body.isEmpty());
+    if (auto *lay = mInfoPanel->layout()) lay->activate();
+    mInfoPanel->adjustSize();
+    mInfoPanel->resize(270, qBound(84, mInfoPanel->height(), 260));
+
+    QPoint pos = source->mapTo(this, QPoint(source->width() + 12, 0));
+    if (pos.x() + mInfoPanel->width() > width() - 8)
+        pos.setX(source->mapTo(this, QPoint(-mInfoPanel->width() - 12, 0)).x());
+    pos.setX(qBound(6, pos.x(), qMax(6, width() - mInfoPanel->width() - 6)));
+    pos.setY(qBound(6, pos.y(), qMax(6, height() - mInfoPanel->height() - 6)));
+
+    mInfoPanel->move(pos);
+    mInfoPanel->raise();
+    mInfoPanel->show();
+}
+
+void ShopWidget::hideOfferInfo()
+{
+    if (mInfoPanel) mInfoPanel->hide();
+}
+
+bool ShopWidget::eventFilter(QObject *obj, QEvent *event)
+{
+    QWidget *w = qobject_cast<QWidget *>(obj);
+    if (w && w->property("infoTitle").isValid()) {
+        if (event->type() == QEvent::Enter) {
+            showOfferInfo(w);
+        } else if (event->type() == QEvent::Leave || event->type() == QEvent::Hide) {
+            hideOfferInfo();
+        }
+    }
+    return QWidget::eventFilter(obj, event);
+}
+
 void ShopWidget::refresh()
 {
     mLblGold->setText(QString("$%1").arg(mGS->gold()));
 
     auto fillSlot = [this](OfferUi &ou, const ShopOffer &o, bool canBuy, bool isBooster) {
-        if (o.sold) { ou.card->setVisible(false); return; }
+        if (o.sold) {
+            ou.card->setVisible(false);
+            ou.cardBtn->setToolTip(QString());
+            ou.cardBtn->setProperty("infoTitle", QString());
+            ou.cardBtn->setProperty("infoBody", QString());
+            return;
+        }
         ou.card->setVisible(true);
 
         QString name;
+        QString body;
         if (o.kind == OfferKind::Joker) {
             Joker tmp = createJoker(o.joker);
             QString ed = editionDisplayName(o.jokerEdition);
             name = ed.isEmpty() ? tmp.name : (ed + " " + tmp.name);
-            QString tip = tmp.name + "\n" + tmp.description;
-            if (!ed.isEmpty()) tip += "\n" + editionDescription(o.jokerEdition);
-            ou.cardBtn->setToolTip(tip);
+            body = tmp.description;
+            if (!ed.isEmpty()) body += "\n" + editionDescription(o.jokerEdition);
         } else if (o.kind == OfferKind::Pack) {
             name = packDisplayName(o.pack, o.packSize);
+            body = "购买后打开，选择其中的牌。";
         } else if (o.kind == OfferKind::Voucher) {
             name = voucherData(o.voucher).name;
-            ou.cardBtn->setToolTip(voucherData(o.voucher).description);
+            body = voucherData(o.voucher).description;
         } else if (o.kind == OfferKind::PlayingCard) {
             name = o.playingCard.toString();
+            body = "购买后加入牌组。";
         } else {
             Consumable tmp = createConsumable(o.consumable);
             name = tmp.name;
+            body = tmp.description;
         }
+        ou.cardBtn->setToolTip(QString());
+        ou.cardBtn->setProperty("infoTitle", name);
+        ou.cardBtn->setProperty("infoBody", body);
         ou.nameLbl->setText(name);
         ou.priceLbl->setText(QString("$%1").arg(o.cost));
 
-        // 设按钮图片(QIcon)
+        // 卡图由 ShopCardButton 自己绘制，保留原始像素清晰度，并在 hover 时做原版式顶点透视。
         QPixmap pix = offerPixmap(o);
-        if (!pix.isNull()) {
-            QPixmap scaled = pix.scaled(ou.cardBtn->size() - QSize(10, 10),
-                                        Qt::KeepAspectRatio, Qt::SmoothTransformation);
-            ou.cardBtn->setIcon(QIcon(scaled));
-            ou.cardBtn->setIconSize(scaled.size());
+        if (auto *tiltBtn = dynamic_cast<ShopCardButton *>(ou.cardBtn))
+            tiltBtn->setDisplayPixmap(pix);
+        else if (!pix.isNull()) {
+            ou.cardBtn->setIcon(QIcon(pix));
+            ou.cardBtn->setIconSize(pix.size());
         }
         ou.cardBtn->setEnabled(canBuy);
     };
@@ -326,26 +532,17 @@ QPixmap ShopWidget::offerPixmap(const ShopOffer &o) const
         QPoint c = JokerItem::spritePos(o.joker);
         QPixmap pix = sheet.copy(c.x() * JokerItem::WIDTH, c.y() * JokerItem::HEIGHT,
                                  JokerItem::WIDTH, JokerItem::HEIGHT);
-        if (o.jokerEdition != Edition::None) {
+        // 全息投影 / 五张传奇牌：原版 card.lua:4512-4523 走 floating_sprite 浮动层。
+        // 商店里如果只画 pos 主体，Hologram 看上去就是个空相框，传奇牌也少了肖像。
+        {
             QPainter p(&pix);
-            p.setRenderHint(QPainter::Antialiasing);
-            if (o.jokerEdition == Edition::Negative) {
-                p.fillRect(pix.rect(), QColor(48, 0, 72, 110));
-                p.setPen(QPen(QColor(190, 100, 255, 230), 5));
-            } else if (o.jokerEdition == Edition::Polychrome) {
-                QLinearGradient g(0, 0, pix.width(), pix.height());
-                g.setColorAt(0.0, QColor(255, 100, 100, 230));
-                g.setColorAt(0.5, QColor(100, 255, 100, 230));
-                g.setColorAt(1.0, QColor(100, 120, 255, 230));
-                p.setPen(QPen(QBrush(g), 5));
-            } else if (o.jokerEdition == Edition::Holographic) {
-                p.setPen(QPen(QColor(255, 100, 200, 230), 5));
-            } else {
-                p.setPen(QPen(QColor(120, 200, 255, 230), 5));
-            }
-            p.setBrush(Qt::NoBrush);
-            p.drawRoundedRect(2, 2, pix.width() - 4, pix.height() - 4, 8, 8);
+            p.setRenderHint(QPainter::Antialiasing, true);
+            p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+            JokerItem::drawFloatingSprite(&p, QRectF(0, 0, pix.width(), pix.height()),
+                                          o.joker, /*animated=*/false);
         }
+        if (o.jokerEdition != Edition::None)
+            pix = BalatroShaders::renderEditionPixmap(pix, o.jokerEdition);
         return pix;
     }
 
@@ -357,9 +554,13 @@ QPixmap ShopWidget::offerPixmap(const ShopOffer &o) const
         QPixmap sheet(":/textures/images/boosters.png");
         if (sheet.isNull()) return QPixmap();
         QPoint c = packSpritePos(o.pack, o.packSize);
-        return sheet.copy(c.x() * ConsumableItem::WIDTH,
-                          c.y() * ConsumableItem::HEIGHT,
-                          ConsumableItem::WIDTH, ConsumableItem::HEIGHT);
+        QPixmap base = sheet.copy(c.x() * ConsumableItem::WIDTH,
+                                  c.y() * ConsumableItem::HEIGHT,
+                                  ConsumableItem::WIDTH, ConsumableItem::HEIGHT);
+
+        // 原版 booster.fs：卡包有动态蓝紫/金色波纹。这里统一走 shader 转写层，
+        // 同时修正透明边距，避免 QIcon 把卡包压小。
+        return BalatroShaders::makeBooster3DPixmap(base);
     }
     if (o.kind == OfferKind::PlayingCard) {
         return playingCardPixmap(o.playingCard);
@@ -371,10 +572,11 @@ QPixmap ShopWidget::offerPixmap(const ShopOffer &o) const
         QPixmap voucherSheet(":/textures/images/Vouchers.png");
         if (!voucherSheet.isNull()) {
             QPoint c = voucherData(o.voucher).spritePos;
-            return voucherSheet.copy(c.x() * ConsumableItem::WIDTH,
-                                     c.y() * ConsumableItem::HEIGHT,
-                                     ConsumableItem::WIDTH,
-                                     ConsumableItem::HEIGHT);
+            QPixmap pix = voucherSheet.copy(c.x() * ConsumableItem::WIDTH,
+                                           c.y() * ConsumableItem::HEIGHT,
+                                           ConsumableItem::WIDTH,
+                                           ConsumableItem::HEIGHT);
+            return BalatroShaders::renderVoucherPixmap(pix, 0.9);
         }
 
         QPixmap pix(ConsumableItem::WIDTH, ConsumableItem::HEIGHT);
@@ -432,6 +634,35 @@ QPixmap ShopWidget::playingCardPixmap(const CardData &c) const
         }
         p.drawPixmap(QRect(0, 0, W, H), deckSheet, QRect(col*W, row*H, W, H));
     }
+    p.end();
+
+    if (c.edition != Edition::None)
+        pix = BalatroShaders::renderEditionPixmap(pix, c.edition);
+
+    if (c.seal != Seal::None && !enhSheet.isNull()) {
+        int sCol = 0, sRow = 0;
+        switch (c.seal) {
+        case Seal::Gold:   sCol = 2; sRow = 0; break;
+        case Seal::Purple: sCol = 4; sRow = 4; break;
+        case Seal::Red:    sCol = 5; sRow = 4; break;
+        case Seal::Blue:   sCol = 6; sRow = 4; break;
+        default: break;
+        }
+        QPixmap sealPix(W, H);
+        sealPix.fill(Qt::transparent);
+        {
+            QPainter sp(&sealPix);
+            sp.setRenderHint(QPainter::SmoothPixmapTransform, true);
+            sp.drawPixmap(QRect(0, 0, W, H), enhSheet, QRect(sCol * W, sRow * H, W, H));
+        }
+        if (c.seal == Seal::Gold)
+            sealPix = BalatroShaders::renderVoucherPixmap(sealPix, 0.95);
+        QPainter fp(&pix);
+        fp.drawPixmap(QRect(0, 0, W, H), sealPix);
+    }
+
+    if (c.isDebuffed)
+        pix = BalatroShaders::renderDebuffedPixmap(pix);
     return pix;
 }
 
@@ -460,8 +691,9 @@ void ShopWidget::resizeEvent(QResizeEvent *e)
 void ShopWidget::layoutPanel()
 {
     if (!mPanel) return;
-    int panelW = qBound(980, int(width() * 0.86), 1220);
-    int panelH = qBound(640, int(height() * 0.82), 760);
+    // 右下角牌组要一直露出来，因此商店面板不能无限向右撑。
+    int panelW = qBound(900, int(width() * 0.84), qMax(900, width() - 28));
+    int panelH = qBound(650, int(height() * 0.84), 760);
     mPanel->resize(panelW, panelH);
     int x = (width()  - mPanel->width())  / 2;
     int y = (height() - mPanel->height()) / 2;

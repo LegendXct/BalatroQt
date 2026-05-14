@@ -9,7 +9,7 @@ namespace Constants {
     constexpr int INITIAL_DISCARDS = 3; // 初始弃牌次数
 
     // 经济
-    constexpr int INITIAL_GOLD = 4; // 初始资金
+    constexpr int INITIAL_GOLD = 104; // 初始资金（调试）
     constexpr int INTEREST_MAX = 5; // 利息上限（每5金币+1）
     constexpr int HAND_GOLD = 1; // 每次出牌获得金币
     constexpr int WIN_GOLD = 3; // 通过盲注奖励

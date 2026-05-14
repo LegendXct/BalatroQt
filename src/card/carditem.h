@@ -43,6 +43,7 @@ public:
     void setBaseRotation(double deg) { mBaseRotation = deg; applyTransform(); }
 signals:
     void clicked(CardItem *card);
+    void dragMoved(CardItem *card, QPointF scenePos);
     void dragReleased(CardItem *card, QPointF scenePos);
     void hoverChanged(CardItem *card, bool hovered);
 protected:

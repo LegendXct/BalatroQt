@@ -639,6 +639,9 @@ QVector<JokerType> Shop::jokerPool() {
         JokerType::FlowerPot,       JokerType::Acrobat,
         JokerType::Swashbuckler,    JokerType::Ramen,
         JokerType::DriversLicense,
+        JokerType::Hiker, JokerType::CardSharp, JokerType::Hologram,
+        JokerType::MidasMask, JokerType::Vampire, JokerType::Constellation,
+        JokerType::Photograph, JokerType::HangingChad, JokerType::SockAndBuskin,
         JokerType::Blueprint, JokerType::Brainstorm, JokerType::DNA, JokerType::Mime,
     };
 }
@@ -646,9 +649,19 @@ QVector<JokerType> Shop::jokerPool() {
 JokerType Shop::randomJokerType(const QVector<JokerType> &alreadyRolled) const {
     QVector<JokerType> pool;
     for (JokerType t : jokerPool()) {
+        if (t == JokerType::GrosMichel && mGrosMichelExtinct) continue;
+        if (t == JokerType::Cavendish && !mGrosMichelExtinct) continue;
         if (!mAllowJokerDuplicates && (mOwnedJokers.contains(t) || alreadyRolled.contains(t)))
             continue;
         pool.append(t);
+    }
+    // 退化时仅放开“重复”过滤，仍保留 gros_michel_extinct 规则。
+    if (pool.isEmpty()) {
+        for (JokerType t : jokerPool()) {
+            if (t == JokerType::GrosMichel && mGrosMichelExtinct) continue;
+            if (t == JokerType::Cavendish && !mGrosMichelExtinct) continue;
+            pool.append(t);
+        }
     }
     if (pool.isEmpty()) pool = jokerPool();
     return pool[QRandomGenerator::global()->bounded(pool.size())];

@@ -64,6 +64,15 @@ static int jokerBaseCost(JokerType t)
     case JokerType::Swashbuckler: return 4;
     case JokerType::Ramen: return 6;
     case JokerType::DriversLicense: return 7;
+    case JokerType::Hiker: return 5;
+    case JokerType::CardSharp: return 6;
+    case JokerType::Hologram: return 7;
+    case JokerType::MidasMask: return 7;
+    case JokerType::Vampire: return 7;
+    case JokerType::Constellation: return 6;
+    case JokerType::Photograph: return 5;
+    case JokerType::HangingChad: return 4;
+    case JokerType::SockAndBuskin: return 6;
     case JokerType::Mime: return 5;
     case JokerType::DNA: return 8;
     case JokerType::Blueprint:
@@ -382,13 +391,13 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::GrosMichel:
-        j.name = "大麦克香蕉"; j.description = "+15 倍率";
+        j.name = "大麦克香蕉"; j.description = "+15 倍率；回合结束 1/6 概率灭绝，并解锁卡文迪许";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &ctx) { ctx.result.mult += 15; };
         break;
 
     case JokerType::Cavendish:
-        j.name = "卡文迪许香蕉"; j.description = "×3 倍率";
+        j.name = "卡文迪许香蕉"; j.description = "×3 倍率；回合结束 1/1000 概率消失";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &ctx) { ctx.result.xmult *= 3.0; };
         break;
@@ -544,19 +553,15 @@ Joker createJoker(JokerType type) {
     case JokerType::ShootTheMoon:
         j.name = "射月"; j.description = "手牌中每张Q +13 倍率";
         j.timing = TriggerTiming::Passive;
-        j.effect = [](TriggerContext &ctx) {
-            for (const CardData &c : ctx.hand)
-                if (!c.isDebuffed && c.rank == Rank::Queen) ctx.result.mult += 13;
-        };
+        // 由 GameState 的“手牌持有牌触发”阶段处理，事件会落在每张手牌Q上。
+        j.effect = [](TriggerContext &) {};
         break;
 
     case JokerType::Baron:
         j.name = "男爵"; j.description = "手牌中每张K ×1.5 倍率";
         j.timing = TriggerTiming::Passive;
-        j.effect = [](TriggerContext &ctx) {
-            for (const CardData &c : ctx.hand)
-                if (!c.isDebuffed && c.rank == Rank::King) ctx.result.xmult *= 1.5;
-        };
+        // 由 GameState 的“手牌持有牌触发”阶段处理，事件会落在每张手牌K上。
+        j.effect = [](TriggerContext &) {};
         break;
 
     case JokerType::FlowerPot:
@@ -608,6 +613,75 @@ Joker createJoker(JokerType type) {
                 if (c.enhancement != Enhancement::None) ++enhanced;
             if (enhanced >= 16) ctx.result.xmult *= 3.0;
         };
+        break;
+
+    case JokerType::Hiker:
+        j.name = "徒步者"; j.description = "每张计分牌永久 +5 筹码";
+        j.timing = TriggerTiming::OnScoringCard;
+        j.effect = [](TriggerContext &ctx) {
+            if (ctx.currentCard && !ctx.currentCard->isDebuffed) ctx.result.chips += 5;
+        };
+        break;
+
+    case JokerType::CardSharp:
+        j.name = "锋利卡牌"; j.description = "若本盲注已经出过该牌型，×3 倍率";
+        j.timing = TriggerTiming::OnPlayedHand;
+        j.effect = [](TriggerContext &ctx) {
+            auto it = ctx.state.handLevels().constFind(ctx.result.type);
+            if (it != ctx.state.handLevels().constEnd() && it->played > 0) ctx.result.xmult *= 3.0;
+        };
+        break;
+
+    case JokerType::Hologram:
+        j.name = "全息图"; j.description = "每向牌组添加 1 张游戏牌，本小丑 +X0.25 倍率";
+        j.counter = 0;
+        j.timing = TriggerTiming::Passive;
+        j.effect = [](TriggerContext &ctx) {
+            Q_UNUSED(ctx);
+            // 真实动态数值由 GameState 按 j.counter 处理，避免复制小丑丢失成长值。
+        };
+        break;
+
+    case JokerType::MidasMask:
+        j.name = "迈达斯面具"; j.description = "计分的人头牌变为黄金牌";
+        j.timing = TriggerTiming::Passive;
+        j.effect = [](TriggerContext &) {};
+        break;
+
+    case JokerType::Vampire:
+        j.name = "吸血鬼"; j.description = "移除计分牌增强，每移除 1 张获得 +X0.1 倍率";
+        j.counter = 0;
+        j.timing = TriggerTiming::Passive;
+        j.effect = [](TriggerContext &) {};
+        break;
+
+    case JokerType::Constellation:
+        j.name = "星座"; j.description = "每使用 1 张星球牌，本小丑 +X0.1 倍率";
+        j.counter = 0;
+        j.timing = TriggerTiming::Passive;
+        j.effect = [](TriggerContext &) {};
+        break;
+
+    case JokerType::Photograph:
+        j.name = "照片"; j.description = "第一张计分人头牌 ×2 倍率";
+        j.timing = TriggerTiming::OnScoringCard;
+        j.effect = [](TriggerContext &ctx) {
+            if (!ctx.currentCard || ctx.currentCard->isDebuffed) return;
+            const Rank r = ctx.currentCard->rank;
+            if (r == Rank::Jack || r == Rank::Queen || r == Rank::King) ctx.result.xmult *= 2.0;
+        };
+        break;
+
+    case JokerType::HangingChad:
+        j.name = "悬挂乍得"; j.description = "重新触发第一张计分牌 2 次";
+        j.timing = TriggerTiming::Passive;
+        j.effect = [](TriggerContext &) {};
+        break;
+
+    case JokerType::SockAndBuskin:
+        j.name = "袜子与公交鞋"; j.description = "所有计分人头牌重新触发 1 次";
+        j.timing = TriggerTiming::Passive;
+        j.effect = [](TriggerContext &) {};
         break;
 
     case JokerType::Blueprint:
