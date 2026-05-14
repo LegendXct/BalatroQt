@@ -22,7 +22,7 @@ QTimer *sConsumableShaderTimer = nullptr;
 
 bool consumableNeedsShaderTick(const Consumable &c)
 {
-    return c.type == ConsumableType::Spectral_Soul || c.negative;
+    return c.type == ConsumableType::Spectral_Soul;
 }
 
 void ensureConsumableShaderTimer()
@@ -128,7 +128,7 @@ QPixmap ConsumableItem::renderPixmap(ConsumableType type, bool negative)
     pix.fill(Qt::transparent);
 
     QPainter p(&pix);
-    p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    p.setRenderHint(QPainter::SmoothPixmapTransform, false);
     p.setRenderHint(QPainter::Antialiasing, true);
 
     if (sSheet && !sSheet->isNull()) {
@@ -147,7 +147,7 @@ QPixmap ConsumableItem::renderPixmap(ConsumableType type, bool negative)
     // 这里放在 negative 之后，保证你要的白水晶不会被反相污染。
     if (type == ConsumableType::Spectral_Soul) {
         QPainter soulPainter(&pix);
-        soulPainter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        soulPainter.setRenderHint(QPainter::SmoothPixmapTransform, false);
         soulPainter.setRenderHint(QPainter::Antialiasing, true);
         static QPixmap enhSheet(QStringLiteral(":/textures/images/Enhancers.png"));
         BalatroShaders::paintSoulCrystal(&soulPainter, QRectF(0, 0, WIDTH, HEIGHT), enhSheet);
@@ -175,7 +175,7 @@ ConsumableItem::ConsumableItem(const Consumable &c, QGraphicsItem *parent)
 }
 
 void ConsumableItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) {
-    p->setRenderHint(QPainter::SmoothPixmapTransform);
+    p->setRenderHint(QPainter::SmoothPixmapTransform, false);
     p->drawPixmap(QRect(0, 0, WIDTH, HEIGHT), renderPixmap(mC.type, mC.negative));
 
     if (mHovered) {

@@ -7,6 +7,9 @@
 #include <QPainter>
 #include <QGraphicsDropShadowEffect>
 #include <QEvent>
+#include <QPainterPath>
+#include <QPaintEvent>
+#include <QMouseEvent>
 #include "../utils/shadereffects.h"
 
 
@@ -30,6 +33,102 @@ static QString editionDescription(Edition e)
     case Edition::Negative:    return "负片：不占用小丑槽，并增加 1 个小丑槽位";
     default:                   return "";
     }
+}
+
+
+namespace {
+class ShopCardButton : public QPushButton
+{
+public:
+    explicit ShopCardButton(QWidget *parent = nullptr) : QPushButton(parent)
+    {
+        setMouseTracking(true);
+        setIcon(QIcon());
+        setText(QString());
+        setFlat(true);
+    }
+
+    void setDisplayPixmap(const QPixmap &pix)
+    {
+        mPixmap = pix;
+        update();
+    }
+
+protected:
+    void enterEvent(QEnterEvent *event) override
+    {
+        mHovered = true;
+        QPushButton::enterEvent(event);
+        update();
+    }
+
+    void leaveEvent(QEvent *event) override
+    {
+        mHovered = false;
+        mTiltX = 0.0;
+        mTiltY = 0.0;
+        QPushButton::leaveEvent(event);
+        update();
+    }
+
+    void mouseMoveEvent(QMouseEvent *event) override
+    {
+        if (mHovered && !mPixmap.isNull()) {
+            const qreal nx = event->position().x() / qMax(1, width()) - 0.5;
+            const qreal ny = event->position().y() / qMax(1, height()) - 0.5;
+            // 原版 hover 不是改变贴图像素，而是顶点阶段做轻微透视。
+            // 这里保持原始清晰贴图，只变换最终四边形。
+            mTiltY = qBound(-0.12, nx * 0.24, 0.12);
+            mTiltX = qBound(-0.10, ny * 0.20, 0.10);
+        }
+        QPushButton::mouseMoveEvent(event);
+        update();
+    }
+
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        p.setRenderHint(QPainter::SmoothPixmapTransform, false);
+
+        const QColor bg = !isEnabled() ? QColor("#2a3035") : (mHovered ? QColor("#4f6367") : QColor("#374244"));
+        p.setPen(Qt::NoPen);
+        p.setBrush(bg);
+        p.drawRoundedRect(rect().adjusted(0, 0, -1, -1), 7, 7);
+
+        if (mPixmap.isNull()) return;
+        QSize target = size() - QSize(10, 10);
+        QSize pixSize = mPixmap.size();
+        pixSize.scale(target, Qt::KeepAspectRatio);
+        QRectF pr(QPointF(-pixSize.width() / 2.0, -pixSize.height() / 2.0), pixSize);
+
+        p.save();
+        p.setOpacity(isEnabled() ? 1.0 : 0.42);
+        p.translate(width() / 2.0, height() / 2.0 + (mHovered ? -4.0 : 0.0));
+
+        QTransform t;
+        t.shear(mTiltY, -mTiltX);
+        t.scale(1.0 + (mHovered ? 0.035 : 0.0), 1.0 + (mHovered ? 0.035 : 0.0));
+        p.setTransform(t, true);
+
+        // 先画投影，再画原始像素贴图；不对贴图做降采样处理。
+        p.save();
+        p.setOpacity(isEnabled() ? 0.32 : 0.16);
+        p.translate(6, 8);
+        p.setBrush(QColor(0,0,0,180));
+        p.drawRoundedRect(pr.adjusted(4, 5, -4, -2), 8, 8);
+        p.restore();
+
+        p.drawPixmap(pr, mPixmap, QRectF(0, 0, mPixmap.width(), mPixmap.height()));
+        p.restore();
+    }
+
+private:
+    QPixmap mPixmap;
+    bool mHovered = false;
+    qreal mTiltX = 0.0;
+    qreal mTiltY = 0.0;
+};
 }
 
 ShopWidget::ShopWidget(GameState *gs,
@@ -219,7 +318,7 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
     vbl->addWidget(ou.priceLbl, 0, Qt::AlignCenter);
 
     // 卡图(整张点击)
-    ou.cardBtn = new QPushButton(ou.card);
+    ou.cardBtn = new ShopCardButton(ou.card);
     // Booster 在原版商店区使用约 1.27×牌宽的显示区域，给它单独更宽的按钮。
     if (isBooster) ou.cardBtn->setFixedSize(190, 252);
     else           ou.cardBtn->setFixedSize(126, 174);
@@ -378,13 +477,13 @@ void ShopWidget::refresh()
         ou.nameLbl->setText(name);
         ou.priceLbl->setText(QString("$%1").arg(o.cost));
 
-        // 设按钮图片(QIcon)
+        // 卡图由 ShopCardButton 自己绘制，保留原始像素清晰度，并在 hover 时做原版式顶点透视。
         QPixmap pix = offerPixmap(o);
-        if (!pix.isNull()) {
-            QPixmap scaled = pix.scaled(ou.cardBtn->size() - QSize(10, 10),
-                                        Qt::KeepAspectRatio, Qt::SmoothTransformation);
-            ou.cardBtn->setIcon(QIcon(scaled));
-            ou.cardBtn->setIconSize(scaled.size());
+        if (auto *tiltBtn = dynamic_cast<ShopCardButton *>(ou.cardBtn))
+            tiltBtn->setDisplayPixmap(pix);
+        else if (!pix.isNull()) {
+            ou.cardBtn->setIcon(QIcon(pix));
+            ou.cardBtn->setIconSize(pix.size());
         }
         ou.cardBtn->setEnabled(canBuy);
     };

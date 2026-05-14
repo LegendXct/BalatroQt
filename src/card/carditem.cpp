@@ -25,7 +25,9 @@ QTimer *sCardShaderTimer = nullptr;
 
 bool cardNeedsShaderTick(const CardData &d)
 {
-    return d.edition != Edition::None || d.seal == Seal::Gold || d.isDebuffed;
+    Q_UNUSED(d);
+    // 版本/蜡封/debuff 走 GPU 离屏一次性渲染缓存，不再定时刷新每张手牌。
+    return false;
 }
 
 void ensureCardShaderTimer()
@@ -79,7 +81,7 @@ QRectF CardItem::boundingRect() const {
 }
 
 void CardItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) {
-    painter->setRenderHint(QPainter::SmoothPixmapTransform);
+    painter->setRenderHint(QPainter::SmoothPixmapTransform, false);
     if (mData.faceUp) paintFront(painter);
     else paintBack(painter);
 }
@@ -149,7 +151,7 @@ void CardItem::paintFront(QPainter *painter)
         body.fill(Qt::transparent);
         {
             QPainter bp(&body);
-            bp.setRenderHint(QPainter::SmoothPixmapTransform, true);
+            bp.setRenderHint(QPainter::SmoothPixmapTransform, false);
             QRect enh = enhanceSrcRect();
             if (!enh.isNull()) bp.drawPixmap(dst, *sEnhSheet, enh);
             if (mData.enhancement != Enhancement::Stone)
@@ -163,7 +165,7 @@ void CardItem::paintFront(QPainter *painter)
 
         {
             QPainter fp(&finalPix);
-            fp.setRenderHint(QPainter::SmoothPixmapTransform, true);
+            fp.setRenderHint(QPainter::SmoothPixmapTransform, false);
             fp.drawPixmap(dst, body);
 
             QRect seal = sealSrcRect();
@@ -172,7 +174,7 @@ void CardItem::paintFront(QPainter *painter)
                 sealPix.fill(Qt::transparent);
                 {
                     QPainter sp(&sealPix);
-                    sp.setRenderHint(QPainter::SmoothPixmapTransform, true);
+                    sp.setRenderHint(QPainter::SmoothPixmapTransform, false);
                     sp.drawPixmap(dst, *sEnhSheet, seal);
                 }
                 if (mData.seal == Seal::Gold)

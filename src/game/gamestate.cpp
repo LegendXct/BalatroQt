@@ -106,6 +106,11 @@ static int countResolvedJokersOfType(const QVector<Joker> &jokers, JokerType typ
     return count;
 }
 
+static bool canRecordForFool(ConsumableType t)
+{
+    return t != ConsumableType::Tarot_Fool && kindOf(t) != ConsumableKind::Spectral;
+}
+
 static void applyResolvedJokerEffect(const Joker &j, TriggerContext &ctx)
 {
     if (j.type == JokerType::IceCream) {
@@ -538,7 +543,6 @@ void GameState::finishWinningRound()
                 endRoundEvents.append({ ScoreEventKind::RedSealRetrigger, -1, i, -1, 0, 1.0 });
 
             if (c.enhancement == Enhancement::Gold) {
-                addGold(3);
                 endRoundEvents.append({ ScoreEventKind::DollarGain, -1, i, -1, 3, 1.0 });
             }
             if (c.seal == Seal::Blue && canAddConsumable()) {
@@ -547,6 +551,11 @@ void GameState::finishWinningRound()
             }
         }
     }
+
+    int endRoundGoldGain = 0;
+    for (const ScoreEvent &ev : endRoundEvents)
+        if (ev.kind == ScoreEventKind::DollarGain) endRoundGoldGain += ev.intValue;
+    if (endRoundGoldGain > 0) mGold += endRoundGoldGain;
 
     if (!endRoundEvents.isEmpty())
         emit endRoundCardTriggered(endRoundEvents);
@@ -776,19 +785,24 @@ bool GameState::addConsumable(ConsumableType t) {
 }
 
 bool GameState::addFoolCopyConsumable() {
-    // 原版 The Fool：生成上一张使用过的塔罗/星球/幻灵牌，且不复制愚者自己。
-    if (!mHasLastUsedConsumable || mLastUsedConsumable == ConsumableType::Tarot_Fool) return false;
+    // 原版 The Fool：只复制上一张使用过的塔罗/星球牌；没有记录、上一张是愚者、或上一张是幻灵牌时不可使用。
+    if (!mHasLastUsedConsumable || !canRecordForFool(mLastUsedConsumable)) return false;
     if (!canAddConsumable()) return false;
     mConsumables.append(createConsumable(mLastUsedConsumable));
     emit consumablesChanged();
     return true;
 }
 
+bool GameState::canUseFool() const
+{
+    return mHasLastUsedConsumable && canRecordForFool(mLastUsedConsumable);
+}
+
 bool GameState::useConsumable(int idx, const QVector<int> &selectedHandIdx) {
     if (mPhase == GamePhase::GameOver) return false;
     if (idx < 0 || idx >= mConsumables.size()) return false;
 
-    const Consumable &c = mConsumables[idx];
+    Consumable c = mConsumables[idx];
     if (c.needsSelection > 0 &&
         selectedHandIdx.size() < c.needsSelection) return false;
 
@@ -798,15 +812,20 @@ bool GameState::useConsumable(int idx, const QVector<int> &selectedHandIdx) {
     if (c.maxSelection > 0 && sel.size() > c.maxSelection)
         return false;
 
+    if (c.type == ConsumableType::Tarot_Fool && !mHasLastUsedConsumable) return false;
+    if (c.type == ConsumableType::Tarot_Fool && !canRecordForFool(mLastUsedConsumable)) return false;
+
+    // 先把被使用的消耗牌移出槽位，再执行效果。否则皇帝/女祭司在 2 槽已占 1 槽时只会生成 1 张。
+    mConsumables.removeAt(idx);
+
     UseContext ctx{ *this, sel };
     c.effect(ctx);
 
-    if (c.type != ConsumableType::Tarot_Fool) {
+    if (canRecordForFool(c.type)) {
         mLastUsedConsumable = c.type;
         mHasLastUsedConsumable = true;
     }
 
-    mConsumables.removeAt(idx);
     emit consumablesChanged();
     return true;
 }
@@ -1481,10 +1500,17 @@ bool GameState::applyPackChoice(const PackContent &pack, int chosenIdx,
 
     case PackKind::Arcana:
     case PackKind::Celestial:
-    case PackKind::Spectral:
+    case PackKind::Spectral: {
         if (chosenIdx >= pack.consumables.size()) return false;
-        return applyConsumableTypeToPackHand(*this, pack.consumables[chosenIdx],
-                                             selectedPackHandIdx, packHand);
+        ConsumableType usedType = pack.consumables[chosenIdx];
+        bool ok = applyConsumableTypeToPackHand(*this, usedType,
+                                                selectedPackHandIdx, packHand);
+        if (ok && canRecordForFool(usedType)) {
+            mLastUsedConsumable = usedType;
+            mHasLastUsedConsumable = true;
+        }
+        return ok;
+    }
 
     case PackKind::Buffoon:
         if (chosenIdx >= pack.jokers.size()) return false;
@@ -1508,15 +1534,24 @@ bool GameState::useConsumableOnPackHand(int consumableIdx,
     if (sel.size() < c.needsSelection) return false;
     if (c.maxSelection > 0 && sel.size() > c.maxSelection) return false;
 
-    bool ok = applyConsumableTypeToPackHand(*this, c.type, sel, packHand);
-    if (!ok) return false;
+    if (c.type == ConsumableType::Tarot_Fool && !mHasLastUsedConsumable) return false;
+    if (c.type == ConsumableType::Tarot_Fool && !canRecordForFool(mLastUsedConsumable)) return false;
 
-    if (c.type != ConsumableType::Tarot_Fool) {
+    // 先腾出槽位，皇帝/女祭司才能在原有消耗牌槽位里补满两张。
+    mConsumables.removeAt(consumableIdx);
+
+    bool ok = applyConsumableTypeToPackHand(*this, c.type, sel, packHand);
+    if (!ok) {
+        mConsumables.insert(consumableIdx, c);
+        emit consumablesChanged();
+        return false;
+    }
+
+    if (canRecordForFool(c.type)) {
         mLastUsedConsumable = c.type;
         mHasLastUsedConsumable = true;
     }
 
-    mConsumables.removeAt(consumableIdx);
     emit consumablesChanged();
     return true;
 }

@@ -42,6 +42,7 @@ protected:
     void mouseMoveEvent(QGraphicsSceneMouseEvent *e) override;
     void mouseReleaseEvent(QGraphicsSceneMouseEvent *e) override;
     void hoverEnterEvent(QGraphicsSceneHoverEvent *e) override;
+    void hoverMoveEvent(QGraphicsSceneHoverEvent *e) override;
     void hoverLeaveEvent(QGraphicsSceneHoverEvent *e) override;
 
 private:
@@ -51,6 +52,9 @@ private:
     bool mDragging = false;
     QPointF mPressScenePos;
     qreal mRestZ = 0;
+    double mHoverTiltX = 0.0;
+    double mHoverTiltY = 0.0;
+    void applyHoverTransform();
     void animateScale(qreal target, int durationMs = 120);
     static QPixmap *sSheet;
 };

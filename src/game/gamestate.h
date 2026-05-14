@@ -114,6 +114,7 @@ public:
     bool canAddConsumable() const { return mConsumables.size() < consumableSlots(); }
     bool addConsumable(ConsumableType t);
     bool addFoolCopyConsumable();
+    bool canUseFool() const;
     bool useConsumable(int idx, const QVector<int> &selectedHandIdx);
     bool sellConsumable(int idx);
     bool sellJoker(int idx);

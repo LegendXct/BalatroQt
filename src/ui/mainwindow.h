@@ -253,6 +253,7 @@ private:
     void animatePlayedCardsToDiscardThen(std::function<void()> after);
     void showGameOverOverlay(bool won);
     void hideGameOverOverlay();
+    void resetTransientOverlaysForNewRun();
 
 protected:
     void resizeEvent(QResizeEvent *event) override;

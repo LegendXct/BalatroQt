@@ -14,6 +14,7 @@ qt_add_executable(BalatroQt
     src/ui/mainwindow.cpp src/ui/mainwindow.h src/ui/mainwindow.ui
     src/utils/constants.h
     src/utils/shadereffects.h src/utils/shadereffects.cpp
+    src/utils/gpueffectsrenderer.h src/utils/gpueffectsrenderer.cpp
     src/card/carddata.h src/card/carddata.cpp
     src/card/joker.h src/card/joker.cpp
     src/game/deck.h src/game/deck.cpp

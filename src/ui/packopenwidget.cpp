@@ -16,6 +16,129 @@
 #include <QPropertyAnimation>
 #include <QEasingCurve>
 #include <QSizePolicy>
+#include <QMouseEvent>
+#include <QLineF>
+#include <QEnterEvent>
+#include <QTransform>
+#include <cmath>
+
+class PackHandCardWidget : public QWidget
+{
+    Q_OBJECT
+public:
+    explicit PackHandCardWidget(int index, QWidget *parent = nullptr)
+        : QWidget(parent), mIndex(index)
+    {
+        setMouseTracking(true);
+        setCursor(Qt::PointingHandCursor);
+        setAttribute(Qt::WA_TranslucentBackground, true);
+    }
+
+    void setIndex(int index) { mIndex = index; }
+    void setPixmap(const QPixmap &pix) { mPixmap = pix; update(); }
+    void setSelected(bool s) { mSelected = s; update(); }
+    void setBaseRotation(qreal deg) { mBaseRotation = deg; update(); }
+
+signals:
+    void clicked(int index);
+    void dragged(int index, QPoint parentPos);
+    void released(int index, QPoint parentPos);
+
+protected:
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        const QRectF r = rect().adjusted(3, 3, -3, -3);
+        const qreal cx = width() / 2.0;
+        const qreal cy = height() / 2.0;
+        QTransform t;
+        t.translate(cx, cy);
+        t.rotate(mBaseRotation + mHoverTiltY * 0.18);
+        t.shear(mHoverTiltY / 260.0, -mHoverTiltX / 280.0);
+        t.translate(-cx, -cy);
+        p.setTransform(t, true);
+        if (!mPixmap.isNull()) p.drawPixmap(r, mPixmap, QRectF(mPixmap.rect()));
+        if (mSelected || mHovered) {
+            p.setPen(QPen(mSelected ? QColor(255, 230, 109, 230) : QColor(255, 230, 109, 140), mSelected ? 4 : 2));
+            p.setBrush(Qt::NoBrush);
+            p.drawRoundedRect(r, 9, 9);
+        }
+    }
+
+    void mousePressEvent(QMouseEvent *e) override
+    {
+        if (e->button() != Qt::LeftButton) return QWidget::mousePressEvent(e);
+        mPressed = true;
+        mDragging = false;
+        mPressPos = e->pos();
+        mStartPos = pos();
+        raise();
+        e->accept();
+    }
+
+    void mouseMoveEvent(QMouseEvent *e) override
+    {
+        const qreal nx = (e->pos().x() / qMax(1.0, double(width()))) - 0.5;
+        const qreal ny = (e->pos().y() / qMax(1.0, double(height()))) - 0.5;
+        mHoverTiltY = nx * 18.0;
+        mHoverTiltX = ny * 18.0;
+        update();
+
+        if (!mPressed) return QWidget::mouseMoveEvent(e);
+        if (!mDragging && QLineF(e->pos(), mPressPos).length() > 7.0) mDragging = true;
+        if (mDragging) {
+            QPoint parentP = mapToParent(e->pos());
+            move(parentP - mPressPos);
+            emit dragged(mIndex, parentP);
+            e->accept();
+            return;
+        }
+        QWidget::mouseMoveEvent(e);
+    }
+
+    void mouseReleaseEvent(QMouseEvent *e) override
+    {
+        if (e->button() == Qt::LeftButton && mPressed) {
+            QPoint parentP = mapToParent(e->pos());
+            mPressed = false;
+            if (mDragging) {
+                mDragging = false;
+                emit released(mIndex, parentP);
+            } else {
+                emit clicked(mIndex);
+            }
+            e->accept();
+            return;
+        }
+        QWidget::mouseReleaseEvent(e);
+    }
+
+    void enterEvent(QEnterEvent *e) override
+    {
+        mHovered = true; update(); QWidget::enterEvent(e);
+    }
+
+    void leaveEvent(QEvent *e) override
+    {
+        if (!mPressed) { mHovered = false; mHoverTiltX = mHoverTiltY = 0; update(); }
+        QWidget::leaveEvent(e);
+    }
+
+private:
+    int mIndex = 0;
+    QPixmap mPixmap;
+    bool mSelected = false;
+    bool mHovered = false;
+    bool mPressed = false;
+    bool mDragging = false;
+    QPoint mPressPos;
+    QPoint mStartPos;
+    qreal mBaseRotation = 0;
+    qreal mHoverTiltX = 0;
+    qreal mHoverTiltY = 0;
+};
 
 PackOpenWidget::PackOpenWidget(const QFont &cnFont, const QFont &pixelFont,
                                QWidget *parent)
@@ -84,10 +207,10 @@ void PackOpenWidget::buildUi()
 
     for (int i = 0; i < 10; ++i) {
         HandUi hu;
-        hu.btn = new QPushButton(handBox);
-        hu.btn->setCursor(Qt::PointingHandCursor);
-        hu.btn->setStyleSheet("QPushButton { background:transparent; border:none; border-radius:6px; }");
-        connect(hu.btn, &QPushButton::clicked, this, [this, i]() { onHandCardClicked(i); });
+        hu.btn = new PackHandCardWidget(i, handBox);
+        connect(hu.btn, &PackHandCardWidget::clicked, this, &PackOpenWidget::onHandCardClicked);
+        connect(hu.btn, &PackHandCardWidget::dragged, this, &PackOpenWidget::onHandCardDragged);
+        connect(hu.btn, &PackHandCardWidget::released, this, &PackOpenWidget::onHandCardReleased);
 
         hu.nameLbl = new QLabel("", handBox);
         hu.nameLbl->hide();
@@ -366,14 +489,13 @@ void PackOpenWidget::layoutPackHand()
         }
         const bool selected = mSelectedHand.contains(i);
         const int lift = selected ? 22 : 0;
+        hu.btn->setIndex(i);
         hu.btn->setFixedSize(cardW, cardH);
         hu.btn->move(startX + i * step, baseY - lift);
-        hu.btn->setIcon(QIcon(renderPlayingCard(mPackHand[i], QSize(cardW - 4, cardH - 4))));
-        hu.btn->setIconSize(QSize(cardW - 4, cardH - 4));
-        hu.btn->setStyleSheet(selected ?
-            "QPushButton { background:transparent; border:3px solid #ffe66d; border-radius:8px; }" :
-            "QPushButton { background:transparent; border:none; border-radius:8px; }"
-            "QPushButton:hover { border:2px solid rgba(255,230,109,170); }");
+        hu.btn->setPixmap(renderPlayingCard(mPackHand[i], QSize(cardW - 4, cardH - 4)));
+        hu.btn->setSelected(selected);
+        double t = n > 0 ? (-n / 2.0 - 0.5 + (i + 1)) / double(n) : 0.0;
+        hu.btn->setBaseRotation(0.2 * t * 180.0 / 3.14159265358979323846);
         hu.btn->show();
         hu.btn->raise();
         if (hu.nameLbl) hu.nameLbl->hide();
@@ -622,6 +744,47 @@ int PackOpenWidget::maxCurrentSelectionLimit() const
     return qMax(1, qMin(5, limit));
 }
 
+void PackOpenWidget::applyPackHandOrderMove(int from, int to)
+{
+    if (from < 0 || from >= mPackHand.size() || to < 0 || to >= mPackHand.size() || from == to) return;
+    CardData moved = mPackHand.takeAt(from);
+    mPackHand.insert(to, moved);
+
+    QVector<int> newSel;
+    for (int s : mSelectedHand) {
+        int ns = s;
+        if (s == from) ns = to;
+        else if (from < to && s > from && s <= to) ns = s - 1;
+        else if (from > to && s >= to && s < from) ns = s + 1;
+        if (!newSel.contains(ns)) newSel.append(ns);
+    }
+    std::sort(newSel.begin(), newSel.end());
+    mSelectedHand = newSel;
+    emit packHandReordered(mPackHand);
+}
+
+void PackOpenWidget::onHandCardDragged(int idx, QPoint localPos)
+{
+    if (!packUsesHandSelection() || idx < 0 || idx >= mPackHand.size()) return;
+    const int n = qMin(mPackHand.size(), mHandUi.size());
+    if (n <= 1) return;
+    int to = 0;
+    for (int i = 0; i < n; ++i) {
+        if (!mHandUi[i].btn || !mHandUi[i].btn->isVisible()) continue;
+        double center = mHandUi[i].btn->geometry().center().x();
+        if (localPos.x() > center) to = i;
+    }
+    to = qBound(0, to, n - 1);
+    if (to == idx) return;
+    applyPackHandOrderMove(idx, to);
+    layoutPackHand();
+}
+
+void PackOpenWidget::onHandCardReleased(int, QPoint)
+{
+    layoutPackHand();
+}
+
 void PackOpenWidget::onHandCardClicked(int idx)
 {
     if (!packUsesHandSelection()) return;
@@ -737,3 +900,4 @@ void PackOpenWidget::layoutPanel()
     mPanel->move(x, y);
     layoutPackHand();
 }
+#include "packopenwidget.moc"

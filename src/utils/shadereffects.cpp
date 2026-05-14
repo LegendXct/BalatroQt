@@ -1,4 +1,5 @@
 #include "shadereffects.h"
+#include "gpueffectsrenderer.h"
 
 #include <QDateTime>
 #include <QPainterPath>
@@ -38,22 +39,22 @@ static bool kindUsesAnimatedFrame(ShaderKind kind, double dissolve)
 {
     if (dissolve > 0.001) return true;
     switch (kind) {
+    case ShaderKind::Dissolve:
+    case ShaderKind::Hologram:
+        return true;
     case ShaderKind::Foil:
     case ShaderKind::Holo:
     case ShaderKind::Polychrome:
+    case ShaderKind::Negative:
     case ShaderKind::NegativeShine:
     case ShaderKind::Booster:
     case ShaderKind::Voucher:
-    case ShaderKind::Dissolve:
-    case ShaderKind::Hologram:
-    case ShaderKind::GoldSeal:
-        return true;
-    case ShaderKind::Negative:
     case ShaderKind::Debuff:
     case ShaderKind::Played:
+    case ShaderKind::GoldSeal:
         return false;
     }
-    return true;
+    return false;
 }
 
 struct V2 { double x = 0.0; double y = 0.0; };
@@ -504,6 +505,12 @@ double shaderTime()
 
 QPixmap renderEditionPixmap(const QPixmap &base, Edition edition, double intensity)
 {
+    if (edition == Edition::None || base.isNull()) return base;
+
+    bool gpuOk = false;
+    QPixmap gpu = renderEditionPixmapGpu(base, edition, intensity, &gpuOk);
+    if (gpuOk && !gpu.isNull()) return gpu;
+
     switch (edition) {
     case Edition::Foil:        return processPixmap(base, ShaderKind::Foil, intensity, true);
     case Edition::Holographic: return processPixmap(base, ShaderKind::Holo, intensity, true);
@@ -527,27 +534,37 @@ QPixmap renderEditionPixmap(const QPixmap &base, Edition edition, double intensi
 
 QPixmap renderBoosterPixmap(const QPixmap &base, double intensity)
 {
-    return processPixmap(base, ShaderKind::Booster, intensity, true);
+    bool ok = false;
+    QPixmap gpu = renderShaderPixmapGpu(base, QStringLiteral("booster"), intensity, true, &ok);
+    return (ok && !gpu.isNull()) ? gpu : processPixmap(base, ShaderKind::Booster, intensity, true);
 }
 
 QPixmap renderVoucherPixmap(const QPixmap &base, double intensity)
 {
-    return processPixmap(base, ShaderKind::Voucher, intensity, true);
+    bool ok = false;
+    QPixmap gpu = renderShaderPixmapGpu(base, QStringLiteral("voucher"), intensity, true, &ok);
+    return (ok && !gpu.isNull()) ? gpu : processPixmap(base, ShaderKind::Voucher, intensity, true);
 }
 
 QPixmap renderHologramPixmap(const QPixmap &base, double intensity)
 {
-    return processPixmap(base, ShaderKind::Hologram, intensity, true);
+    bool ok = false;
+    QPixmap gpu = renderShaderPixmapGpu(base, QStringLiteral("hologram"), intensity, true, &ok);
+    return (ok && !gpu.isNull()) ? gpu : processPixmap(base, ShaderKind::Hologram, intensity, true);
 }
 
 QPixmap renderDebuffedPixmap(const QPixmap &base, double intensity)
 {
-    return processPixmap(base, ShaderKind::Debuff, intensity, true);
+    bool ok = false;
+    QPixmap gpu = renderShaderPixmapGpu(base, QStringLiteral("debuff"), intensity, true, &ok);
+    return (ok && !gpu.isNull()) ? gpu : processPixmap(base, ShaderKind::Debuff, intensity, true);
 }
 
 QPixmap renderPlayedPixmap(const QPixmap &base, double intensity)
 {
-    return processPixmap(base, ShaderKind::Played, intensity, true);
+    bool ok = false;
+    QPixmap gpu = renderShaderPixmapGpu(base, QStringLiteral("played"), intensity, true, &ok);
+    return (ok && !gpu.isNull()) ? gpu : processPixmap(base, ShaderKind::Played, intensity, true);
 }
 
 QPixmap renderDissolvePixmap(const QPixmap &base, double dissolve, const QColor &burn1, const QColor &burn2, double intensity)
@@ -557,7 +574,9 @@ QPixmap renderDissolvePixmap(const QPixmap &base, double dissolve, const QColor 
 
 QPixmap renderGoldSealPixmap(const QPixmap &base, double intensity)
 {
-    return processPixmap(base, ShaderKind::GoldSeal, intensity, false);
+    bool ok = false;
+    QPixmap gpu = renderShaderPixmapGpu(base, QStringLiteral("goldseal"), intensity, false, &ok);
+    return (ok && !gpu.isNull()) ? gpu : processPixmap(base, ShaderKind::GoldSeal, intensity, false);
 }
 
 QImage makeBackgroundImage(const QSizeF &logicalSize, const QColor &c1, const QColor &c2, const QColor &c3,
@@ -664,7 +683,9 @@ void paintNegativeShine(QPainter *p, const QRectF &r, double intensity)
 {
     if (!p) return;
     QPixmap base = makeFlatBase(QSize(int(std::round(r.width())), int(std::round(r.height()))), 190);
-    QPixmap fx = processPixmap(base, ShaderKind::NegativeShine, intensity, false);
+    bool ok = false;
+    QPixmap fx = renderShaderPixmapGpu(base, QStringLiteral("negative_shine"), intensity, false, &ok);
+    if (!ok || fx.isNull()) fx = processPixmap(base, ShaderKind::NegativeShine, intensity, false);
     p->save();
     roundedClip(p, r, 10);
     p->drawPixmap(r, fx, QRectF(0, 0, fx.width(), fx.height()));
@@ -675,7 +696,9 @@ void paintBoosterShader(QPainter *p, const QRectF &r, double intensity)
 {
     if (!p) return;
     QPixmap base = makeFlatBase(QSize(int(std::round(r.width())), int(std::round(r.height()))), 155);
-    QPixmap fx = processPixmap(base, ShaderKind::Booster, intensity, false);
+    bool ok = false;
+    QPixmap fx = renderShaderPixmapGpu(base, QStringLiteral("booster"), intensity, false, &ok);
+    if (!ok || fx.isNull()) fx = processPixmap(base, ShaderKind::Booster, intensity, false);
     p->save();
     roundedClip(p, r, 12);
     p->drawPixmap(r, fx, QRectF(0, 0, fx.width(), fx.height()));
@@ -686,7 +709,9 @@ void paintVoucherShader(QPainter *p, const QRectF &r, double intensity)
 {
     if (!p) return;
     QPixmap base = makeFlatBase(QSize(int(std::round(r.width())), int(std::round(r.height()))), 155);
-    QPixmap fx = processPixmap(base, ShaderKind::Voucher, intensity, false);
+    bool ok = false;
+    QPixmap fx = renderShaderPixmapGpu(base, QStringLiteral("voucher"), intensity, false, &ok);
+    if (!ok || fx.isNull()) fx = processPixmap(base, ShaderKind::Voucher, intensity, false);
     p->save();
     roundedClip(p, r, 10);
     p->drawPixmap(r, fx, QRectF(0, 0, fx.width(), fx.height()));
@@ -697,7 +722,9 @@ void paintHologramShader(QPainter *p, const QRectF &r, double intensity)
 {
     if (!p) return;
     QPixmap base = makeFlatBase(QSize(int(std::round(r.width())), int(std::round(r.height()))), 190);
-    QPixmap fx = processPixmap(base, ShaderKind::Hologram, intensity, false);
+    bool ok = false;
+    QPixmap fx = renderShaderPixmapGpu(base, QStringLiteral("hologram"), intensity, false, &ok);
+    if (!ok || fx.isNull()) fx = processPixmap(base, ShaderKind::Hologram, intensity, false);
     p->save();
     roundedClip(p, r, 10);
     p->drawPixmap(r, fx, QRectF(0, 0, fx.width(), fx.height()));
@@ -728,7 +755,9 @@ void paintDebuff(QPainter *p, const QRectF &r, double intensity)
 {
     if (!p) return;
     QPixmap base = makeFlatBase(QSize(int(std::round(r.width())), int(std::round(r.height()))), 210);
-    QPixmap fx = processPixmap(base, ShaderKind::Debuff, intensity, false);
+    bool ok = false;
+    QPixmap fx = renderShaderPixmapGpu(base, QStringLiteral("debuff"), intensity, false, &ok);
+    if (!ok || fx.isNull()) fx = processPixmap(base, ShaderKind::Debuff, intensity, false);
     p->save();
     roundedClip(p, r, 10);
     p->drawPixmap(r, fx, QRectF(0, 0, fx.width(), fx.height()));
@@ -768,7 +797,9 @@ void paintGoldSealGlow(QPainter *p, const QRectF &r, double intensity)
 {
     if (!p) return;
     QPixmap base = makeFlatBase(QSize(int(std::round(r.width())), int(std::round(r.height()))), 170);
-    QPixmap fx = processPixmap(base, ShaderKind::GoldSeal, intensity, false);
+    bool ok = false;
+    QPixmap fx = renderShaderPixmapGpu(base, QStringLiteral("gold_seal"), intensity, false, &ok);
+    if (!ok || fx.isNull()) fx = processPixmap(base, ShaderKind::GoldSeal, intensity, false);
     p->save();
     p->setCompositionMode(QPainter::CompositionMode_Screen);
     p->drawPixmap(r, fx, QRectF(0, 0, fx.width(), fx.height()));
@@ -799,16 +830,13 @@ void paintSoulCrystal(QPainter *p, const QRectF &rect, const QPixmap &enhancersS
     p->rotate(rotateMod * 180.0 / PI);
     p->scale(1.0 + scaleMod, 1.0 + scaleMod);
     p->translate(-c);
-    paintDissolveGlow(p, rect, QColor(255, 255, 255, 110), QColor(170, 215, 255, 80), 1.25);
     if (!cached.isNull()) {
-        p->setCompositionMode(QPainter::CompositionMode_SourceOver);
+        // 原版 The Soul 画两次 shared_soul dissolve；这里不再额外叠径向白雾，
+        // 避免中心和边缘出现原版没有的白色模糊光圈。
+        p->setOpacity(0.6);
         p->drawPixmap(rect, cached, QRectF(0, 0, cached.width(), cached.height()));
-        p->setCompositionMode(QPainter::CompositionMode_Screen);
-        QRadialGradient rg(rect.center(), rect.width() * 0.45);
-        rg.setColorAt(0.0, QColor(255, 255, 255, int(75 + 35 * std::sin(1.8 * t))));
-        rg.setColorAt(0.55, QColor(190, 220, 255, 40));
-        rg.setColorAt(1.0, QColor(255, 255, 255, 0));
-        p->fillRect(rect, rg);
+        p->setOpacity(1.0);
+        p->drawPixmap(rect, cached, QRectF(0, 0, cached.width(), cached.height()));
     }
     p->restore();
 }

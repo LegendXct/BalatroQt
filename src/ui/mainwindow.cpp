@@ -806,8 +806,14 @@ void MainWindow::setupLeftPanel() {
             if (txt == "开始新的一局") {
                 connect(b, &QPushButton::clicked, this, [this, &dlg]() {
                     dlg.accept();
+                    resetTransientOverlaysForNewRun();
                     mGameState->startGame();
-                    refreshHand(); refreshJokerSlots(); refreshConsumableSlots(); refreshCounters(); refreshScore(); refreshGold();
+                    refreshHand();
+                    refreshJokerSlots();
+                    refreshConsumableSlots();
+                    refreshCounters();
+                    refreshScore();
+                    refreshGold();
                 });
             } else {
                 b->setEnabled(false);
@@ -1860,37 +1866,29 @@ void MainWindow::showJokerInfo(int idx, bool showSellButton)
     mJokerInfoDesc->setText(desc);
 
     if (showSellButton) {
-        // 原版点击牌后只出现一个很小的操作牌片：上方价格、下方售出。
-        // 详细说明仍由 hover 面板负责，这里不要再塞大段文字。
+        // 原版 card_focus_button 是一个黑绿色小牌片，里面两行：售出 / $价格。
+        // 之前这里把价格单独做成 QLabel，某些字体/布局下会残留一个黑色空框。
+        // 现在只保留一个两行按钮，彻底去掉上方黑框。
         if (auto *lay = mJokerInfoPanel->layout()) {
-            lay->setContentsMargins(6, 5, 6, 6);
-            lay->setSpacing(3);
+            lay->setContentsMargins(0, 0, 0, 0);
+            lay->setSpacing(0);
         }
-        mJokerInfoPanel->setStyleSheet(
-            "background:transparent;"
-            "border:none;"
-        );
-        mJokerInfoPanel->setFixedSize(90, 54);
+        mJokerInfoPanel->setStyleSheet("background:transparent; border:none;");
+        mJokerInfoPanel->setFixedSize(76, 58);
 
-        QFont mf = mCNFont; mf.setPixelSize(12); mf.setBold(true);
-        mJokerInfoMeta->setFont(mf);
-        mJokerInfoMeta->setAlignment(Qt::AlignCenter);
-        mJokerInfoMeta->setStyleSheet(
-            "color:#ffd05a; background:rgba(8,11,12,220);"
-            "border:2px solid #101719; border-radius:8px; padding:0px 4px;"
-        );
-        mJokerInfoMeta->setText(QString("$%1").arg(qMax(1, j.sellValue)));
-        mJokerInfoMeta->setFixedHeight(20);
+        mJokerInfoMeta->clear();
+        mJokerInfoMeta->setVisible(false);
+        mJokerInfoMeta->setFixedHeight(0);
 
-        QFont sf = mCNFont; sf.setPixelSize(13); sf.setBold(true);
+        QFont sf = mCNFont; sf.setPixelSize(15); sf.setBold(true);
         mJokerSellButton->setFont(sf);
-        mJokerSellButton->setText(QString("售出 +$%1").arg(qMax(1, j.sellValue)));
-        mJokerSellButton->setFixedSize(82, 25);
+        mJokerSellButton->setText(QString("售出\n$%1").arg(qMax(1, j.sellValue)));
+        mJokerSellButton->setFixedSize(76, 58);
         mJokerSellButton->setStyleSheet(
-            "QPushButton { background:#ff5b4f; color:white; border:0px;"
-            "border-radius:7px; padding:0px; }"
-            "QPushButton:hover { background:#ff7468; }"
-            "QPushButton:pressed { background:#d94b42; }"
+            "QPushButton { background:#10372f; color:white; border:0px;"
+            "border-radius:11px; padding:3px 6px; text-align:left; }"
+            "QPushButton:hover { background:#145143; }"
+            "QPushButton:pressed { background:#0b2923; }"
         );
     } else {
         if (auto *lay = mJokerInfoPanel->layout()) {
@@ -1910,6 +1908,7 @@ void MainWindow::showJokerInfo(int idx, bool showSellButton)
         mJokerInfoDesc->setFixedWidth(250);
         QFont mf = mCNFont; mf.setPixelSize(13); mf.setBold(false);
         mJokerInfoMeta->setFont(mf);
+        mJokerInfoMeta->setVisible(true);
         mJokerInfoMeta->setStyleSheet("color:#cbd6dc; background:transparent; border:none;");
         mJokerInfoMeta->setMinimumHeight(0);
         mJokerInfoMeta->setMaximumHeight(16777215);
@@ -1944,10 +1943,10 @@ void MainWindow::showJokerInfo(int idx, bool showSellButton)
     if (showSellButton) {
         // 单击后，紧贴小丑右侧出现小型售出牌片；右侧空间不够时放到左侧。
         x = jp.x() + CARD_W + 8;
-        y = jp.y() + CARD_H * 0.5 - 31;
-        if (x + 90 > mSceneW - 6) x = jp.x() - 98;
-        x = qBound<qreal>(6, x, mSceneW - 96);
-        y = qBound<qreal>(6, y, mSceneH - 60);
+        y = jp.y() + CARD_H * 0.5 - 34;
+        if (x + 76 > mSceneW - 6) x = jp.x() - 84;
+        x = qBound<qreal>(6, x, mSceneW - 82);
+        y = qBound<qreal>(6, y, mSceneH - 64);
     } else {
         // 悬浮说明默认放在小丑下方；如果商店面板挡住，就放到小丑上方。
         x = jp.x() + CARD_W / 2.0 - 140;
@@ -2079,12 +2078,8 @@ void MainWindow::showConsumableAction(int idx)
         v->setSpacing(3);
 
         mConsumableActionPrice = new QLabel(mConsumableActionPanel);
-        QFont pf = mCNFont; pf.setPixelSize(12); pf.setBold(true);
-        mConsumableActionPrice->setFont(pf);
-        mConsumableActionPrice->setAlignment(Qt::AlignCenter);
-        mConsumableActionPrice->setStyleSheet(
-            "color:#ffd05a; background:rgba(0,0,0,150); border:1px solid #0d1114; border-radius:7px; padding:1px 4px;"
-        );
+        mConsumableActionPrice->hide();
+        mConsumableActionPrice->setFixedHeight(0);
         v->addWidget(mConsumableActionPrice);
 
         auto *row = new QWidget(mConsumableActionPanel);
@@ -2096,22 +2091,22 @@ void MainWindow::showConsumableAction(int idx)
         mConsumableSellButton = new QPushButton("售出", row);
         for (QPushButton *b : {mConsumableUseButton, mConsumableSellButton}) {
             b->setFont(bf);
-            b->setFixedSize(48, 26);
+            b->setFixedSize(54, 46);
             b->setStyleSheet(
-                "QPushButton { background:#ff5b4f; color:white; border:0px; border-radius:7px; padding:0px; }"
-                "QPushButton:hover { background:#ff7468; }"
-                "QPushButton:pressed { background:#d94b42; }"
+                "QPushButton { background:#10372f; color:white; border:0px; border-radius:9px; padding:2px 4px; text-align:left; }"
+                "QPushButton:hover { background:#145143; }"
+                "QPushButton:pressed { background:#0b2923; }"
             );
             h->addWidget(b);
         }
         mConsumableUseButton->setStyleSheet(
-            "QPushButton { background:#009dff; color:white; border:0px; border-radius:7px; padding:0px; }"
-            "QPushButton:hover { background:#33b0ff; }"
-            "QPushButton:pressed { background:#007acc; }"
+            "QPushButton { background:#0a86cf; color:white; border:0px; border-radius:9px; padding:2px 4px; }"
+            "QPushButton:hover { background:#11a7ff; }"
+            "QPushButton:pressed { background:#006aa3; }"
         );
         v->addWidget(row);
 
-        mConsumableActionPanel->setFixedSize(110, 62);
+        mConsumableActionPanel->setFixedSize(118, 56);
         mConsumableActionProxy = mScene->addWidget(mConsumableActionPanel);
         mConsumableActionProxy->setZValue(910);
 
@@ -2153,14 +2148,15 @@ void MainWindow::showConsumableAction(int idx)
         });
     }
 
-    mConsumableActionPrice->setText(QString("$%1").arg(qMax(1, c.sellValue)));
-    mConsumableSellButton->setText(QString("售出"));
+    mConsumableActionPrice->clear();
+    mConsumableActionPrice->setVisible(false);
+    mConsumableSellButton->setText(QString("售出\n$%1").arg(qMax(1, c.sellValue)));
     QPointF cp = mConsumableItems[idx]->pos();
     qreal x = cp.x() + CARD_W + 8;
     qreal y = cp.y() + CARD_H * 0.5 - 31;
-    if (x + 110 > mSceneW - 6) x = cp.x() - 118;
-    x = qBound<qreal>(6, x, mSceneW - 116);
-    y = qBound<qreal>(6, y, mSceneH - 68);
+    if (x + 118 > mSceneW - 6) x = cp.x() - 126;
+    x = qBound<qreal>(6, x, mSceneW - 124);
+    y = qBound<qreal>(6, y, mSceneH - 62);
     mConsumableActionProxy->setPos(x, y);
     mConsumableActionPanel->show();
 }
@@ -2476,6 +2472,11 @@ void MainWindow::onBlindSelectEntered()
     setContextPage(0);
     setPlayPhaseVisible(false);       // ← 隐藏对局元素
     clearPlayedCards();                // ← 清上轮出牌
+    // BlindSelect 是新局/新盲注入口，除盲注选择外的临时 overlay 都必须消失。
+    if (mShopWidget) mShopWidget->hide();
+    if (mPackOpenWidget) mPackOpenWidget->hide();
+    if (mRoundEndOverlay) mRoundEndOverlay->hide();
+    if (mDeckViewWidget) mDeckViewWidget->hide();
     if (!mBlindSelectWidget || !mPlayPage) return;
 
     const bool skipped = mGameState->justSkipped();
@@ -2506,9 +2507,11 @@ void MainWindow::onBlindStarted()
 {
     if (mDynamicBg) mDynamicBg->setMood(DynamicBackgroundItem::Mood::Default);
     clearFloatingScores();
-    mBlindSelectWidget->hide();
-    mShopWidget->hide();
-    mRoundEndOverlay->hide();
+    if (mBlindSelectWidget) mBlindSelectWidget->hide();
+    if (mShopWidget) mShopWidget->hide();
+    if (mPackOpenWidget) mPackOpenWidget->hide();
+    if (mRoundEndOverlay) mRoundEndOverlay->hide();
+    if (mDeckViewWidget) mDeckViewWidget->hide();
     setContextPage(1);
     setPlayPhaseVisible(true);        // ← 显示对局元素
 
@@ -2643,6 +2646,38 @@ void MainWindow::onPackBuyRequested(int slot)
         if (mDeckViewWidget && mPlayPage)
             mDeckViewWidget->setGeometry(mPlayPage->rect());
     });
+}
+
+void MainWindow::resetTransientOverlaysForNewRun()
+{
+    // 开始新的一局必须把商店、开包、结算、牌组查看、游戏结束等临时界面全部收掉。
+    // 否则这些 QWidget 仍然挂在 mPlayPage 上，即使 GameState 已经进入 BlindSelect，
+    // 旧商店/旧卡包还会盖在动态背景上，看起来像“背景残留”。
+    if (mShopWidget) {
+        mShopWidget->hide();
+        mShopWidget->move(mShopWidget->x(), mPlayPage ? mPlayPage->height() + 20 : mShopWidget->y());
+    }
+    if (mPackOpenWidget) {
+        mPackOpenWidget->hide();
+        mPendingPackHand.clear();
+        mPackFromTag = false;
+    }
+    if (mRoundEndOverlay) mRoundEndOverlay->hide();
+    if (mDeckViewWidget) mDeckViewWidget->hide();
+    hideGameOverOverlay();
+    hideJokerInfo();
+    hideCardInfo();
+    hideConsumableAction();
+    clearFloatingScores();
+    clearObtainedTags();
+    clearPlayedCards();
+    mSelected.clear();
+    mShatteredPlayedIndices.clear();
+    mGameOverHandled = false;
+    mScoringInProgress = false;
+    mEndRoundAnimationDelay = 260;
+    resetScoreFlame();
+    if (mDynamicBg) mDynamicBg->setMood(DynamicBackgroundItem::Mood::BlindSelect);
 }
 
 void MainWindow::setContextPage(int page)
@@ -2900,14 +2935,9 @@ void MainWindow::showGameOverOverlay(bool won)
         hl->addWidget(quit);
         vl->addWidget(row);
         connect(restart, &QPushButton::clicked, this, [this]() {
-            hideGameOverOverlay();
-            mGameOverHandled = false;
-            mScoringInProgress = false;
-            clearObtainedTags();
-            clearPlayedCards();
+            resetTransientOverlaysForNewRun();
             for (auto *c : mHandCards) { if (c->scene()) mScene->removeItem(c); c->deleteLater(); }
             mHandCards.clear();
-            mSelected.clear();
             mGameState->startGame();
             refreshGold();
             refreshCounters();
