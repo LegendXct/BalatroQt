@@ -402,10 +402,13 @@ void PackOpenWidget::onPackCardClicked(CardItem *card)
     if (mSelectedHand.contains(idx)) {
         mSelectedHand.removeAll(idx);
     } else {
-        int limit = qMax(1, maxCurrentSelectionLimit());
-        if (mSelectedHand.size() >= limit) mSelectedHand.removeFirst();
-        mSelectedHand.append(idx);
-        std::sort(mSelectedHand.begin(), mSelectedHand.end());
+        // 和正式出牌手牌一致：选择区本身最多允许 5 张，具体塔罗/幻灵牌
+        // 是否能使用由 selectionValidFor() 决定，不能在点击时强制把已选牌挤掉。
+        // 否则死神、力量、世界/太阳/月亮等开包场景无法先自由选牌再决定使用哪张消耗牌。
+        if (mSelectedHand.size() < qMin(5, mPackHand.size())) {
+            mSelectedHand.append(idx);
+            std::sort(mSelectedHand.begin(), mSelectedHand.end());
+        }
     }
     layoutPackHand();
     refreshOptionUi();

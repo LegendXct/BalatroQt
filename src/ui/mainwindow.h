@@ -27,6 +27,7 @@
 #include "floatingscore.h"
 #include "deckviewwidget.h"
 #include "dynamicbackgrounditem.h"
+#include "splashshaderoverlay.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -105,6 +106,7 @@ private:
     PackOpenWidget *mPackOpenWidget = nullptr;
     DeckViewWidget *mDeckViewWidget = nullptr;
     DynamicBackgroundItem *mDynamicBg = nullptr;
+    SplashShaderOverlay *mSplashOverlay = nullptr;
     PackContent     mPendingPack;        // 当前正在打开的包
     QVector<CardData> mPendingPackHand;  // 开包界面临时翻出的一手牌
     bool mPackFromTag = false;
@@ -236,12 +238,19 @@ private:
     int mDisplayedChips = 0;   // 当前显示中的 chips(动画过程中)
     int mDisplayedMult  = 0;
 
-    // 倍率×筹码 ≥ 目标分数时点燃的旗标，每手清空；用于火焰在分数累计过程中即时出现。
-    bool mFlameTriggered = false;
-    QWidget *mFlameOverlay = nullptr;        // 盖在 chipsRow 上方的火焰层
-    QWidget *mChipsRowWidget = nullptr;      // 引用 chipsRow 用于定位 mFlameOverlay
-    void triggerScoreFlame();                // 立即点火（带原版橙边）
-    void resetScoreFlame();                  // 复位边框与火焰
+    // 原版每次累加分数都重算火焰强度:earned >= required 才点燃,log5 公式控制大小。
+    // 不再用单次触发布尔,真正按"当前 displayed chips × mult"实时驱动。
+    QWidget *mChipFlame = nullptr;       // 蓝色筹码方块上的火焰
+    QWidget *mMultFlame = nullptr;       // 红色倍率方块上的火焰
+    double   mChipFlameTarget = 0.0;
+    double   mMultFlameTarget = 0.0;
+    double   mChipFlameReal   = 0.0;
+    double   mMultFlameReal   = 0.0;
+    QTimer  *mFlameTick = nullptr;
+    QWidget *mChipsRowWidget = nullptr;      // 引用 chipsRow 用于定位火焰
+    void triggerSplashShader();              // 原版 splash.fs 全屏 GPU 溅射(占位)
+    void updateFlameIntensity();
+    void resetScoreFlame();
 
     // 拖拽时记录上一次目标位置，避免每次 dragMoved 都触发 moveTo()
     int mLastJokerDragTo = -1;

@@ -252,13 +252,24 @@ vec4 effect_voucher_like(vec4 tex, vec2 uv, bool booster) {
 }
 
 vec4 effect_debuff(vec4 tex, vec2 uv) {
-    vec4 sat = HSL(tex * 0.8 + vec4(0.2, 0.0, 0.0, tex.a * 0.2));
+    float origA = tex.a;
+    vec4 sat = HSL(tex * 0.8 + 0.2 * vec4(1.0, 0.0, 0.0, tex.a));
     sat.y = 0.5;
     float width = 0.1;
-    bool cross = ((uv.x + uv.y > 1.0 - width && uv.x + uv.y < 1.0 + width) || ((1.0 - uv.x) + uv.y > 1.0 - width && (1.0 - uv.x) + uv.y < 1.0 + width));
-    if (cross) { sat.x = 1.0; sat.y = 0.7; sat.z = 0.8 * sat.z; }
-    else { sat.y *= 0.5; sat.z *= 0.7; }
-    return RGB(sat);
+    bool cross = false;
+    if ((uv.x + uv.y > 1.0 - width && uv.x + uv.y < 1.0 + width) ||
+        ((1.0 - uv.x) + uv.y > 1.0 - width && (1.0 - uv.x) + uv.y < 1.0 + width)) {
+        cross = true;
+        sat.x = 1.0;
+        sat.y = 0.7;
+        sat.z = 0.8 * sat.z;
+    } else {
+        sat.y *= 0.5;
+        sat.z *= 0.7;
+    }
+    vec4 outc = RGB(sat);
+    outc.a = origA;
+    return outc;
 }
 
 vec4 effect_hologram(vec4 tex, vec2 uv) {

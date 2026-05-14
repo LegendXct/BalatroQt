@@ -377,6 +377,15 @@ int Shop::rawCostFor(const ShopOffer &o) const
 
 bool Shop::duplicatesOffer(const ShopOffer &candidate, const QVector<ShopOffer> &existing) const
 {
+    // 原版普通商店不会刷出你当前消耗槽里已经持有的 Tarot/Planet/Spectral，
+    // 逻辑和小丑去重一样；Showman 只影响 Joker，不影响消耗牌。
+    if (candidate.kind == OfferKind::Tarot ||
+        candidate.kind == OfferKind::Planet ||
+        candidate.kind == OfferKind::Spectral) {
+        if (mOwnedConsumables.contains(candidate.consumable))
+            return true;
+    }
+
     for (const ShopOffer &o : existing) {
         if (o.sold) continue;
         if (candidate.kind != o.kind) continue;

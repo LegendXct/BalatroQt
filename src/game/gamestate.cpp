@@ -189,6 +189,13 @@ QVector<JokerType> GameState::ownedJokerTypes() const
     return out;
 }
 
+QVector<ConsumableType> GameState::ownedConsumableTypes() const
+{
+    QVector<ConsumableType> out;
+    for (const Consumable &c : mConsumables) out.append(c.type);
+    return out;
+}
+
 bool GameState::hasJokerDuplicateBypass() const
 {
     // 原版 Showman/马戏团长允许重复小丑。当前项目还没有实现 Showman，
@@ -199,6 +206,7 @@ bool GameState::hasJokerDuplicateBypass() const
 void GameState::syncShopJokerRules()
 {
     mShop.setOwnedJokers(ownedJokerTypes(), hasJokerDuplicateBypass());
+    mShop.setOwnedConsumables(ownedConsumableTypes());
     mShop.setGrosMichelExtinct(mGrosMichelExtinct);
 }
 
@@ -752,6 +760,7 @@ void GameState::rerollShop() {
     if (mGold < cost) return;
 
     mGold -= cost;
+    syncShopJokerRules();
     mShop.onReroll();
     mShop.rerollShopOnly();   // ← 只 reroll 商品区,不动 booster
 

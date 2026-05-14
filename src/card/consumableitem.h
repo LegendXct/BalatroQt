@@ -5,6 +5,9 @@
 #include <QPixmap>
 #include "consumable.h"
 
+class QGraphicsSceneHoverEvent;
+class QGraphicsSceneMouseEvent;
+
 // consumableitem.h
 class ConsumableItem : public QGraphicsObject
 {
@@ -27,12 +30,17 @@ signals:
 
 protected:
     void mousePressEvent(QGraphicsSceneMouseEvent *e) override;
-    void hoverEnterEvent(QGraphicsSceneHoverEvent *) override { mHovered = true;  update(); }
-    void hoverLeaveEvent(QGraphicsSceneHoverEvent *) override { mHovered = false; update(); }
+    void hoverEnterEvent(QGraphicsSceneHoverEvent *e) override;
+    void hoverMoveEvent(QGraphicsSceneHoverEvent *e) override;
+    void hoverLeaveEvent(QGraphicsSceneHoverEvent *e) override;
 
 private:
     Consumable mC;
     bool mHovered = false;
+    double mHoverTiltX = 0.0;
+    double mHoverTiltY = 0.0;
+    void applyHoverTransform();
+    void animateScale(qreal target, int durationMs = 120);
     static QPixmap *sSheet;
 };
 

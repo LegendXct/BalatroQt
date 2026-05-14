@@ -262,6 +262,7 @@ private:
     void applySkippedTag(TagType t, int recursionDepth = 0);
     void applyTagEffectsToShop();
     QVector<JokerType> ownedJokerTypes() const;
+    QVector<ConsumableType> ownedConsumableTypes() const;
     bool hasJokerDuplicateBypass() const;
     void syncShopJokerRules();
     void scoreCard(const CardData &card, HandResult &result, int playedIdx);

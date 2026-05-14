@@ -1,6 +1,9 @@
 #include "consumableitem.h"
 #include <QPainter>
 #include <QGraphicsSceneMouseEvent>
+#include <QtMath>
+#include <QPropertyAnimation>
+#include <QGraphicsSceneHoverEvent>
 #include "../utils/shadereffects.h"
 #include <QCursor>
 #include <QTimer>
@@ -178,14 +181,79 @@ void ConsumableItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidge
     p->setRenderHint(QPainter::SmoothPixmapTransform, false);
     p->drawPixmap(QRect(0, 0, WIDTH, HEIGHT), renderPixmap(mC.type, mC.negative));
 
-    if (mHovered) {
-        p->setPen(QPen(QColor(255, 240, 96, 220), 4));
-        p->setBrush(Qt::NoBrush);
-        p->drawRoundedRect(2, 2, WIDTH - 4, HEIGHT - 4, 10, 10);
-    }
 }
 
 void ConsumableItem::mousePressEvent(QGraphicsSceneMouseEvent *e) {
     emit clicked(this, e->button());
     e->accept();
+}
+
+void ConsumableItem::applyHoverTransform()
+{
+    const qreal cx = WIDTH / 2.0;
+    const qreal cy = HEIGHT / 2.0;
+    const qreal tiltX = qDegreesToRadians(mHoverTiltX);
+    const qreal tiltY = qDegreesToRadians(mHoverTiltY);
+
+    const qreal cosY = std::cos(tiltY);
+    const qreal cosX = std::cos(tiltX);
+    const qreal sinY = std::sin(tiltY);
+    const qreal sinX = std::sin(tiltX);
+
+    QTransform t;
+    t.translate(cx, cy);
+    QTransform persp;
+    persp.setMatrix(
+        cosY,           sinY * sinX,    0.0048 * sinY,
+        0,              cosX,           0.0048 * sinX,
+        0,              0,              1
+    );
+    t = persp * t;
+    t.translate(-cx, -cy);
+    setTransform(t);
+}
+
+void ConsumableItem::hoverEnterEvent(QGraphicsSceneHoverEvent *e)
+{
+    mHovered = true;
+    setTransformOriginPoint(WIDTH / 2.0, HEIGHT / 2.0);
+    setZValue(qMax<qreal>(zValue(), 120));
+    animateScale(1.08, 100);
+    update();
+    QGraphicsObject::hoverEnterEvent(e);
+}
+
+void ConsumableItem::hoverMoveEvent(QGraphicsSceneHoverEvent *e)
+{
+    if (!mHovered) {
+        QGraphicsObject::hoverMoveEvent(e);
+        return;
+    }
+    const qreal nx = e->pos().x() / WIDTH - 0.5;
+    const qreal ny = e->pos().y() / HEIGHT - 0.5;
+    mHoverTiltY = qBound(-10.0, nx * 20.0, 10.0);
+    mHoverTiltX = qBound(-10.0, ny * 20.0, 10.0);
+    applyHoverTransform();
+    QGraphicsObject::hoverMoveEvent(e);
+}
+
+void ConsumableItem::hoverLeaveEvent(QGraphicsSceneHoverEvent *e)
+{
+    mHovered = false;
+    mHoverTiltX = 0.0;
+    mHoverTiltY = 0.0;
+    applyHoverTransform();
+    animateScale(1.0, 110);
+    update();
+    QGraphicsObject::hoverLeaveEvent(e);
+}
+
+void ConsumableItem::animateScale(qreal target, int durationMs)
+{
+    auto *anim = new QPropertyAnimation(this, "scale", this);
+    anim->setDuration(durationMs);
+    anim->setStartValue(scale());
+    anim->setEndValue(target);
+    anim->setEasingCurve(QEasingCurve::OutCubic);
+    anim->start(QAbstractAnimation::DeleteWhenStopped);
 }
