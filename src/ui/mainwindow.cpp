@@ -1624,24 +1624,61 @@ void MainWindow::onHandPlayed()
     mLblHandName ->setText(r.name);
     mLblHandLevel->setText(QString("等级%1").arg(r.level));
 
-    // 新一手开始,先把上一手的火焰目标归零(spring ease 自然熄灭)。
     resetScoreFlame();
 
-    // 原版先亮出牌型的基础筹码/倍率,再逐张牌、小丑实时累加。
     mDisplayedChips = r.baseChips;
     mDisplayedMult  = r.baseMult;
     mLblChips->setText(formatScoreNumber(mDisplayedChips));
     mLblMult ->setText(formatScoreNumber(mDisplayedMult));
-
-    // 无条件按当前 displayed chips×mult 重算火焰强度。
-    // 未达盲注时 target=0,火焰隐藏;达标后 target=log5(earned)-2 渐升。
     updateFlameIntensity();
 
-    double gained = r.chips * r.mult * r.xmult;
-    if (!std::isfinite(gained)) gained = std::numeric_limits<double>::infinity();
+    int gained = static_cast<int>(r.chips * r.mult * r.xmult);
 
-    int delayBase = 420;
+    // ── 提取参与计分的 played 区卡片下标(去重,按 x 排序,对应原版 table.sort by T.x) ──
+    QVector<int> scoringIndices;
+    QSet<int> seen;
+    for (const ScoreEvent &ev : r.events) {
+        if (ev.sourceCardIdx >= 0 && !seen.contains(ev.sourceCardIdx)) {
+            seen.insert(ev.sourceCardIdx);
+            scoringIndices.append(ev.sourceCardIdx);
+        }
+    }
+    std::sort(scoringIndices.begin(), scoringIndices.end(),
+              [this](int a, int b) {
+                  if (a < 0 || a >= mPlayedCards.size()) return false;
+                  if (b < 0 || b >= mPlayedCards.size()) return true;
+                  return mPlayedCards[a]->x() < mPlayedCards[b]->x();
+              });
+
+    // ── 时序参数 ──
+    // 1) onPlayClicked 内 5 张牌 moveTo play 区花了 280ms
+    // 2) 卡到位后, 计分卡 staggered highlight 上升 (对应原版 highlight_card 'up' + delay 0.2)
+    // 3) 全部升起后再开始 score event
+    const int playArrivalMs   = 300;   // 等 onPlayClicked 的 moveTo 完成 + 留一点缓冲
+    const int staggerStepMs   = 80;    // 每张卡之间错开 80ms
+    const int upDurationMs    = 150;   // 单张卡升起动画 150ms
+
+    for (int i = 0; i < scoringIndices.size(); ++i) {
+        int idx = scoringIndices[i];
+        int delay = playArrivalMs + i * staggerStepMs;
+        QTimer::singleShot(delay, this, [this, idx, upDurationMs]() {
+            if (idx < 0 || idx >= mPlayedCards.size()) return;
+            CardItem *c = mPlayedCards[idx];
+            if (!c) return;
+            // 上升 0.2 * CARD_H (HIGHLIGHT_H 原版常量),保持升起状态不下落。
+            QPointF target = c->pos() + QPointF(0, -int(CARD_H * 0.2));
+            c->moveTo(target, upDurationMs);
+        });
+    }
+
+    // 第一个 score event 在 highlight up 全部完成之后再开始,
+    // 给玩家一个清晰的"参与计分的牌已选出"视觉节奏。
+    int highlightDoneMs = playArrivalMs
+                          + qMax(0, scoringIndices.size() - 1) * staggerStepMs
+                          + upDurationMs;
+    int delayBase = highlightDoneMs + 180;   // 180ms 缓冲,对应原版 delay(0.2) + 余量
     int delayStep = 230;
+
     for (int ei = 0; ei < r.events.size(); ++ei) {
         const ScoreEvent ev = r.events[ei];
         int delay = delayBase + ei * delayStep;
@@ -1653,7 +1690,7 @@ void MainWindow::onHandPlayed()
     int finalDelay = delayBase + r.events.size() * delayStep + 260;
     QTimer::singleShot(finalDelay, this, [this, r, gained, finalDelay]() {
         mDisplayedChips = r.chips;
-        mDisplayedMult  = r.mult * r.xmult;
+        mDisplayedMult  = qRound(r.mult * r.xmult);
         mLblChips->setText(formatScoreNumber(r.chips));
         mLblMult ->setText(formatScoreNumber(mDisplayedMult));
         updateFlameIntensity();
@@ -2663,6 +2700,7 @@ void MainWindow::onBlindStarted()
 {
     if (mDynamicBg) mDynamicBg->setMood(DynamicBackgroundItem::Mood::Default);
     clearFloatingScores();
+    mHandY = mHandYNormal;
     if (mBlindSelectWidget) mBlindSelectWidget->hide();
     if (mShopWidget) mShopWidget->hide();
     if (mPackOpenWidget) mPackOpenWidget->hide();
@@ -2678,7 +2716,6 @@ void MainWindow::onBlindStarted()
     refreshJokerSlots();
     refreshConsumableSlots();
     clearPlayedCards();
-    mHandY = mHandYNormal;
     mLblChips->setText("0");
     mLblMult ->setText("0");
     mDisplayedChips = 0;
@@ -2987,7 +3024,7 @@ void MainWindow::triggerSplashShader()
 void MainWindow::spawnFloatingText(const QPointF &nearPos, const QString &text, const QColor &color)
 {
     auto *fs = new FloatingScore(text, color, mPixelFont);
-    fs->setZValue(100);
+    fs->setZValue(700);
     QPointF basePos = nearPos + QPointF(CARD_W / 2, -20);
     fs->setPos(basePos);
     mScene->addItem(fs);
@@ -3065,11 +3102,10 @@ void MainWindow::animateScoreTotalThenFinalize(double gained, int /*delayAfterEv
         animatePlayedCardsToDiscardThen([this]() {
             mGameState->finalizePlayedHand();
             mScoringInProgress = false;
+
             if (mGameState->phase() == GamePhase::Blind) {
                 if (mBtnPlay) mBtnPlay->setEnabled(true);
                 if (mBtnDiscard) mBtnDiscard->setEnabled(true);
-
-                // 恢复 hand 位置 + 重排手牌 + 让按钮飞回。8/8 标签随 hand 上移。
                 mHandY = mHandYNormal;
                 showPlayControlsAfterScoring();
                 layoutHandCards();
@@ -3307,6 +3343,7 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev)
 
     if (sourceCard) {
         if (ev.kind == ScoreEventKind::GlassShatter) {
+            // 玻璃牌碎裂:水平 shake (原版 card_eval_status_text 内部 + glass 特殊处理)
             sourceCard->juiceUp(1.28, 260);
             auto *shake = new QSequentialAnimationGroup(sourceCard);
             QPointF base = sourceCard->pos();
@@ -3325,25 +3362,9 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev)
             shake->addAnimation(back);
             back->setParent(shake);
             shake->start(QAbstractAnimation::DeleteWhenStopped);
-        } else if (isHeldCardEvent || ev.kind == ScoreEventKind::RedSealRetrigger || ev.kind == ScoreEventKind::DollarGain || ev.kind == ScoreEventKind::BlueSealPlanet) {
-            sourceCard->juiceUp(1.18, 210);
         } else {
-            QPointF base = sourceCard->pos();
-            auto *seq = new QSequentialAnimationGroup(sourceCard);
-            auto *up = new QPropertyAnimation(sourceCard, "pos");
-            up->setDuration(90);
-            up->setStartValue(base);
-            up->setEndValue(base + QPointF(0, -26));
-            up->setEasingCurve(QEasingCurve::OutCubic);
-            auto *down = new QPropertyAnimation(sourceCard, "pos");
-            down->setDuration(140);
-            down->setStartValue(base + QPointF(0, -26));
-            down->setEndValue(base);
-            down->setEasingCurve(QEasingCurve::OutBounce);
-            seq->addAnimation(up);
-            seq->addAnimation(down);
-            up->setParent(seq); down->setParent(seq);
-            seq->start(QAbstractAnimation::DeleteWhenStopped);
+            // 原版 card_eval_status_text 内对源卡只做 card:juice_up(0.6, 0.1) 缩放脉冲,
+            // 不做位置上下蹦动。卡片在 onHandPlayed 阶段已 highlight 升起并保持。
             sourceCard->juiceUp(1.18, 210);
         }
     }
