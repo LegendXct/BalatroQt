@@ -63,6 +63,8 @@ public:
     const QVector<Joker> &jokers() const {return mJokers;}
     bool hasJokerType(JokerType t) const;
     int gold() const {return mGold;}
+    int pendingRoundPayout() const { return mPendingRoundPayout; }
+    bool claimRoundPayout();
     int handsLeft() const {return mHandsLeft;}
     int discardLeft() const {return mDiscardLeft;}
     double score() const {return mScore;}
@@ -72,7 +74,7 @@ public:
     int currentBlindStartingHands() const { return mBlindStartingHands; }
     BlindType blindType() const {return mBlindType;}
     GamePhase phase() const {return mPhase;}
-    void addGold(int amount) {mGold += amount; emit goldChanged();}
+    void addGold(int amount) { mGold += amount; if (!mSuppressGoldSignal) emit goldChanged(); }
     const HandResult &lastResult() const{return mLastResult;}
     void sortHandByRank();
     void sortHandBySuit();
@@ -198,6 +200,8 @@ private:
     double mPendingHandScore = 0.0;
     QVector<int> mPendingPlayedIndices;
     QVector<bool> mPendingShattered;
+    int mPendingRoundPayout = 0; // 胜利结算先暂存，点击“提现”后再真正加到金币
+    bool mSuppressGoldSignal = false; // 回合末临时计算提现金额时，避免提前刷新左侧金币
     void finishWinningRound();
 
     int mBlindIdx = 0;

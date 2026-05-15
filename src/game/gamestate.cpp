@@ -575,10 +575,13 @@ void GameState::finalizePlayedHand()
 void GameState::finishWinningRound()
 {
     const HandResult result = mLastResult;
+    const int goldBeforeCashout = mGold;
+    mPendingRoundPayout = 0;
+    mSuppressGoldSignal = true;
 
     // 原版 end_of_round 阶段也走“先看这张手牌有没有效果，再由红蜡封/Mime 追加 repetition”。
     // 这里使用解析后的 Mime 数量，Blueprint / Brainstorm 指向 Mime 时也会生效。
-    // UI 事件只负责动画提示；实际金币/星球牌仍在这里立刻结算，避免破坏原有流程。
+    // UI 事件只负责动画提示；金币先进入待提现缓存，点击“提现”后再真正加到账户。
     const int mimeRetriggers = countResolvedJokersOfType(mJokers, JokerType::Mime);
     QVector<ScoreEvent> endRoundEvents;
 
@@ -638,6 +641,13 @@ void GameState::finishWinningRound()
     int interest = qMin(mGold / 5, mInterestCap / 5);
     mGold += interest;
 
+    // 结算窗口弹出前不直接改变左侧金币。
+    // 上面仍按原有顺序临时计算所有回合末金币变化，保证利息、金牌、
+    // 投资标签/小丑等逻辑和原流程一致；随后把差额存入待提现缓存。
+    mPendingRoundPayout = mGold - goldBeforeCashout;
+    mGold = goldBeforeCashout;
+    mSuppressGoldSignal = false;
+
     mPhase = GamePhase::Shop;
     syncShopJokerRules();
     mShop.roll();
@@ -656,6 +666,15 @@ void GameState::finishWinningRound()
     applyTagEffectsToShop();
     emit goldChanged();
     emit roundWon(blindReward, handBonus, interest);
+}
+
+bool GameState::claimRoundPayout()
+{
+    if (mPendingRoundPayout == 0) return false;
+    mGold += mPendingRoundPayout;
+    mPendingRoundPayout = 0;
+    emit goldChanged();
+    return true;
 }
 
 
@@ -1627,6 +1646,8 @@ void GameState::startGame()
     mPendingPlayedIndices.clear();
     mPendingShattered.clear();
     mGold = Constants::INITIAL_GOLD;
+    mPendingRoundPayout = 0;
+    mSuppressGoldSignal = false;
     mAnte = 1;
     mScore = 0;
     mJokers.clear();
@@ -1705,6 +1726,8 @@ void GameState::startBlind(BlindType type)
 {
     mBlindType = type;
     mScore = 0;
+    mPendingRoundPayout = 0;
+    mSuppressGoldSignal = false;
     mHandsLeft = qMax(1, Constants::INITIAL_HANDS + mExtraHandsPerRound);
     mBlindStartingHands = mHandsLeft;
     mDNAUsedThisBlind = false;

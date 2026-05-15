@@ -20,6 +20,7 @@
 #include <QPointer>
 #include <QVariantAnimation>
 #include <QGraphicsDropShadowEffect>
+#include <QColor>
 #include <QProgressBar>
 #include <QDialog>
 #include <QTabWidget>
@@ -51,14 +52,19 @@ static QPushButton *makeBtn(const QString &text, const QString &bg, const QStrin
     QPushButton *btn = new QPushButton(text, parent);
     btn->setFixedHeight(h);
     btn->setFont(font);
+    btn->setCursor(Qt::PointingHandCursor);
     btn->setStyleSheet(QString(
                            "QPushButton {"
-                           " background: %1; color: white;"
-                           " border: none; border-radius: 8px; font-size: 16px;"
+                           " background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %2, stop:0.52 %1, stop:1 rgba(0,0,0,80));"
+                           " color:white; border:2px solid rgba(255,255,255,70);"
+                           " border-radius:11px; font-size:16px; font-weight:bold; padding:4px 8px;"
                            "}"
-                           "QPushButton:hover { background: %2; }"
-                           "QPushButton:pressed { background: %2; }"
-                           "QPushButton:disabled { background: #333; color: #666; }"
+                           "QPushButton:hover {"
+                           " background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #ffffff, stop:0.04 %2, stop:1 %1);"
+                           " border:2px solid rgba(255,255,255,150);"
+                           "}"
+                           "QPushButton:pressed { background:%1; padding-top:6px; }"
+                           "QPushButton:disabled { background:#2b3032; color:#758083; border:2px solid #3b4447; }"
                            ).arg(bg, hover));
     return btn;
 }
@@ -99,7 +105,7 @@ static QWidget *makeInfoCard(const QString &title, const QString &body, const QF
     auto *box = new QWidget(parent);
     box->setAttribute(Qt::WA_StyledBackground, true);
     box->setStyleSheet(QString(
-                           "background:rgba(42,57,60,235); border:2px solid %1; border-radius:12px;"
+                           "background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 rgba(50,67,71,240), stop:1 rgba(24,34,37,240)); border:2px solid %1; border-radius:14px;"
                            ).arg(accent));
     auto *v = new QVBoxLayout(box);
     v->setContentsMargins(12, 8, 12, 8);
@@ -240,7 +246,7 @@ MainWindow::MainWindow(QWidget *parent)
     // ── 右半边容器:绿色牌桌永远显示 ──
     mPlayPage = new QWidget;
     mPlayPage->setAttribute(Qt::WA_StyledBackground, true);
-    mPlayPage->setStyleSheet("background: #2a3144;");
+    mPlayPage->setStyleSheet("background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #30384d, stop:1 #202839);");
     setupScene();
     setupSceneButtons();
     {
@@ -260,7 +266,7 @@ MainWindow::MainWindow(QWidget *parent)
     // ── 整体 central:左面板 + 右半边,横向并列 ──
     auto *container = new QWidget;
     container->setAttribute(Qt::WA_StyledBackground, true);
-    container->setStyleSheet("background: #1a2024;");
+    container->setStyleSheet("background:#11181b;");
     auto *cl = new QHBoxLayout(container);
     cl->setContentsMargins(8, 8, 0, 8);
     cl->setSpacing(0);
@@ -312,7 +318,7 @@ void MainWindow::setupLeftPanel() {
     mLeftPanel->setFixedWidth(mLeftW);
     mLeftPanel->setAttribute(Qt::WA_StyledBackground, true);
     mLeftPanel->setStyleSheet(
-        "QWidget#LeftPanel { background: rgba(31,39,42,238); border: none; border-radius: 0px; }"
+        "QWidget#LeftPanel { background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 rgba(38,49,53,245), stop:1 rgba(16,24,27,245)); border-right:2px solid rgba(132,166,168,120); border-radius: 0px; }"
         "QWidget#LeftPanel QWidget { border: none; }"
         "QWidget#LeftPanel QLabel { border: none; }"
         "QWidget#LeftPanel QPushButton { border: none; }"
@@ -355,7 +361,7 @@ void MainWindow::setupLeftPanel() {
     // 页面 1: Blind
     mCtxBlind = new QWidget;
     mCtxBlind->setAttribute(Qt::WA_StyledBackground, true);
-    mCtxBlind->setStyleSheet("background:#374244; border:none; border-radius:8px;");
+    mCtxBlind->setStyleSheet("background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #46555a, stop:1 #2b373b); border:2px solid rgba(255,255,255,45); border-radius:13px;");
     {
         auto *hbl = new QHBoxLayout(mCtxBlind);
         hbl->setContentsMargins(10, 8, 10, 8);
@@ -433,7 +439,7 @@ void MainWindow::setupLeftPanel() {
     QWidget *scoreBox = new QWidget(mLeftPanel);
     scoreBox->setFixedHeight(88);
     scoreBox->setAttribute(Qt::WA_StyledBackground, true);
-    scoreBox->setStyleSheet("background:#374244; border:none; border-radius:8px;");
+    scoreBox->setStyleSheet("background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #46555a, stop:1 #2b373b); border:2px solid rgba(255,255,255,45); border-radius:13px;");
 
     auto *scoreVBox = new QVBoxLayout(scoreBox);
     scoreVBox->setContentsMargins(10, 6, 10, 8);
@@ -685,7 +691,7 @@ void MainWindow::setupLeftPanel() {
         dlg.setWindowTitle("比赛信息");
         dlg.resize(qMin(960, int(mWinW * 0.60)), qMin(690, int(mWinH * 0.68)));
         dlg.setStyleSheet(
-            "QDialog { background:rgba(27,43,45,246); border:4px solid #dbe9e7; border-radius:18px; }"
+            "QDialog { background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 rgba(43,60,63,248), stop:1 rgba(18,31,34,248)); border:4px solid #dbe9e7; border-radius:20px; }"
             "QLabel { color:white; background:transparent; border:none; }"
             "QPushButton { font-weight:bold; border:none; }"
             );
@@ -704,7 +710,10 @@ void MainWindow::setupLeftPanel() {
         arrow->setAlignment(Qt::AlignCenter);
         arrow->setFixedSize(36, 26);
         arrow->setStyleSheet("color:#ff5f55;");
-        topL->addWidget(arrow, 0, Qt::AlignLeft);
+        // 不把箭头交给 layout 管理，否则初始位置容易被 layout 拉回最左侧。
+        // 只预留一行高度，然后用 move() 精确指向当前 tab 的中心。
+        arrow->move(0, 0);
+        topL->addSpacing(26);
         QWidget *tabRow = new QWidget(top);
         auto *tabL = new QHBoxLayout(tabRow);
         tabL->setContentsMargins(70,0,70,0);
@@ -716,23 +725,25 @@ void MainWindow::setupLeftPanel() {
         pages->setStyleSheet("background:transparent; border:none;");
         root->addWidget(pages, 1);
 
+        auto moveArrowToTab = [arrow](QPushButton *tab) {
+            if (!arrow || !tab || !arrow->parentWidget()) return;
+            const QPoint center = tab->mapTo(arrow->parentWidget(), QPoint(tab->width() / 2, 0));
+            arrow->move(center.x() - arrow->width() / 2, arrow->y());
+        };
+
         auto makeTab = [&](const QString &txt, int pageIdx) {
             auto *b = new QPushButton(txt, tabRow);
             QFont f = mCNFont; f.setPixelSize(19); f.setBold(true);
             b->setFont(f);
             b->setFixedHeight(50);
             b->setStyleSheet(
-                "QPushButton { background:#f04f47; color:white; border-radius:9px; padding:8px 24px; }"
-                "QPushButton:hover { background:#ff665e; }"
-                "QPushButton:pressed { background:#c63f38; }"
+                "QPushButton { background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #ff7a70, stop:1 #d63f39); color:white; border:2px solid rgba(255,255,255,70); border-radius:12px; padding:8px 24px; }"
+                "QPushButton:hover { background:#ff756d; border:2px solid rgba(255,255,255,150); }"
+                "QPushButton:pressed { background:#bb342f; }"
                 );
-            connect(b, &QPushButton::clicked, this, [pages, pageIdx, arrow, b]() {
+            connect(b, &QPushButton::clicked, this, [pages, pageIdx, moveArrowToTab, b]() {
                 pages->setCurrentIndex(pageIdx);
-                if (arrow && b && arrow->parentWidget()) {
-                    const QPoint p = b->mapTo(arrow->parentWidget(),
-                                              QPoint(b->width() / 2 - arrow->width() / 2, 0));
-                    arrow->move(p.x(), arrow->y());
-                }
+                QTimer::singleShot(0, b, [moveArrowToTab, b]() { moveArrowToTab(b); });
             });
             tabL->addWidget(b, 1);
             return b;
@@ -741,7 +752,7 @@ void MainWindow::setupLeftPanel() {
         auto makeDarkPage = [&](QWidget *parent) {
             auto *w = new QWidget(parent);
             w->setAttribute(Qt::WA_StyledBackground, true);
-            w->setStyleSheet("background:rgba(31,48,50,230); border:3px solid #132023; border-radius:14px;");
+            w->setStyleSheet("background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 rgba(39,58,61,235), stop:1 rgba(16,27,30,235)); border:3px solid rgba(7,14,16,230); border-radius:16px;");
             return w;
         };
         auto makeHandRow = [&](QWidget *parent, const QString &level, const QString &name,
@@ -749,7 +760,7 @@ void MainWindow::setupLeftPanel() {
             QWidget *row = new QWidget(parent);
             row->setFixedHeight(48);
             row->setAttribute(Qt::WA_StyledBackground, true);
-            row->setStyleSheet("background:rgba(226,232,226,235); border:2px solid #bcd3cc; border-radius:11px;");
+            row->setStyleSheet("background:qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 rgba(235,243,239,240), stop:1 rgba(199,218,212,235)); border:2px solid #d7e9e5; border-radius:12px;");
             auto *h = new QHBoxLayout(row);
             h->setContentsMargins(8,4,8,4);
             h->setSpacing(8);
@@ -859,17 +870,17 @@ void MainWindow::setupLeftPanel() {
         QVector<QPushButton*> tabButtons;
         tabButtons << makeTab("牌型", 0) << makeTab("盲注", 1) << makeTab("优惠券", 2) << makeTab("赌注", 3);
         pages->setCurrentIndex(0);
-        QTimer::singleShot(0, &dlg, [arrow, firstTab = tabButtons.value(0)]() {
-            if (!arrow || !firstTab || !arrow->parentWidget()) return;
-            const QPoint p = firstTab->mapTo(arrow->parentWidget(),
-                                             QPoint(firstTab->width() / 2 - arrow->width() / 2, 0));
-            arrow->move(p.x(), arrow->y());
+        QTimer::singleShot(0, &dlg, [moveArrowToTab, firstTab = tabButtons.value(0)]() {
+            moveArrowToTab(firstTab);
+        });
+        QTimer::singleShot(80, &dlg, [moveArrowToTab, firstTab = tabButtons.value(0)]() {
+            moveArrowToTab(firstTab);
         });
 
         auto *back = new QPushButton("返回", &dlg);
         QFont bf = mCNFont; bf.setPixelSize(21); bf.setBold(true); back->setFont(bf);
         back->setFixedHeight(46);
-        back->setStyleSheet("QPushButton { background:#fda200; color:white; border:none; border-radius:9px; } QPushButton:hover { background:#ffb730; }");
+        back->setStyleSheet("QPushButton { background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #ffc45b, stop:1 #e58c00); color:white; border:2px solid #ffe2a0; border-radius:12px; } QPushButton:hover { background:#ffb730; }");
         connect(back, &QPushButton::clicked, &dlg, &QDialog::accept);
         root->addWidget(back);
         dlg.exec();
@@ -890,7 +901,7 @@ void MainWindow::setupLeftPanel() {
     QWidget *handsRow = new QWidget(rightCol);
     handsRow->setFixedHeight(66);
     handsRow->setAttribute(Qt::WA_StyledBackground, true);
-    handsRow->setStyleSheet("background:#374244; border:none; border-radius:8px;");
+    handsRow->setStyleSheet("background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #46555a, stop:1 #2b373b); border:2px solid rgba(255,255,255,38); border-radius:13px;");
     auto *hrl = new QHBoxLayout(handsRow);
     hrl->setContentsMargins(8, 4, 8, 4);
     hrl->setSpacing(4);
@@ -920,7 +931,7 @@ void MainWindow::setupLeftPanel() {
     QWidget *goldRow = new QWidget(rightCol);
     goldRow->setFixedHeight(48);
     goldRow->setAttribute(Qt::WA_StyledBackground, true);
-    goldRow->setStyleSheet("background:#374244; border:none; border-radius:8px;");
+    goldRow->setStyleSheet("background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #3b4a3f, stop:1 #222e27); border:2px solid rgba(243,185,88,80); border-radius:13px;");
     auto *gbl = new QHBoxLayout(goldRow);
     gbl->setContentsMargins(10, 4, 10, 4);
     gbl->setSpacing(8);
@@ -938,7 +949,7 @@ void MainWindow::setupLeftPanel() {
     QWidget *anteBox = new QWidget(anteRow2);
     anteBox->setFixedHeight(54);
     anteBox->setAttribute(Qt::WA_StyledBackground, true);
-    anteBox->setStyleSheet("background:#374244; border:none; border-radius:8px;");
+    anteBox->setStyleSheet("background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #46555a, stop:1 #2b373b); border:2px solid rgba(255,255,255,38); border-radius:13px;");
     auto *avbl = new QVBoxLayout(anteBox);
     avbl->setContentsMargins(6, 3, 6, 3);
     avbl->setSpacing(0);
@@ -952,7 +963,7 @@ void MainWindow::setupLeftPanel() {
     QWidget *roundBox = new QWidget(anteRow2);
     roundBox->setFixedHeight(54);
     roundBox->setAttribute(Qt::WA_StyledBackground, true);
-    roundBox->setStyleSheet("background:#374244; border:none; border-radius:8px;");
+    roundBox->setStyleSheet("background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #46555a, stop:1 #2b373b); border:2px solid rgba(255,255,255,38); border-radius:13px;");
     auto *rvbl = new QVBoxLayout(roundBox);
     rvbl->setContentsMargins(6, 3, 6, 3);
     rvbl->setSpacing(0);
@@ -1307,8 +1318,13 @@ void MainWindow::refreshHand() {
                     this, &MainWindow::onHandCardDragReleased);
             connect(match, &CardItem::hoverChanged,
                     this, [this](CardItem *c, bool hovered) {
-                        if (hovered) showCardInfo(c);
-                        else hideCardInfo();
+                        if (hovered) {
+                            c->setZValue(720);
+                            showCardInfo(c);
+                        } else {
+                            hideCardInfo();
+                            layoutHandCards();
+                        }
                     });
         } else {
             match->setCardData(hc);
@@ -1566,30 +1582,35 @@ void MainWindow::showCardInfo(CardItem *card)
         mCardInfoPanel = new QWidget;
         mCardInfoPanel->setAttribute(Qt::WA_StyledBackground, true);
         mCardInfoPanel->setStyleSheet(
-            "background:rgba(26,31,35,238);"
-            "border:2px solid #6fd3ff;"
-            "border-radius:10px;"
+            "background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 rgba(34,44,47,248), stop:1 rgba(12,20,23,248));"
+            "border:3px solid #6fd3ff;"
+            "border-radius:14px;"
             );
+        auto *infoGlow = new QGraphicsDropShadowEffect(mCardInfoPanel);
+        infoGlow->setBlurRadius(24);
+        infoGlow->setOffset(0, 0);
+        infoGlow->setColor(QColor(0, 0, 0, 180));
+        mCardInfoPanel->setGraphicsEffect(infoGlow);
         auto *v = new QVBoxLayout(mCardInfoPanel);
-        v->setContentsMargins(12, 10, 12, 10);
-        v->setSpacing(6);
+        v->setContentsMargins(14, 11, 14, 12);
+        v->setSpacing(7);
 
         mCardInfoName = new QLabel(mCardInfoPanel);
         QFont nf = mCNFont; nf.setPixelSize(18); nf.setBold(true);
         mCardInfoName->setFont(nf);
-        mCardInfoName->setStyleSheet("color:white; background:transparent;");
+        mCardInfoName->setStyleSheet("color:#ffe9a8; background:transparent;");
         mCardInfoName->setAlignment(Qt::AlignCenter);
         v->addWidget(mCardInfoName);
 
         mCardInfoDesc = new QLabel(mCardInfoPanel);
         QFont df = mCNFont; df.setPixelSize(13);
         mCardInfoDesc->setFont(df);
-        mCardInfoDesc->setStyleSheet("color:#d6edf7; background:transparent;");
+        mCardInfoDesc->setStyleSheet("color:#eefcff; background:transparent; line-height:130%;");
         mCardInfoDesc->setWordWrap(true);
         mCardInfoDesc->setAlignment(Qt::AlignLeft | Qt::AlignTop);
         v->addWidget(mCardInfoDesc);
 
-        mCardInfoPanel->setFixedWidth(260);
+        mCardInfoPanel->setFixedWidth(272);
         mCardInfoProxy = mScene->addWidget(mCardInfoPanel);
         mCardInfoProxy->setZValue(900);
     }
@@ -2948,6 +2969,13 @@ void MainWindow::onNextBlindClicked()
 {
     clearFloatingScores();
 
+    // “提现”按钮现在负责真正把本回合奖励打到金币上；
+    // 回合胜利时只展示结算窗口，不提前修改金币数字。
+    if (mRoundEndOverlay && mRoundEndOverlay->isVisible()) {
+        mGameState->claimRoundPayout();
+        refreshGold();
+    }
+
     auto enterShop = [this]() {
         setContextPage(2);
         setPlayPhaseVisible(false);
@@ -2972,12 +3000,15 @@ void MainWindow::onRoundWon(int blindReward, int handBonus, int interest)
     case BlindType::Boss:  chipRow = bossChipRow(mGameState->bossEffect()); break;
     }
 
+    const int pendingPayout = mGameState->pendingRoundPayout();
+    const int extraBonus = pendingPayout - blindReward - handBonus - interest;
     mRoundEndOverlay->setData(
         chipRow,
         mGameState->targetScore(),
         blindReward,
         mGameState->handsLeft(),  handBonus,
-        interest
+        interest,
+        extraBonus, pendingPayout
         );
 
     const int delay = mEndRoundAnimationDelay;

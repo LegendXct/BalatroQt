@@ -6,6 +6,8 @@
 #include <cmath>
 #include <algorithm>
 #include <QEasingCurve>
+#include <QGraphicsDropShadowEffect>
+#include <QColor>
 
 
 static QString formatLargeNumber(double num)
@@ -38,21 +40,28 @@ RoundEndOverlay::RoundEndOverlay(const QFont &cnFont, const QFont &pixelFont, QW
     : QWidget(parent), mCNFont(cnFont), mPixelFont(pixelFont)
 {
     setAttribute(Qt::WA_StyledBackground, true);
-    setStyleSheet("background: rgba(0, 0, 0, 100);");
+    setStyleSheet("background: rgba(0, 0, 0, 115);");
     buildUi();
 }
 
 void RoundEndOverlay::buildUi()
 {
-    // 主面板:#374244 圆角,居中
+    // 主面板：更接近 Balatro 的深色卡片 + 轻微发光边框。
     auto *panel = new QWidget(this);
     panel->setAttribute(Qt::WA_StyledBackground, true);
     panel->setObjectName("rePanel");
     panel->setStyleSheet(
-        "QWidget#rePanel { background:#374244; border-radius:14px; "
-        "                  border: 2px solid #4f6367; }"
+        "QWidget#rePanel {"
+        " background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #425055, stop:1 #273338);"
+        " border-radius:18px; border: 3px solid #6f8589;"
+        "}"
         );
-    panel->setFixedSize(560, 460);
+    panel->setFixedSize(580, 492);
+    auto *panelGlow = new QGraphicsDropShadowEffect(panel);
+    panelGlow->setBlurRadius(34);
+    panelGlow->setOffset(0, 0);
+    panelGlow->setColor(QColor(0, 0, 0, 170));
+    panel->setGraphicsEffect(panelGlow);
 
     // 居中 panel
     auto *outer = new QVBoxLayout(this);
@@ -71,9 +80,12 @@ void RoundEndOverlay::buildUi()
     mCashOutBtn->setFont(btnF);
     mCashOutBtn->setCursor(Qt::PointingHandCursor);
     mCashOutBtn->setStyleSheet(
-        "QPushButton { background:#fda200; color:white; border:none;"
-        "              border-radius: 10px; padding: 4px; }"
-        "QPushButton:hover { background:#ffb730; }"
+        "QPushButton {"
+        " background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #ffc756, stop:0.5 #fda200, stop:1 #d77b00);"
+        " color:white; border:3px solid #ffe49a; border-radius: 13px; padding: 4px;"
+        "}"
+        "QPushButton:hover { background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #ffe18a, stop:1 #ffa817); }"
+        "QPushButton:pressed { background:#cf7100; }"
         );
     connect(mCashOutBtn, &QPushButton::clicked, this, &RoundEndOverlay::nextClicked);
     vbl->addWidget(mCashOutBtn);
@@ -82,8 +94,10 @@ void RoundEndOverlay::buildUi()
     auto makeRow = [&](QLabel **leftNumOut, const QString &numColor,
                        const QString &desc, QLabel **rightSymOut) {
         auto *row = new QWidget(panel);
+        row->setAttribute(Qt::WA_StyledBackground, true);
+        row->setStyleSheet("background:rgba(21,30,33,100); border-radius:9px;");
         auto *hbl = new QHBoxLayout(row);
-        hbl->setContentsMargins(8, 0, 8, 0);
+        hbl->setContentsMargins(10, 2, 10, 2);
         hbl->setSpacing(8);
 
         // 左侧:大数字
@@ -196,6 +210,12 @@ void RoundEndOverlay::buildUi()
     vbl->addWidget(makeRow(&mInterestNumLbl, "#f3b958",
                            "每$5获得1利息(最高 5)", &mInterestRewardSym));
 
+    // ── 金牌/投资标签/回合末小丑等额外金币，通常为 0，非 0 时显示。 ──
+    mExtraRow = makeRow(&mExtraNumLbl, "#d8b4ff",
+                        "额外回合奖励", &mExtraRewardSym);
+    mExtraRow->hide();
+    vbl->addWidget(mExtraRow);
+
     vbl->addStretch();
 }
 
@@ -242,9 +262,10 @@ void RoundEndOverlay::hideToBottom(std::function<void()> after)
 }
 
 void RoundEndOverlay::setData(int blindChipRow, double targetScore, int blindReward,
-                              int handsLeft, int handBonus, int interest)
+                              int handsLeft, int handBonus, int interest,
+                              int extraBonus, int totalPayout)
 {
-    int total = blindReward + handBonus + interest;
+    int total = (totalPayout >= 0) ? totalPayout : (blindReward + handBonus + interest + extraBonus);
     mCashOutBtn->setText(QString("提现: $%1").arg(total));
 
     QPixmap sheet(":/textures/images/BlindChips.png");
@@ -261,5 +282,18 @@ void RoundEndOverlay::setData(int blindChipRow, double targetScore, int blindRew
     mHandsRewardSym->setText(QString(handBonus, '$'));
 
     mInterestNumLbl->setText(QString::number(interest));
-    mInterestRewardSym->setText(QString(interest, '$'));
+    mInterestRewardSym->setText(QString(qMax(0, interest), '$'));
+
+    if (mExtraRow && mExtraNumLbl && mExtraRewardSym) {
+        if (extraBonus != 0) {
+            mExtraRow->show();
+            mExtraNumLbl->setText(QString::number(extraBonus));
+            const QString sign = extraBonus < 0 ? "-" : "";
+            mExtraRewardSym->setText(sign + QString(qAbs(extraBonus), '$'));
+        } else {
+            mExtraRow->hide();
+            mExtraNumLbl->clear();
+            mExtraRewardSym->clear();
+        }
+    }
 }

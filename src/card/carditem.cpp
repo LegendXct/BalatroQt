@@ -1,5 +1,6 @@
 #include "carditem.h"
 #include <QPainter>
+#include <QColor>
 #include <QGraphicsSceneMouseEvent>
 #include <QPropertyAnimation>
 #include <QCursor>
@@ -72,6 +73,7 @@ CardItem::CardItem(const CardData &data, QGraphicsItem *parent)
 {
     setAcceptHoverEvents(true);
     setCursor(Qt::PointingHandCursor);
+    setTransformOriginPoint(WIDTH / 2.0, HEIGHT / 2.0);
     QObject::connect(this, &QObject::destroyed, [ptr = this]() { sAnimatedCards.remove(ptr); });
 
     if (cardNeedsShaderTick(mData)) {
@@ -81,13 +83,46 @@ CardItem::CardItem(const CardData &data, QGraphicsItem *parent)
 }
 
 QRectF CardItem::boundingRect() const {
-    return QRectF(0, 0, WIDTH, HEIGHT);
+    // 预留外发光和悬浮描边空间，避免 hover/selected 效果被裁掉。
+    return QRectF(-10, -12, WIDTH + 20, HEIGHT + 24);
 }
 
 void CardItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) {
     painter->setRenderHint(QPainter::SmoothPixmapTransform, false);
     if (mData.faceUp) paintFront(painter);
     else paintBack(painter);
+
+    if (mHovered || mSelected) {
+        painter->save();
+        painter->setRenderHint(QPainter::Antialiasing, true);
+
+        const QColor accent = mSelected ? QColor(255, 190, 64) : QColor(82, 215, 255);
+        const QRectF outer(-6.5, -7.5, WIDTH + 13.0, HEIGHT + 15.0);
+        for (int i = 0; i < 3; ++i) {
+            QColor glow = accent;
+            glow.setAlpha(mSelected ? 52 - i * 12 : 42 - i * 10);
+            QPen glowPen(glow, 10 - i * 2);
+            glowPen.setJoinStyle(Qt::RoundJoin);
+            painter->setPen(glowPen);
+            painter->setBrush(Qt::NoBrush);
+            painter->drawRoundedRect(outer.adjusted(i * 1.8, i * 1.8, -i * 1.8, -i * 1.8), 14, 14);
+        }
+
+        QColor edge = accent;
+        edge.setAlpha(mSelected ? 235 : 210);
+        painter->setPen(QPen(edge, mSelected ? 3.2 : 2.4));
+        painter->setBrush(Qt::NoBrush);
+        painter->drawRoundedRect(QRectF(1.5, 1.5, WIDTH - 3.0, HEIGHT - 3.0), 9, 9);
+
+        if (mHovered && !mSelected) {
+            QColor wash = accent;
+            wash.setAlpha(30);
+            painter->setPen(Qt::NoPen);
+            painter->setBrush(wash);
+            painter->drawRoundedRect(QRectF(4, 4, WIDTH - 8, HEIGHT - 8), 8, 8);
+        }
+        painter->restore();
+    }
 }
 
 QRect CardItem::whiteBaseSrcRect() const {
@@ -361,6 +396,8 @@ void CardItem::applyTransform()
 
 void CardItem::hoverEnterEvent(QGraphicsSceneHoverEvent *event) {
     mHovered = true;
+    setScale(1.035);
+    update();
     emit hoverChanged(this, true);
     QGraphicsObject::hoverEnterEvent(event);
 }
@@ -372,9 +409,9 @@ void CardItem::hoverMoveEvent(QGraphicsSceneHoverEvent *event) {
     qreal nx = (lx / WIDTH)  - 0.5;     // [-0.5, 0.5]
     qreal ny = (ly / HEIGHT) - 0.5;
     // 鼠标在右半 → 卡片向右后倾(Y 轴倾斜)
-    mHoverTiltY = nx * 20.0;            // 最大 ±10°
+    mHoverTiltY = nx * 12.0;            // 最大约 ±6°，比旧版更克制
     // 鼠标在上半 → 卡片向上后倾(X 轴倾斜),负号让方向自然
-    mHoverTiltX = ny * 20.0;
+    mHoverTiltX = ny * 12.0;
     applyTransform();
     QGraphicsObject::hoverMoveEvent(event);
 }
@@ -384,6 +421,8 @@ void CardItem::hoverLeaveEvent(QGraphicsSceneHoverEvent *event) {
     emit hoverChanged(this, false);
     mHoverTiltX = 0;
     mHoverTiltY = 0;
+    setScale(1.0);
     applyTransform();
+    update();
     QGraphicsObject::hoverLeaveEvent(event);
 }
