@@ -153,7 +153,13 @@ private:
     void hideJokerInfo();
 
     void refreshConsumableSlots();
+    void layoutConsumableItems(bool animate = true);
     void onConsumableClicked(ConsumableItem *item, Qt::MouseButton btn);
+    void onConsumablePressed(ConsumableItem *item, Qt::MouseButton btn);
+    void onConsumableDragMoved(ConsumableItem *item, QPointF scenePos);
+    void onConsumableDragReleased(ConsumableItem *item, QPointF scenePos);
+    void animateConsumableUseThen(int idx, std::function<void()> after);
+    void flashConsumableActionError();
 
     void loadFonts();
     void setupLeftPanel();
@@ -235,8 +241,8 @@ private:
     void spawnFloatingText(const QPointF &nearPos, const QString &text, const QColor &color);
     void clearFloatingScores();
 
-    int mDisplayedChips = 0;   // 当前显示中的 chips(动画过程中)
-    int mDisplayedMult  = 0;
+    double mDisplayedChips = 0.0;   // 当前显示中的 chips(动画过程中)，用 double 避免高倍率溢出
+    double mDisplayedMult  = 0.0;
 
     // 原版每次累加分数都重算火焰强度:earned >= required 才点燃,log5 公式控制大小。
     // 不再用单次触发布尔,真正按"当前 displayed chips × mult"实时驱动。
@@ -255,10 +261,11 @@ private:
     // 拖拽时记录上一次目标位置，避免每次 dragMoved 都触发 moveTo()
     int mLastJokerDragTo = -1;
     int mLastHandCardDragTo = -1;
+    int mLastConsumableDragTo = -1;
 
     void updateHandPreview();
     void playScoreEvent(const ScoreEvent &ev);
-    void animateScoreTotalThenFinalize(int gained, int delayAfterEvents);
+    void animateScoreTotalThenFinalize(double gained, int delayAfterEvents);
     void animatePlayedCardsToDiscardThen(std::function<void()> after);
     void showGameOverOverlay(bool won);
     void hideGameOverOverlay();

@@ -3,6 +3,8 @@
 #include <QGraphicsSceneMouseEvent>
 #include <QtMath>
 #include <QPropertyAnimation>
+#include <QSequentialAnimationGroup>
+#include <QLineF>
 #include <QGraphicsSceneHoverEvent>
 #include "../utils/shadereffects.h"
 #include <QCursor>
@@ -183,9 +185,60 @@ void ConsumableItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidge
 
 }
 
-void ConsumableItem::mousePressEvent(QGraphicsSceneMouseEvent *e) {
-    emit clicked(this, e->button());
-    e->accept();
+void ConsumableItem::mousePressEvent(QGraphicsSceneMouseEvent *e)
+{
+    if (e->button() == Qt::LeftButton || e->button() == Qt::RightButton) {
+        mPressed = true;
+        mDragging = false;
+        mHoverTiltX = 0.0;
+        mHoverTiltY = 0.0;
+        applyHoverTransform();
+        mPressScenePos = e->scenePos();
+        mRestZ = zValue();
+        e->accept();
+        return;
+    }
+    QGraphicsObject::mousePressEvent(e);
+}
+
+void ConsumableItem::mouseMoveEvent(QGraphicsSceneMouseEvent *e)
+{
+    if (!mPressed) {
+        QGraphicsObject::mouseMoveEvent(e);
+        return;
+    }
+
+    if (!mDragging && QLineF(e->scenePos(), mPressScenePos).length() > 7.0) {
+        mDragging = true;
+        setZValue(700);
+        animateScale(1.0, 70);
+    }
+
+    if (mDragging) {
+        setPos(e->scenePos() - QPointF(WIDTH / 2.0, HEIGHT / 2.0));
+        emit dragMoved(this, e->scenePos());
+        e->accept();
+        return;
+    }
+
+    QGraphicsObject::mouseMoveEvent(e);
+}
+
+void ConsumableItem::mouseReleaseEvent(QGraphicsSceneMouseEvent *e)
+{
+    if ((e->button() == Qt::LeftButton || e->button() == Qt::RightButton) && mPressed) {
+        mPressed = false;
+        if (mDragging) {
+            mDragging = false;
+            emit dragReleased(this, e->scenePos());
+        } else {
+            emit pressed(this, e->button());
+            emit clicked(this, e->button());
+        }
+        e->accept();
+        return;
+    }
+    QGraphicsObject::mouseReleaseEvent(e);
 }
 
 void ConsumableItem::applyHoverTransform()
@@ -217,7 +270,6 @@ void ConsumableItem::hoverEnterEvent(QGraphicsSceneHoverEvent *e)
 {
     mHovered = true;
     setTransformOriginPoint(WIDTH / 2.0, HEIGHT / 2.0);
-    setZValue(qMax<qreal>(zValue(), 120));
     animateScale(1.08, 100);
     update();
     QGraphicsObject::hoverEnterEvent(e);
@@ -225,7 +277,7 @@ void ConsumableItem::hoverEnterEvent(QGraphicsSceneHoverEvent *e)
 
 void ConsumableItem::hoverMoveEvent(QGraphicsSceneHoverEvent *e)
 {
-    if (!mHovered) {
+    if (!mHovered || mDragging) {
         QGraphicsObject::hoverMoveEvent(e);
         return;
     }
@@ -256,4 +308,36 @@ void ConsumableItem::animateScale(qreal target, int durationMs)
     anim->setEndValue(target);
     anim->setEasingCurve(QEasingCurve::OutCubic);
     anim->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+void ConsumableItem::moveTo(const QPointF &target, int durationMs)
+{
+    auto *anim = new QPropertyAnimation(this, "pos", this);
+    anim->setDuration(durationMs);
+    anim->setStartValue(pos());
+    anim->setEndValue(target);
+    anim->setEasingCurve(QEasingCurve::OutCubic);
+    anim->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+void ConsumableItem::juiceUp(double scaleAmount, int durationMs)
+{
+    setTransformOriginPoint(WIDTH / 2.0, HEIGHT / 2.0);
+
+    auto *up = new QPropertyAnimation(this, "scale");
+    up->setDuration(durationMs / 2);
+    up->setStartValue(scale());
+    up->setEndValue(scaleAmount);
+
+    auto *down = new QPropertyAnimation(this, "scale");
+    down->setDuration(durationMs / 2);
+    down->setStartValue(scaleAmount);
+    down->setEndValue(1.0);
+
+    auto *seq = new QSequentialAnimationGroup(this);
+    seq->addAnimation(up);
+    seq->addAnimation(down);
+    up->setParent(seq);
+    down->setParent(seq);
+    seq->start(QAbstractAnimation::DeleteWhenStopped);
 }

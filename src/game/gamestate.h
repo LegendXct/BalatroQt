@@ -65,8 +65,8 @@ public:
     int gold() const {return mGold;}
     int handsLeft() const {return mHandsLeft;}
     int discardLeft() const {return mDiscardLeft;}
-    int score() const {return mScore;}
-    int targetScore() const {return mTargetScore;}
+    double score() const {return mScore;}
+    double targetScore() const {return mTargetScore;}
     int ante() const {return mAnte;}
     int jokerSlots() const;
     int currentBlindStartingHands() const { return mBlindStartingHands; }
@@ -119,6 +119,7 @@ public:
     bool sellConsumable(int idx);
     bool sellJoker(int idx);
     bool moveJoker(int from, int to);
+    bool moveConsumable(int from, int to);
     bool moveHandCard(int from, int to);
     void collectRoundCardsToDeck();
 
@@ -177,8 +178,8 @@ private:
     QVector<CardData> mHand;
     QVector<Joker> mJokers;
     int mGold;
-    int mScore;
-    int mTargetScore;
+    double mScore;
+    double mTargetScore;
     int mHandsLeft;
     int mDiscardLeft;
     int mAnte;
@@ -194,7 +195,7 @@ private:
     bool mJustSkipped = false;
 
     bool mAwaitingScoreFinalize = false;
-    int mPendingHandScore = 0;
+    double mPendingHandScore = 0.0;
     QVector<int> mPendingPlayedIndices;
     QVector<bool> mPendingShattered;
     void finishWinningRound();
@@ -206,7 +207,7 @@ private:
     void enterBlindSelect();
 
     void dealCards(); // 补牌到满
-    int calcTargetScore() const;
+    double calcTargetScore() const;
     void applyCardEnhancements(HandResult &result);
     void applyJokerEffects(HandResult &result);
     void checkGameOver();
@@ -265,6 +266,7 @@ private:
     QVector<ConsumableType> ownedConsumableTypes() const;
     bool hasJokerDuplicateBypass() const;
     void syncShopJokerRules();
+    void updateOwnedSellValues();
     void scoreCard(const CardData &card, HandResult &result, int playedIdx);
     void decayEndOfHandJokers();
     static ConsumableType planetTypeFor(HandType t);

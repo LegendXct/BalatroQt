@@ -359,11 +359,14 @@ static V4 shaderPixel(const QImage &src, ShaderKind kind, int x, int y, double s
             sat.r = 1.0;
             sat.g = 0.7;
             sat.b = 0.8 * sat.b;
+            V4 crossCol = RGB(sat);
+            tex = mix(tex, crossCol, 0.78);
         } else {
             sat.g *= 0.5;
             sat.b *= 0.7;
+            V4 dimCol = RGB(sat);
+            tex = mix(tex, dimCol, 0.62);
         }
-        tex = RGB(sat);
         tex.a = origA * intensity;
         return dissolveMask(tex, uv, w, h, dissolve, seedTime, false, burn1, burn2);
     }
@@ -933,10 +936,10 @@ void paintSoulCrystal(QPainter *p, const QRectF &rect, const QPixmap &enhancersS
 QPixmap makeBooster3DPixmap(const QPixmap &base)
 {
     if (base.isNull()) return QPixmap();
-    // 当前先使用原始 booster 贴图。之前的离屏 booster shader 在透明区域上会被
-    // QWidget/QPixmap 组合成黑色方块，导致商店卡包背后出现原版没有的黑底。
-    // booster.fs 后续应接入真正实时 GPU 绘制层，而不是提前烘成 QPixmap。
-    return base;
+    // 原版 booster.fs 直接作用在卡包 sprite 上。这里用同一套 GPU/CPU shader
+    // 处理真实卡包贴图；如果透明边缘出现异常则自动回退原图，避免黑底。
+    QPixmap fx = renderBoosterPixmap(base, 1.0);
+    return fx.isNull() ? base : fx;
 }
 
 } // namespace BalatroShaders

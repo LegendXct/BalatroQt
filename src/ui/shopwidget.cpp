@@ -578,7 +578,7 @@ QPixmap ShopWidget::offerPixmap(const ShopOffer &o) const
                                            c.y() * ConsumableItem::HEIGHT,
                                            ConsumableItem::WIDTH,
                                            ConsumableItem::HEIGHT);
-            return BalatroShaders::renderVoucherPixmap(pix, 0.9);
+            return BalatroShaders::renderVoucherPixmap(pix, 1.0);
         }
 
         QPixmap pix(ConsumableItem::WIDTH, ConsumableItem::HEIGHT);
@@ -658,7 +658,7 @@ QPixmap ShopWidget::playingCardPixmap(const CardData &c) const
             sp.drawPixmap(QRect(0, 0, W, H), enhSheet, QRect(sCol * W, sRow * H, W, H));
         }
         if (c.seal == Seal::Gold)
-            sealPix = BalatroShaders::renderVoucherPixmap(sealPix, 0.95);
+            sealPix = BalatroShaders::renderVoucherPixmap(sealPix, 1.0);
         QPainter fp(&pix);
         fp.drawPixmap(QRect(0, 0, W, H), sealPix);
     }

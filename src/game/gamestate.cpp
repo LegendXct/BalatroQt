@@ -1,6 +1,8 @@
 #include "gamestate.h"
 #include <QSet>
 #include <QRandomGenerator>
+#include <limits>
+#include <cmath>
 #include <algorithm>
 #include <functional>
 #include <cmath>
@@ -45,13 +47,44 @@ void GameState::levelUpHand(HandType t, int times) {
 }
 
 static auto rankComp = [](const CardData &a, const CardData &b) {
+    const bool aStone = a.enhancement == Enhancement::Stone;
+    const bool bStone = b.enhancement == Enhancement::Stone;
+    // 原版石头牌没有点数/花色；无论按点数还是按花色理牌，都应该沉到最后。
+    if (aStone != bStone) return !aStone;
     if (a.rank != b.rank) return static_cast<int>(a.rank) > static_cast<int>(b.rank);
     return static_cast<int>(a.suit) < static_cast<int>(b.suit);
 };
 
+static bool jokerUsesCardRankOrSuit(JokerType type)
+{
+    switch (type) {
+    case JokerType::GreedyJoker:
+    case JokerType::LustyJoker:
+    case JokerType::WrathfulJoker:
+    case JokerType::GluttonousJoker:
+    case JokerType::Fibonacci:
+    case JokerType::EvenSteven:
+    case JokerType::OddTodd:
+    case JokerType::Scholar:
+    case JokerType::ScaryFace:
+    case JokerType::SmileyFace:
+    case JokerType::WalkieTalkie:
+    case JokerType::Arrowhead:
+    case JokerType::OnyxAgate:
+    case JokerType::RoughGem:
+    case JokerType::Bloodstone:
+    case JokerType::Photograph:
+    case JokerType::Triboulet:
+        return true;
+    default:
+        return false;
+    }
+}
 
 static bool bossDebuffsCard(BossEffect effect, const CardData &c)
 {
+    // 石头牌没有花色和点数，不能被花色/人头类 Boss 盲注按旧底牌属性限制。
+    if (c.enhancement == Enhancement::Stone) return false;
     if (effect == BossEffect::TheClub  && c.suit == Suit::Clubs)    return true;
     if (effect == BossEffect::TheGoad  && c.suit == Suit::Spades)   return true;
     if (effect == BossEffect::TheHead  && c.suit == Suit::Hearts)   return true;
@@ -133,6 +166,9 @@ static void applyResolvedJokerEffect(const Joker &j, TriggerContext &ctx)
 }
 
 static auto suitComp = [](const CardData &a, const CardData &b) {
+    const bool aStone = a.enhancement == Enhancement::Stone;
+    const bool bStone = b.enhancement == Enhancement::Stone;
+    if (aStone != bStone) return !aStone;
     if (a.suit != b.suit) return static_cast<int>(a.suit) < static_cast<int>(b.suit);
     return static_cast<int>(a.rank) > static_cast<int>(b.rank);
 };
@@ -277,8 +313,8 @@ void GameState::playCards(const QVector<int> &indices) {
     result.xmult  = 1.0;
 
     if (!hasJokerType(JokerType::Chicot) && mBossEffect == BossEffect::TheFlint) {
-        result.chips = qMax(0, int(std::floor(result.chips * 0.5 + 0.5)));
-        result.mult  = qMax(1, int(std::floor(result.mult  * 0.5 + 0.5)));
+        result.chips = std::max(0.0, std::floor(result.chips * 0.5 + 0.5));
+        result.mult  = std::max(1.0, std::floor(result.mult  * 0.5 + 0.5));
     }
 
     result.baseChips = result.chips;
@@ -300,6 +336,12 @@ void GameState::playCards(const QVector<int> &indices) {
             }
         }
     }
+    // 原版石头牌没有点数/花色，不参与牌型判定；但只要被打出，它自己总是计分 +50。
+    for (int k = 0; k < played.size(); ++k) {
+        if (played[k].enhancement != Enhancement::Stone) continue;
+        if (!scoringPlayedIdx.contains(k)) scoringPlayedIdx.append(k);
+        result.scoringCards.append(played[k]);
+    }
     std::sort(scoringPlayedIdx.begin(), scoringPlayedIdx.end());
 
     QVector<bool> shattered(played.size(), false);
@@ -317,7 +359,8 @@ void GameState::playCards(const QVector<int> &indices) {
 
         const int redSealReps = (card.seal == Seal::Red) ? 1 : 0;
         int triggers = 1 + redSealReps;
-        const bool isFace = card.rank == Rank::Jack || card.rank == Rank::Queen || card.rank == Rank::King;
+        const bool hasRankAndSuit = card.enhancement != Enhancement::Stone;
+        const bool isFace = hasRankAndSuit && (card.rank == Rank::Jack || card.rank == Rank::Queen || card.rank == Rank::King);
         if (isFace) triggers += sockRetriggers;
         if (firstScoringCard) triggers += chadRetriggers;
 
@@ -410,7 +453,7 @@ void GameState::playCards(const QVector<int> &indices) {
     }
 
     {
-        int chipsBefore = result.chips, multBefore = result.mult;
+        double chipsBefore = result.chips, multBefore = result.mult;
         double xmultBefore = result.xmult;
 
         TriggerContext ctx{ result, *this, heldHand, result.scoringCards, nullptr };
@@ -452,7 +495,8 @@ void GameState::playCards(const QVector<int> &indices) {
     }
 
     // 只缓存本手最终分。真正加到回合总分，要等 UI 播完逐张牌/小丑动画之后。
-    mPendingHandScore = static_cast<int>(result.chips * result.mult * result.xmult);
+    mPendingHandScore = result.chips * result.mult * result.xmult;
+    if (!std::isfinite(mPendingHandScore)) mPendingHandScore = std::numeric_limits<double>::infinity();
     mPendingPlayedIndices = sorted;
     mPendingShattered = shattered;
     mAwaitingScoreFinalize = true;
@@ -562,7 +606,7 @@ void GameState::finishWinningRound()
 
     int endRoundGoldGain = 0;
     for (const ScoreEvent &ev : endRoundEvents)
-        if (ev.kind == ScoreEventKind::DollarGain) endRoundGoldGain += ev.intValue;
+        if (ev.kind == ScoreEventKind::DollarGain) endRoundGoldGain += int(std::round(ev.intValue));
     if (endRoundGoldGain > 0) mGold += endRoundGoldGain;
 
     if (!endRoundEvents.isEmpty())
@@ -653,7 +697,7 @@ void GameState::discardCards(const QVector<int> &indices)
     emit handChanged();
 }
 
-int GameState::calcTargetScore() const {
+double GameState::calcTargetScore() const {
     const int baseScores[] = { 0, 300, 800, 2000, 5000, 11000, 20000, 35000, 50000 };
     double mult = 1.0;
     switch (mBlindType) {
@@ -661,8 +705,8 @@ int GameState::calcTargetScore() const {
     case BlindType::Big:   mult = Constants::BIG_BLIND_MULT;   break;
     case BlindType::Boss:  mult = Constants::BOSS_BLIND_MULT;  break;
     }
-    int target = static_cast<int>(baseScores[mAnte] * mult);
-    if (mBossEffect == BossEffect::TheWall && !hasJokerType(JokerType::Chicot)) target *= 2;
+    double target = double(baseScores[qBound(0, mAnte, 8)]) * mult;
+    if (mBossEffect == BossEffect::TheWall && !hasJokerType(JokerType::Chicot)) target *= 2.0;
     return target;
 }
 
@@ -698,7 +742,7 @@ void GameState::applyCardEnhancements(HandResult &result) {
         switch (c.edition) {
         case Edition::Foil: result.chips += 50; break;
         case Edition::Holographic: result.mult += 10; break;
-        case Edition::Polychrome: result.mult = static_cast<int>(result.mult * 1.5); break;
+        case Edition::Polychrome: result.mult = result.mult * 1.5; break;
         default: break;
         }
     }
@@ -870,6 +914,14 @@ bool GameState::moveJoker(int from, int to) {
     if (from == to) return true;
     mJokers.move(from, to);
     emit jokersChanged();
+    return true;
+}
+
+bool GameState::moveConsumable(int from, int to) {
+    if (from < 0 || from >= mConsumables.size() || to < 0 || to >= mConsumables.size()) return false;
+    if (from == to) return true;
+    mConsumables.move(from, to);
+    emit consumablesChanged();
     return true;
 }
 
@@ -1156,7 +1208,7 @@ void GameState::scoreCard(const CardData &card, HandResult &result, int playedId
     // 4) OnScoringCard 小丑:之前直接调 effect,现在需要在 ctx 里带 idx 让 effect 写事件
     // 但 effect 是 lambda 修改 ctx.result,没法知道是哪个 joker。
     // 简化做法:在 effect 调用前后比较 chips/mult 差值。
-    int chipsBefore = result.chips, multBefore = result.mult;
+    double chipsBefore = result.chips, multBefore = result.mult;
     double xmultBefore = result.xmult;
 
     for (int ji = 0; ji < mJokers.size(); ++ji) {
@@ -1166,6 +1218,7 @@ void GameState::scoreCard(const CardData &card, HandResult &result, int playedId
         const Joker *effectJoker = resolveCopiedJoker(mJokers, ji);
 
         if (!effectJoker || effectJoker->isDebuffed || effectJoker->timing != TriggerTiming::OnScoringCard) continue;
+        if (card.enhancement == Enhancement::Stone && jokerUsesCardRankOrSuit(effectJoker->type)) continue;
 
         TriggerContext ctx{ result, *this, mHand, result.scoringCards, &card };
         applyResolvedJokerEffect(*effectJoker, ctx);

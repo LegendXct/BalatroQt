@@ -260,14 +260,18 @@ vec4 effect_debuff(vec4 tex, vec2 uv) {
     if ((uv.x + uv.y > 1.0 - width && uv.x + uv.y < 1.0 + width) ||
         ((1.0 - uv.x) + uv.y > 1.0 - width && (1.0 - uv.x) + uv.y < 1.0 + width)) {
         cross = true;
+    }
+    vec4 outc;
+    if (cross) {
         sat.x = 1.0;
         sat.y = 0.7;
         sat.z = 0.8 * sat.z;
+        outc = mix(tex, RGB(sat), 0.78);
     } else {
         sat.y *= 0.5;
         sat.z *= 0.7;
+        outc = mix(tex, RGB(sat), 0.62);
     }
-    vec4 outc = RGB(sat);
     outc.a = origA;
     return outc;
 }

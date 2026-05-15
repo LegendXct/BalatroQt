@@ -3,7 +3,36 @@
 #include <QHBoxLayout>
 #include <QPixmap>
 #include <QPropertyAnimation>
+#include <cmath>
+#include <algorithm>
 #include <QEasingCurve>
+
+
+static QString formatLargeNumber(double num)
+{
+    if (std::isnan(num)) return QStringLiteral("NaNeInf");
+    if (std::isinf(num)) return QStringLiteral("Inf");
+    const bool neg = num < 0.0;
+    num = std::abs(num);
+    if (num >= 100000000000.0) {
+        int exp = int(std::floor(std::log10(std::max(num, 1.0))));
+        double mantissa = num / std::pow(10.0, exp);
+        return QString("%1%2e%3").arg(neg ? "-" : "")
+                                  .arg(QString::number(mantissa, 'f', 3))
+                                  .arg(exp);
+    }
+    qint64 n = qRound64(num);
+    QString raw = QString::number(n);
+    QString out;
+    int count = 0;
+    for (int i = raw.size() - 1; i >= 0; --i) {
+        out.prepend(raw[i]);
+        ++count;
+        if (count == 3 && i > 0) { out.prepend(','); count = 0; }
+    }
+    if (neg && out != "0") out.prepend('-');
+    return out;
+}
 
 RoundEndOverlay::RoundEndOverlay(const QFont &cnFont, const QFont &pixelFont, QWidget *parent)
     : QWidget(parent), mCNFont(cnFont), mPixelFont(pixelFont)
@@ -212,7 +241,7 @@ void RoundEndOverlay::hideToBottom(std::function<void()> after)
     anim->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
-void RoundEndOverlay::setData(int blindChipRow, int targetScore, int blindReward,
+void RoundEndOverlay::setData(int blindChipRow, double targetScore, int blindReward,
                               int handsLeft, int handBonus, int interest)
 {
     int total = blindReward + handBonus + interest;
@@ -225,7 +254,7 @@ void RoundEndOverlay::setData(int blindChipRow, int targetScore, int blindReward
                                          Qt::SmoothTransformation));
     }
 
-    mTargetLbl->setText(QString::number(targetScore));
+    mTargetLbl->setText(formatLargeNumber(targetScore));
     mBlindRewardSym->setText(QString(blindReward, '$'));
 
     mHandsNumLbl->setText(QString::number(handsLeft));

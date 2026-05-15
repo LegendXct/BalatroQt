@@ -36,6 +36,7 @@ enum class ScoreEventKind {
     JokerXMult,         // 小丑加 xmult(红)
     DollarGain,         // 幸运牌/金色蜡封/黄金牌等获得金钱
     RedSealRetrigger,   // 红色蜡封重新触发
+    JokerRetrigger,     // 哑剧/袜子等小丑提供重新触发提示（只负责动画，不改数值）
     GlassShatter,       // 玻璃牌破碎动画
     BlueSealPlanet,     // 蓝色蜡封生成星球牌提示
 };
@@ -45,20 +46,20 @@ struct ScoreEvent {
     int    sourceCardIdx = -1;     // -1 表示不是 played 卡(比如 Steel 在手牌、joker 来源)
     int    sourceHandIdx = -1;     // 手牌位置(Steel 用)
     int    sourceJokerIdx = -1;    // 小丑位置(JokerXxx 用)
-    int    intValue   = 0;          // chip/mult 整数加值
+    double intValue   = 0.0;        // chip/mult 加值（double 防止极大倍率溢出）
     double xmultValue = 1.0;        // xmult 倍率
 };
 
 struct HandResult {
     HandType type = HandType::HighCard;
     QVector<CardData> scoringCards; // 参与计分的牌
-    int chips = 0; // 基础筹码
-    int mult = 0; // 基础倍率
+    double chips = 0.0; // 基础筹码
+    double mult = 0.0; // 基础倍率
     double xmult = 1.0; // ×倍率，Glass/Polychrome/Steel用
     int level = 1; // 牌型等级
     QString name; // 牌型名称，用于UI显示
-    int baseChips = 0;
-    int baseMult  = 0;
+    double baseChips = 0.0;
+    double baseMult  = 0.0;
     QVector<ScoreEvent> events;
 };
 

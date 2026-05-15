@@ -17,6 +17,7 @@
 #include <QStringList>
 #include "shopsignwidget.h"
 #include <QParallelAnimationGroup>
+#include <QPointer>
 #include <QVariantAnimation>
 #include <QDialog>
 #include <QTabWidget>
@@ -29,6 +30,7 @@
 #include <QFrame>
 #include <QAbstractItemView>
 #include <cmath>
+#include <limits>
 #include "../utils/shadereffects.h"
 
 void MainWindow::loadFonts() {
@@ -62,10 +64,16 @@ static QPushButton *makeBtn(const QString &text, const QString &bg, const QStrin
 
 static QString formatScoreNumber(double num)
 {
+    if (std::isnan(num)) return QStringLiteral("NaNeInf");
+    if (std::isinf(num)) return QStringLiteral("Inf");
+    const bool neg = num < 0.0;
+    num = std::abs(num);
     if (num >= 100000000000.0) {
-        int exp = int(std::floor(std::log10(num)));
+        int exp = int(std::floor(std::log10(std::max(num, 1.0))));
         double mantissa = num / std::pow(10.0, exp);
-        return QString::number(mantissa, 'f', 3) + "e" + QString::number(exp);
+        return QString("%1%2e%3").arg(neg ? "-" : "")
+                                  .arg(QString::number(mantissa, 'f', 3))
+                                  .arg(exp);
     }
     qint64 n = qRound64(num);
     QString raw = QString::number(n);
@@ -79,6 +87,7 @@ static QString formatScoreNumber(double num)
             count = 0;
         }
     }
+    if (neg && out != "0") out.prepend('-');
     return out;
 }
 
@@ -742,7 +751,7 @@ void MainWindow::setupLeftPanel() {
         auto *blindH = new QHBoxLayout(blindPage); blindH->setContentsMargins(50, 22, 50, 22); blindH->setSpacing(16);
         BossInfo bi = mGameState->currentBossInfo();
         BossInfo nextBi = bossInfo(mGameState->pendingBossEffect());
-        blindH->addWidget(makeInfoTile(blindPage, "小盲注", QString("至少得分\n%1\n奖励：$$$+").arg(formatScoreNumber(qMax(1, mGameState->targetScore()*2/3))), "#009dff"), 1);
+        blindH->addWidget(makeInfoTile(blindPage, "小盲注", QString("至少得分\n%1\n奖励：$$$+").arg(formatScoreNumber(std::max(1.0, mGameState->targetScore()*2.0/3.0))), "#009dff"), 1);
         blindH->addWidget(makeInfoTile(blindPage, "当前盲注", QString("至少得分\n%1\n奖励：$$$$+").arg(formatScoreNumber(mGameState->targetScore())), "#fda200"), 1);
         blindH->addWidget(makeInfoTile(blindPage, nextBi.name.isEmpty()?bi.name:nextBi.name,
                                        (nextBi.description.isEmpty()?bi.description:nextBi.description) + QString("\n\n至少得分\n%1\n奖励：$$$$$+").arg(formatScoreNumber(mGameState->targetScore()*4/3)), "#fe5f55"), 1);
@@ -831,6 +840,9 @@ void MainWindow::setupLeftPanel() {
             if (txt == "开始新的一局") {
                 connect(b, &QPushButton::clicked, this, [this, &dlg]() {
                     dlg.accept();
+                    // 开新局会同时清理商店/包/计分火焰并重新进入盲注选择。
+                    // 暂停一次窗口重绘，避免中间帧把中央黑底绘出来造成黑屏闪烁。
+                    setUpdatesEnabled(false);
                     resetTransientOverlaysForNewRun();
                     mGameState->startGame();
                     refreshHand();
@@ -839,6 +851,10 @@ void MainWindow::setupLeftPanel() {
                     refreshCounters();
                     refreshScore();
                     refreshGold();
+                    QTimer::singleShot(0, this, [this]() {
+                        setUpdatesEnabled(true);
+                        update();
+                    });
                 });
             } else {
                 b->setEnabled(false);
@@ -1608,7 +1624,8 @@ void MainWindow::onHandPlayed()
     // 未达盲注时 target=0,火焰隐藏;达标后 target=log5(earned)-2 渐升。
     updateFlameIntensity();
 
-    int gained = static_cast<int>(r.chips * r.mult * r.xmult);
+    double gained = r.chips * r.mult * r.xmult;
+    if (!std::isfinite(gained)) gained = std::numeric_limits<double>::infinity();
 
     int delayBase = 420;
     int delayStep = 230;
@@ -1623,7 +1640,7 @@ void MainWindow::onHandPlayed()
     int finalDelay = delayBase + r.events.size() * delayStep + 260;
     QTimer::singleShot(finalDelay, this, [this, r, gained, finalDelay]() {
         mDisplayedChips = r.chips;
-        mDisplayedMult  = qRound(r.mult * r.xmult);
+        mDisplayedMult  = r.mult * r.xmult;
         mLblChips->setText(formatScoreNumber(r.chips));
         mLblMult ->setText(formatScoreNumber(mDisplayedMult));
         updateFlameIntensity();
@@ -2034,6 +2051,7 @@ void MainWindow::showConsumableAction(int idx)
     if (idx < 0 || idx >= cs.size() || idx >= mConsumableItems.size()) return;
     mSelectedConsumableIdx = idx;
     const Consumable &c = cs[idx];
+    layoutConsumableItems(true);
 
     if (!mConsumableActionPanel) {
         mConsumableActionPanel = new QWidget;
@@ -2076,32 +2094,38 @@ void MainWindow::showConsumableAction(int idx)
 
         mConsumableActionPanel->setFixedSize(118, 56);
         mConsumableActionProxy = mScene->addWidget(mConsumableActionPanel);
-        mConsumableActionProxy->setZValue(910);
+        mConsumableActionProxy->setZValue(5000);
 
         connect(mConsumableUseButton, &QPushButton::clicked, this, [this]() {
-            if (mSelectedConsumableIdx < 0) return;
+            int idx = mSelectedConsumableIdx;
+            if (idx < 0 || idx >= mGameState->consumables().size()) return;
+
             QVector<int> sel = mSelected;
             std::sort(sel.begin(), sel.end());
-            if (mGameState->useConsumable(mSelectedConsumableIdx, sel)) {
-                mSelectedConsumableIdx = -1;
-                hideConsumableAction();
-                mSelected.clear();
-                refreshHand();
-                refreshGold();
-                refreshScore();
-                refreshCounters();
-                if (mShopWidget && mShopWidget->isVisible()) mShopWidget->refresh();
-            } else {
-                mConsumableActionPanel->setStyleSheet(
-                    "background:rgba(42,18,20,235); border:2px solid #ff6a6a; border-radius:8px;"
-                    );
-                QTimer::singleShot(260, this, [this]() {
-                    if (mConsumableActionPanel)
-                        mConsumableActionPanel->setStyleSheet(
-                            "background:rgba(18,23,26,230); border:2px solid #2b3135; border-radius:8px;"
-                            );
-                });
+            sel.erase(std::unique(sel.begin(), sel.end()), sel.end());
+
+            const Consumable &c = mGameState->consumables()[idx];
+            if ((c.needsSelection > 0 && sel.size() < c.needsSelection) ||
+                (c.type == ConsumableType::Tarot_Fool && !mGameState->canUseFool())) {
+                flashConsumableActionError();
+                return;
             }
+
+            animateConsumableUseThen(idx, [this, idx, sel]() {
+                if (mGameState->useConsumable(idx, sel)) {
+                    mSelectedConsumableIdx = -1;
+                    hideConsumableAction();
+                    mSelected.clear();
+                    refreshHand();
+                    refreshGold();
+                    refreshScore();
+                    refreshCounters();
+                    if (mShopWidget && mShopWidget->isVisible()) mShopWidget->refresh();
+                } else {
+                    flashConsumableActionError();
+                    refreshConsumableSlots();
+                }
+            });
         });
         connect(mConsumableSellButton, &QPushButton::clicked, this, [this]() {
             if (mSelectedConsumableIdx < 0) return;
@@ -2120,11 +2144,13 @@ void MainWindow::showConsumableAction(int idx)
     mConsumableActionPrice->setVisible(false);
     mConsumableSellButton->setText(QString("售出\n$%1").arg(qMax(1, c.sellValue)));
     QPointF cp = mConsumableItems[idx]->pos();
+    // 消耗牌被点中后像手牌一样上浮；操作按钮永远贴在被选中牌右侧，且保持最高层。
     qreal x = cp.x() + CARD_W + 8;
     qreal y = cp.y() + CARD_H * 0.5 - 31;
     if (x + 118 > mSceneW - 6) x = cp.x() - 126;
     x = qBound<qreal>(6, x, mSceneW - 124);
     y = qBound<qreal>(6, y, mSceneH - 62);
+    mConsumableActionProxy->setZValue(5000);
     mConsumableActionProxy->setPos(x, y);
     mConsumableActionPanel->show();
 }
@@ -2132,6 +2158,10 @@ void MainWindow::showConsumableAction(int idx)
 void MainWindow::hideConsumableAction()
 {
     if (mConsumableActionPanel) mConsumableActionPanel->hide();
+    if (mSelectedConsumableIdx >= 0) {
+        mSelectedConsumableIdx = -1;
+        layoutConsumableItems(true);
+    }
 }
 
 void MainWindow::refreshConsumableSlotFrames()
@@ -2190,12 +2220,103 @@ void MainWindow::refreshConsumableSlots()
         mScene->addItem(ci);
         mConsumableItems.append(ci);
 
-        connect(ci, &ConsumableItem::clicked,
-                this, &MainWindow::onConsumableClicked);
+        connect(ci, &ConsumableItem::pressed,
+                this, &MainWindow::onConsumablePressed);
+        connect(ci, &ConsumableItem::dragMoved,
+                this, &MainWindow::onConsumableDragMoved);
+        connect(ci, &ConsumableItem::dragReleased,
+                this, &MainWindow::onConsumableDragReleased);
+    }
+    layoutConsumableItems(false);
+}
+
+void MainWindow::layoutConsumableItems(bool animate)
+{
+    const int n = mConsumableItems.size();
+    if (n == 0) return;
+
+    int visualSlots = Constants::MAX_CONSUMABLE_SLOTS;
+    int totalW = CARD_W + qMax(0, visualSlots - 1) * (CARD_W + 14);
+    int startX = mSceneW - 8 - totalW;
+    int step = (n > 1) ? (totalW - CARD_W) / qMax(1, n - 1) : (CARD_W + 14);
+    step = qBound(42, step, CARD_W + 14);
+
+    for (int i = 0; i < n; ++i) {
+        ConsumableItem *ci = mConsumableItems[i];
+        if (!ci) continue;
+        const int x = startX + i * step;
+        const int y = JOKER_Y + 18 + ((i == mSelectedConsumableIdx) ? -42 : 0);
+        ci->setZValue(30 + i);   // 永远按槽位从左到右叠，不因点击而盖住右侧牌
+        if (animate) ci->moveTo(QPointF(x, y), 160);
+        else ci->setPos(x, y);
     }
 }
 
+void MainWindow::flashConsumableActionError()
+{
+    if (mConsumableActionPanel && mConsumableActionPanel->isVisible()) {
+        mConsumableActionPanel->setStyleSheet(
+            "background:rgba(42,18,20,235); border:2px solid #ff6a6a; border-radius:8px;"
+            );
+        QTimer::singleShot(260, this, [this]() {
+            if (mConsumableActionPanel)
+                mConsumableActionPanel->setStyleSheet(
+                    "background:rgba(18,23,26,230); border:2px solid #2b3135; border-radius:8px;"
+                    );
+        });
+    }
+    if (mHandCountLabel) {
+        mHandCountLabel->setDefaultTextColor(QColor("#ff8080"));
+        QTimer::singleShot(400, this, [this]() {
+            if (mHandCountLabel) mHandCountLabel->setDefaultTextColor(QColor("#aaddaa"));
+        });
+    }
+}
+
+void MainWindow::animateConsumableUseThen(int idx, std::function<void()> after)
+{
+    if (idx < 0 || idx >= mConsumableItems.size() || !mConsumableItems[idx]) {
+        if (after) after();
+        return;
+    }
+
+    auto *item = mConsumableItems[idx];
+    QPointer<ConsumableItem> guard(item);
+    if (mConsumableActionPanel) mConsumableActionPanel->hide();
+    mSelectedConsumableIdx = -1;
+    item->setEnabled(false);
+    item->setZValue(780);
+    item->setTransformOriginPoint(CARD_W / 2.0, CARD_H / 2.0);
+
+    auto *group = new QParallelAnimationGroup(this);
+    auto *posAnim = new QPropertyAnimation(item, "pos", group);
+    posAnim->setDuration(170);
+    posAnim->setStartValue(item->pos());
+    posAnim->setEndValue(item->pos() + QPointF(0, -42));
+    posAnim->setEasingCurve(QEasingCurve::OutCubic);
+
+    auto *scaleAnim = new QPropertyAnimation(item, "scale", group);
+    scaleAnim->setDuration(170);
+    scaleAnim->setStartValue(item->scale());
+    scaleAnim->setEndValue(1.13);
+    scaleAnim->setEasingCurve(QEasingCurve::OutCubic);
+
+    group->addAnimation(posAnim);
+    group->addAnimation(scaleAnim);
+    connect(group, &QParallelAnimationGroup::finished, this, [this, group, guard, after]() {
+        if (guard) guard->setEnabled(true);
+        if (after) after();
+        group->deleteLater();
+    });
+    group->start();
+}
+
 void MainWindow::onConsumableClicked(ConsumableItem *item, Qt::MouseButton btn)
+{
+    onConsumablePressed(item, btn);
+}
+
+void MainWindow::onConsumablePressed(ConsumableItem *item, Qt::MouseButton btn)
 {
     int idx = mConsumableItems.indexOf(item);
     if (idx < 0) return;
@@ -2209,43 +2330,96 @@ void MainWindow::onConsumableClicked(ConsumableItem *item, Qt::MouseButton btn)
 
     if (mPackOpenWidget && mPackOpenWidget->isVisible() && !mPendingPackHand.isEmpty()) {
         QVector<int> packSel = mPackOpenWidget->selectedHandIndices();
-        if (mGameState->useConsumableOnPackHand(idx, packSel, mPendingPackHand)) {
-            mPackOpenWidget->setPackHand(mPendingPackHand);
-            mPackOpenWidget->setInventoryConsumables(mGameState->consumables());
-            refreshConsumableSlots();
-            refreshGold();
-            if (mShopWidget && mShopWidget->isVisible()) mShopWidget->refresh();
-        } else {
-            mConsCountLabel->setDefaultTextColor(QColor("#ff8080"));
-            QTimer::singleShot(400, this, [this]() {
-                if (mConsCountLabel) mConsCountLabel->setDefaultTextColor(QColor("#aaddaa"));
-            });
-        }
+        animateConsumableUseThen(idx, [this, idx, packSel]() {
+            if (mGameState->useConsumableOnPackHand(idx, packSel, mPendingPackHand)) {
+                mPackOpenWidget->setPackHand(mPendingPackHand);
+                mPackOpenWidget->setInventoryConsumables(mGameState->consumables());
+                refreshConsumableSlots();
+                refreshGold();
+                refreshCounters();
+                if (mShopWidget && mShopWidget->isVisible()) mShopWidget->refresh();
+            } else {
+                flashConsumableActionError();
+                refreshConsumableSlots();
+            }
+        });
         return;
     }
 
     if (btn == Qt::LeftButton) {
         showConsumableAction(idx);
+    }
+}
+
+void MainWindow::onConsumableDragMoved(ConsumableItem *item, QPointF scenePos)
+{
+    int from = mConsumableItems.indexOf(item);
+    if (from < 0) return;
+    if (mConsumableActionPanel) mConsumableActionPanel->hide();
+    mSelectedConsumableIdx = -1;
+
+    int n = mConsumableItems.size();
+    if (n <= 1) {
+        item->setZValue(700);
         return;
     }
 
-    QVector<int> sel = mSelected;
-    std::sort(sel.begin(), sel.end());
+    int visualSlots = Constants::MAX_CONSUMABLE_SLOTS;
+    int totalW = CARD_W + qMax(0, visualSlots - 1) * (CARD_W + 14);
+    int startX = mSceneW - 8 - totalW;
+    int step = (n > 1) ? (totalW - CARD_W) / qMax(1, n - 1) : (CARD_W + 14);
+    step = qBound(42, step, CARD_W + 14);
 
-    const auto &cs = mGameState->consumables();
-    if (idx >= cs.size()) return;
-    if (cs[idx].needsSelection > 0 && sel.size() < cs[idx].needsSelection) {
-        mHandCountLabel->setDefaultTextColor(QColor("#ff8080"));
-        QTimer::singleShot(400, this, [this]() {
-            if (mHandCountLabel) mHandCountLabel->setDefaultTextColor(QColor("#aaddaa"));
-        });
+    int to = 0;
+    for (int i = 0; i < n; ++i) {
+        double center = startX + i * step + CARD_W / 2.0;
+        if (scenePos.x() > center) to = i;
+    }
+    to = qBound(0, to, n - 1);
+
+    if (to == mLastConsumableDragTo) {
+        item->setZValue(700);
         return;
     }
+    mLastConsumableDragTo = to;
 
-    if (mGameState->useConsumable(idx, sel)) {
-        refreshGold();
-        if (mShopWidget && mShopWidget->isVisible()) mShopWidget->refresh();
+    QVector<ConsumableItem*> visual = mConsumableItems;
+    visual.removeAt(from);
+    visual.insert(to, item);
+    for (int vi = 0; vi < visual.size(); ++vi) {
+        ConsumableItem *ci = visual[vi];
+        if (ci == item) continue;
+        int x = startX + vi * step;
+        int y = JOKER_Y + 18;
+        ci->setZValue(30 + vi);
+        ci->moveTo(QPointF(x, y), 60);
     }
+    item->setZValue(700);
+}
+
+void MainWindow::onConsumableDragReleased(ConsumableItem *item, QPointF scenePos)
+{
+    mLastConsumableDragTo = -1;
+    int from = mConsumableItems.indexOf(item);
+    if (from < 0) { refreshConsumableSlots(); return; }
+    int n = mConsumableItems.size();
+    if (n <= 1) { refreshConsumableSlots(); return; }
+
+    int visualSlots = Constants::MAX_CONSUMABLE_SLOTS;
+    int totalW = CARD_W + qMax(0, visualSlots - 1) * (CARD_W + 14);
+    int startX = mSceneW - 8 - totalW;
+    int step = (n > 1) ? (totalW - CARD_W) / qMax(1, n - 1) : (CARD_W + 14);
+    step = qBound(42, step, CARD_W + 14);
+
+    int to = 0;
+    for (int i = 0; i < n; ++i) {
+        double center = startX + i * step + CARD_W / 2.0;
+        if (scenePos.x() > center) to = i;
+    }
+    to = qBound(0, to, n - 1);
+
+    if (from != to) mGameState->moveConsumable(from, to);
+    else refreshConsumableSlots();
 }
 
 void MainWindow::onPackChoiceMade(int chosenIdx, QVector<int> selectedPackHandIdx)
@@ -2708,14 +2882,16 @@ void MainWindow::setPlayPhaseVisible(bool v)
 
 void MainWindow::updateFlameIntensity()
 {
-    qint64 earned = qint64(mDisplayedChips) * qint64(mDisplayedMult);
-    qint64 required = mGameState ? mGameState->targetScore() : 0;
+    const double earned = mDisplayedChips * mDisplayedMult;
+    const double required = mGameState ? mGameState->targetScore() : 0.0;
 
     double target = 0.0;
-    if (required > 0 && earned >= required) {
-        // 原版: max(0, log5(earned) - 2)
-        target = std::max(0.0, std::log(double(earned)) / std::log(5.0) - 2.0);
+    if (required > 0.0 && std::isfinite(earned) && earned >= required) {
+        // 原版: max(0, log5(earned) - 2)，用 double 避免 qint64 溢出后负数/崩溃。
+        target = std::max(0.0, std::log(std::max(earned, 1.0)) / std::log(5.0) - 2.0);
         target = std::min(target, 10.0);
+    } else if (required > 0.0 && std::isinf(earned)) {
+        target = 10.0;
     }
     mChipFlameTarget = target;
     mMultFlameTarget = target;
@@ -2767,6 +2943,10 @@ void MainWindow::resetScoreFlame()
 {
     mChipFlameTarget = 0.0;
     mMultFlameTarget = 0.0;
+    mChipFlameReal = 0.0;
+    mMultFlameReal = 0.0;
+    if (mChipFlame) { mChipFlame->hide(); mChipFlame->update(); }
+    if (mMultFlame) { mMultFlame->hide(); mMultFlame->update(); }
     const QString chipBase = "background:#009dff; color:white; border-radius:8px; padding:4px 8px;";
     const QString multBase = "background:#fe5f55; color:white; border-radius:8px; padding:4px 8px;";
     if (mLblChips) mLblChips->setStyleSheet(chipBase);
@@ -2813,10 +2993,11 @@ void MainWindow::spawnFloatingText(const QPointF &nearPos, const QString &text, 
 }
 
 
-void MainWindow::animateScoreTotalThenFinalize(int gained, int /*delayAfterEvents*/)
+void MainWindow::animateScoreTotalThenFinalize(double gained, int /*delayAfterEvents*/)
 {
-    int before = mGameState->score();
-    int after = before + gained;
+    double before = mGameState->score();
+    double after = before + gained;
+    if (!std::isfinite(after)) after = std::numeric_limits<double>::infinity();
 
     auto *anim = new QVariantAnimation(this);
     anim->setDuration(520);
@@ -2826,7 +3007,7 @@ void MainWindow::animateScoreTotalThenFinalize(int gained, int /*delayAfterEvent
     connect(anim, &QVariantAnimation::valueChanged, this, [this](const QVariant &v) {
         mLblScore->setText(formatScoreNumber(v.toDouble()));
         QFont f = mLblScore->font();
-        f.setPixelSize(30 + (v.toInt() % 2));
+        f.setPixelSize(30 + (int(std::llround(std::fmod(std::abs(v.toDouble()), 2.0)))));
         mLblScore->setFont(f);
     });
     connect(anim, &QVariantAnimation::finished, this, [this, after]() {
@@ -2924,6 +3105,7 @@ void MainWindow::showGameOverOverlay(bool won)
         hl->addWidget(quit);
         vl->addWidget(row);
         connect(restart, &QPushButton::clicked, this, [this]() {
+            setUpdatesEnabled(false);
             resetTransientOverlaysForNewRun();
             for (auto *c : mHandCards) { if (c->scene()) mScene->removeItem(c); c->deleteLater(); }
             mHandCards.clear();
@@ -2933,6 +3115,10 @@ void MainWindow::showGameOverOverlay(bool won)
             refreshJokerSlots();
             refreshConsumableSlots();
             refreshScore();
+            QTimer::singleShot(0, this, [this]() {
+                setUpdatesEnabled(true);
+                update();
+            });
         });
         connect(quit, &QPushButton::clicked, this, &MainWindow::close);
         mGameOverProxy = mScene->addWidget(mGameOverPanel);
@@ -2945,7 +3131,7 @@ void MainWindow::showGameOverOverlay(bool won)
     if (body) body->setText(won
                           ? "你击败了所有盲注。"
                           : QString("未达到盲注要求\n分数：%1 / %2\n底注：%3")
-                                .arg(mGameState->score()).arg(mGameState->targetScore()).arg(mGameState->ante()));
+                                .arg(formatScoreNumber(mGameState->score())).arg(formatScoreNumber(mGameState->targetScore())).arg(mGameState->ante()));
     mGameOverPanel->adjustSize();
     mGameOverProxy->setPos((mSceneW - mGameOverPanel->width()) / 2.0,
                            mSceneH + 40);
@@ -3038,13 +3224,14 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev)
         color = QColor("#fe5f55");
         text = QString("×%1").arg(QString::number(ev.xmultValue, 'g', 3));
         isXMult = true;
-        mDisplayedMult = qMax(1, qRound(mDisplayedMult * ev.xmultValue));
+        mDisplayedMult = std::max(1.0, mDisplayedMult * ev.xmultValue);
+        if (!std::isfinite(mDisplayedMult)) mDisplayedMult = std::numeric_limits<double>::infinity();
         mLblMult->setText(formatScoreNumber(mDisplayedMult));
         break;
 
     case ScoreEventKind::DollarGain:
         color = QColor("#f3b958");
-        text = QString("+$%1").arg(ev.intValue);
+        text = QString("+$%1").arg(formatScoreNumber(ev.intValue));
         refreshGold();
         break;
 

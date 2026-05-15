@@ -13,7 +13,7 @@ class RoundEndOverlay : public QWidget
     Q_OBJECT
 public:
     RoundEndOverlay(const QFont &cnFont, const QFont &pixelFont, QWidget *parent = nullptr);
-    void setData(int blindChipRow, int targetScore, int blindReward,
+    void setData(int blindChipRow, double targetScore, int blindReward,
                  int handsLeft, int handBonus,
                  int interest);
     void showFromBottom(const QRect &finalGeometry);

@@ -2,10 +2,28 @@
 #include <algorithm>
 
 HandResult HandEvaluator::evaluate(const QVector<CardData> &cards) {
-    QVector <CardData> effective = cards;
+    // 石头牌没有点数和花色：不参与牌型判定，只在 GameState 计分阶段作为额外计分牌 +50。
+    QVector<CardData> effective;
+    effective.reserve(cards.size());
+    for (const CardData &c : cards) {
+        if (c.enhancement != Enhancement::Stone) effective.append(c);
+    }
+
     std::sort(effective.begin(), effective.end(), [](const CardData &a, const CardData &b) {
         return static_cast<int>(a.rank) > static_cast<int>(b.rank);
     });
+
+    if (effective.isEmpty()) {
+        HandResult result;
+        result.type = HandType::HighCard;
+        result.scoringCards.clear();
+        result.name = handTypeName(HandType::HighCard);
+        result.chips = Constants::BASE_HIGH_CARD_CHIPS;
+        result.mult = Constants::BASE_HIGH_CARD_MULT;
+        result.xmult = 1.0;
+        return result;
+    }
+
     bool flush = isFlush(effective);
     bool straight = isStraight(effective);
     auto groups = groupByRank(effective);

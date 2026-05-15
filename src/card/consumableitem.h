@@ -3,6 +3,7 @@
 
 #include <QGraphicsObject>
 #include <QPixmap>
+#include <QPointF>
 #include "consumable.h"
 
 class QGraphicsSceneHoverEvent;
@@ -27,9 +28,14 @@ public:
 
 signals:
     void clicked(ConsumableItem *self, Qt::MouseButton button);
+    void pressed(ConsumableItem *self, Qt::MouseButton button);
+    void dragMoved(ConsumableItem *self, QPointF scenePos);
+    void dragReleased(ConsumableItem *self, QPointF scenePos);
 
 protected:
     void mousePressEvent(QGraphicsSceneMouseEvent *e) override;
+    void mouseMoveEvent(QGraphicsSceneMouseEvent *e) override;
+    void mouseReleaseEvent(QGraphicsSceneMouseEvent *e) override;
     void hoverEnterEvent(QGraphicsSceneHoverEvent *e) override;
     void hoverMoveEvent(QGraphicsSceneHoverEvent *e) override;
     void hoverLeaveEvent(QGraphicsSceneHoverEvent *e) override;
@@ -37,10 +43,18 @@ protected:
 private:
     Consumable mC;
     bool mHovered = false;
+    bool mPressed = false;
+    bool mDragging = false;
+    QPointF mPressScenePos;
+    qreal mRestZ = 0.0;
     double mHoverTiltX = 0.0;
     double mHoverTiltY = 0.0;
     void applyHoverTransform();
     void animateScale(qreal target, int durationMs = 120);
+public:
+    void moveTo(const QPointF &target, int durationMs = 160);
+    void juiceUp(double scaleAmount = 1.12, int durationMs = 180);
+private:
     static QPixmap *sSheet;
 };
 

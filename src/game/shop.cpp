@@ -344,8 +344,9 @@ void Shop::addPendingEditionJoker(Edition e)
 }
 
 int Shop::applyDiscount(int rawCost) const {
-    if (mDiscountPercent <= 0) return rawCost;
-    return qMax(0, int(std::floor(rawCost * (100 - mDiscountPercent) / 100.0)));
+    // 原版 Card:set_cost(): floor((base_cost + extra_cost + 0.5) * (100-discount)/100)，最低 $1。
+    if (mDiscountPercent <= 0) return qMax(1, rawCost);
+    return qMax(1, int(std::floor((rawCost + 0.5) * (100 - mDiscountPercent) / 100.0)));
 }
 
 int Shop::rawCostFor(const ShopOffer &o) const
@@ -354,9 +355,9 @@ int Shop::rawCostFor(const ShopOffer &o) const
     case OfferKind::Joker: {
         int raw = rawJokerCostForType(o.joker);
         switch (o.jokerEdition) {
-        case Edition::Foil:
-        case Edition::Holographic: raw += 2; break;
-        case Edition::Polychrome:  raw += 3; break;
+        case Edition::Foil:        raw += 2; break;
+        case Edition::Holographic: raw += 3; break;
+        case Edition::Polychrome:  raw += 5; break;
         case Edition::Negative:    raw += 5; break;
         default: break;
         }
@@ -679,9 +680,9 @@ JokerType Shop::randomJokerType(const QVector<JokerType> &alreadyRolled) const {
 int Shop::costFor(JokerType t, Edition e) const {
     int raw = rawJokerCostForType(t);
     switch (e) {
-    case Edition::Foil:
-    case Edition::Holographic: raw += 2; break;
-    case Edition::Polychrome:  raw += 3; break;
+    case Edition::Foil:        raw += 2; break;
+    case Edition::Holographic: raw += 3; break;
+    case Edition::Polychrome:  raw += 5; break;
     case Edition::Negative:    raw += 5; break;
     default: break;
     }
