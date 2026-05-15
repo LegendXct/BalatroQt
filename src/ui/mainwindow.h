@@ -94,8 +94,11 @@ private:
     static constexpr int JOKER_H = CARD_H + 20;
     static constexpr int PLAY_Y = JOKER_H + 150;   // ← 原 +16, 改成 +150
     static constexpr int PLAY_H = 240;
+    static constexpr int HAND_RIGHT_RESERVE = 230;
     int mBtnY = 0;
     int mHandY = 0;
+    int mHandYNormal  = 0;   // 选牌期间的 hand y
+    int mHandYScoring = 0;   // 出牌计分期间的 hand y(下移让出 play 区下方空间)
 
     bool mGameOverHandled = false;
     bool mScoringInProgress = false;

@@ -1009,7 +1009,7 @@ void MainWindow::setupScene() {
     CardData backData;
     backData.faceUp = false;
     mDeckBackCard = new CardItem(backData);
-    mDeckBackCard->setPos(mSceneW - CARD_W - 10, mSceneH - CARD_H - 36);
+    mDeckBackCard->setPos(mSceneW - CARD_W - 60, mSceneH - CARD_H - 36);
     mDeckBackCard->setZValue(1);
     mScene->addItem(mDeckBackCard);
     connect(mDeckBackCard, &CardItem::clicked, this, &MainWindow::onDeckClicked);
@@ -1021,10 +1021,12 @@ void MainWindow::setupScene() {
     mDeckLabel->setPos(mSceneW - CARD_W - 4, mSceneH - 34);
     mDeckLabel->setZValue(2);
 
-    mHandY = mSceneH - CARD_H - 150;
+    mHandYNormal  = mSceneH - CARD_H - 150;     // 正常 740
+    mHandYScoring = mSceneH - CARD_H - 90;      // 出牌时下移 60 → 800
+    mHandY = mHandYNormal;
     mBtnY  = mSceneH - 88;
 
-    mDeckLabel->setPos(mSceneW - CARD_W - 4, mSceneH - 34);
+    mDeckLabel->setPos(mSceneW - CARD_W - 54, mSceneH - 34);
 }
 
 void MainWindow::setupSceneButtons() {
@@ -1032,7 +1034,7 @@ void MainWindow::setupSceneButtons() {
     int btnH = 50;
     int gap = 12;
     int totalW = btnW * 3 + gap * 2;
-    int startX = (mSceneW - totalW) / 2;
+    int startX = (mSceneW - HAND_RIGHT_RESERVE - totalW) / 2;
     int y = mBtnY;
 
     mBtnPlay = makeBtn("出牌", "#009dff", "#33b0ff", mCNFont, nullptr, btnH);
@@ -1216,26 +1218,24 @@ void MainWindow::layoutHandCards() {
     int n = mHandCards.size();
     if (n == 0) return;
 
-    mHandCountLabel->setPlainText(
-        QString("%1/%2").arg(n).arg(mGameState->handSize()));
-    QRectF hcr = mHandCountLabel->boundingRect();
-    mHandCountLabel->setPos((mSceneW - hcr.width()) / 2, mHandY - 22);
-
-    int available = mSceneW - 80;
+    int areaW = mSceneW - HAND_RIGHT_RESERVE;       // 手牌可用宽度
+    int available = areaW - 80;
     int step = (n > 1) ? (available - CARD_W) / (n - 1) : 0;
     step = qMin(step, CARD_W - 30);
     int totalW = (n - 1) * step + CARD_W;
-    int startX = (mSceneW - totalW) / 2;
+    int startX = (areaW - totalW) / 2;              // 在手牌区(不含右侧 deck/tag 区)居中
+
+    mHandCountLabel->setPlainText(
+        QString("%1/%2").arg(n).arg(mGameState->handSize()));
+    QRectF hcr = mHandCountLabel->boundingRect();
+    mHandCountLabel->setPos(areaW / 2.0 - hcr.width() / 2.0, mHandY + CARD_H + 8);
 
     for (int i = 0; i < n; ++i) {
         bool sel = mSelected.contains(i);
-
         double t = (-n / 2.0 - 0.5 + (i + 1)) / n;
         double angleDeg = 0.2 * t * 180.0 / M_PI;
-
         int x = startX + i * step;
         int y = mHandY + (sel ? -50 : 0);
-
         mHandCards[i]->setBaseRotation(angleDeg);
         mHandCards[i]->setZValue(i);
         mHandCards[i]->moveTo(QPointF(x, y), 220);
@@ -1254,8 +1254,9 @@ void MainWindow::layoutPlayedCards() {
     int n = mPlayedCards.size();
     if (n == 0) return;
 
+    int areaW = mSceneW - HAND_RIGHT_RESERVE;
     int totalW = n * CARD_W + (n - 1) * 10;
-    int startX = (mSceneW - totalW) / 2;
+    int startX = (areaW - totalW) / 2;
     int y = PLAY_Y + (PLAY_H - CARD_H) / 2;
 
     for (int i = 0; i < n; ++i) {
@@ -1339,7 +1340,7 @@ void MainWindow::refreshCounters() {
         mDeckLabel->setPlainText(
             QString("%1/%2").arg(formatScoreNumber(mGameState->deckRemaining())).arg(formatScoreNumber(mGameState->deckTotal())));
         QRectF br = mDeckLabel->boundingRect();
-        mDeckLabel->setPos(mSceneW - CARD_W - 10 + (CARD_W - br.width()) / 2.0,
+        mDeckLabel->setPos(mSceneW - CARD_W - 60 + (CARD_W - br.width()) / 2.0,
                            mSceneH - 34);
     }
     if (mJokerCountLabel) {
@@ -1449,11 +1450,12 @@ void MainWindow::onHandCardDragMoved(CardItem *card, QPointF scenePos)
     int n = mHandCards.size();
     if (n <= 1) return;
 
-    int available = mSceneW - 80;
+    int areaW = mSceneW - HAND_RIGHT_RESERVE;
+    int available = areaW - 80;
     int step = (available - CARD_W) / qMax(1, n - 1);
     step = qMin(step, CARD_W - 30);
     int totalW = (n - 1) * step + CARD_W;
-    int startX = (mSceneW - totalW) / 2;
+    int startX = (areaW - totalW) / 2;
 
     int to = 0;
     for (int i = 0; i < n; ++i) {
@@ -1497,11 +1499,12 @@ void MainWindow::onHandCardDragReleased(CardItem *card, QPointF scenePos)
     int n = mHandCards.size();
     if (n <= 1) { layoutHandCards(); return; }
 
-    int available = mSceneW - 80;
+    int areaW = mSceneW - HAND_RIGHT_RESERVE;
+    int available = areaW - 80;
     int step = (available - CARD_W) / qMax(1, n - 1);
     step = qMin(step, CARD_W - 30);
     int totalW = (n - 1) * step + CARD_W;
-    int startX = (mSceneW - totalW) / 2;
+    int startX = (areaW - totalW) / 2;
 
     int to = 0;
     double x = scenePos.x();
@@ -1544,7 +1547,9 @@ void MainWindow::onPlayClicked() {
     if (mBtnPlay) mBtnPlay->setEnabled(false);
     if (mBtnDiscard) mBtnDiscard->setEnabled(false);
 
-    hidePlayControlsForScoring();   // ← 加这一行,按钮滑出屏幕
+    // 出牌:按钮飞出屏幕 + 手牌下移,8/8 标签随手牌一起下移。
+    mHandY = mHandYScoring;
+    hidePlayControlsForScoring();
 
     QVector<int> sortedIdx = mSelected;
     std::sort(sortedIdx.begin(), sortedIdx.end());
@@ -1566,8 +1571,9 @@ void MainWindow::onPlayClicked() {
     layoutHandCards();
 
     int n = mPlayedCards.size();
+    int areaW = mSceneW - HAND_RIGHT_RESERVE;
     int totalW = n * CARD_W + (n - 1) * 10;
-    int startX = (mSceneW - totalW) / 2;
+    int startX = (areaW - totalW) / 2;
     int y = PLAY_Y + (PLAY_H - CARD_H) / 2;
     for (int i = 0; i < n; ++i) {
         QPointF target(startX + i * (CARD_W + 10), y);
@@ -2672,6 +2678,7 @@ void MainWindow::onBlindStarted()
     refreshJokerSlots();
     refreshConsumableSlots();
     clearPlayedCards();
+    mHandY = mHandYNormal;
     mLblChips->setText("0");
     mLblMult ->setText("0");
     mDisplayedChips = 0;
@@ -2852,6 +2859,7 @@ void MainWindow::onSkipBlind(int /*idx*/)
     default: break;
     }
 }
+
 void MainWindow::addObtainedTag(int tagCol, int tagRow)
 {
     QPixmap sheet(":/textures/images/tags.png");
@@ -2863,8 +2871,11 @@ void MainWindow::addObtainedTag(int tagCol, int tagRow)
 
     auto *item = new QGraphicsPixmapItem(pix);
     int idx = mObtainedTagIcons.size();
-    int x = mSceneW - CARD_W - 10 - 60 - idx * 56;
-    int y = mSceneH - CARD_H - 36 + (CARD_H - 48) / 2;
+    // tag 在牌堆右侧累积。deck 右缘 = mSceneW - 60(因为 deck.x = mSceneW-CARD_W-60)。
+    // 牌堆右侧只有 60px 余地,只能放 1 个 tag(48px),多个则向上叠。
+    int deckRightX = mSceneW - 60;
+    int x = deckRightX + 6;
+    int y = mSceneH - CARD_H - 36 + (CARD_H - 48) / 2 - idx * 56;   // 多张往上叠
     item->setPos(x, y);
     item->setZValue(5);
     mScene->addItem(item);
@@ -3057,7 +3068,11 @@ void MainWindow::animateScoreTotalThenFinalize(double gained, int /*delayAfterEv
             if (mGameState->phase() == GamePhase::Blind) {
                 if (mBtnPlay) mBtnPlay->setEnabled(true);
                 if (mBtnDiscard) mBtnDiscard->setEnabled(true);
-                showPlayControlsAfterScoring();   // ← 加这一行,按钮滑回原位
+
+                // 恢复 hand 位置 + 重排手牌 + 让按钮飞回。8/8 标签随 hand 上移。
+                mHandY = mHandYNormal;
+                showPlayControlsAfterScoring();
+                layoutHandCards();
             }
         });
     });
