@@ -11,8 +11,179 @@
 #include <QMap>
 #include <QStringList>
 #include <QFrame>
+#include <QEvent>
+#include <QPainterPath>
+#include <QFontMetrics>
 #include <algorithm>
+#include <cmath>
 #include "../utils/shadereffects.h"
+
+
+namespace {
+static int deckUiPx(int px) { return qMax(px + 2, int(std::round(px * 1.35))); }
+
+QString deckRankLabel(Rank r)
+{
+    switch (r) {
+    case Rank::Two: return "2";
+    case Rank::Three: return "3";
+    case Rank::Four: return "4";
+    case Rank::Five: return "5";
+    case Rank::Six: return "6";
+    case Rank::Seven: return "7";
+    case Rank::Eight: return "8";
+    case Rank::Nine: return "9";
+    case Rank::Ten: return "10";
+    case Rank::Jack: return "J";
+    case Rank::Queen: return "Q";
+    case Rank::King: return "K";
+    case Rank::Ace: return "A";
+    }
+    return "?";
+}
+
+QString deckSuitLabel(Suit s)
+{
+    switch (s) {
+    case Suit::Spades: return QStringLiteral("黑桃");
+    case Suit::Hearts: return QStringLiteral("红桃");
+    case Suit::Diamonds: return QStringLiteral("方块");
+    case Suit::Clubs: return QStringLiteral("梅花");
+    }
+    return QString();
+}
+
+QString deckHoverTitle(const CardData &d)
+{
+    if (d.enhancement == Enhancement::Stone)
+        return QStringLiteral("石头牌");
+    return deckSuitLabel(d.suit) + deckRankLabel(d.rank);
+}
+
+QString deckHoverDesc(const CardData &d)
+{
+    int chips = d.chipValue() + d.permanentBonusChips;
+    if (d.enhancement == Enhancement::Bonus) chips += 30;
+    if (d.enhancement == Enhancement::Stone) chips = 50 + d.permanentBonusChips;
+    return QStringLiteral("+%1筹码").arg(chips);
+}
+
+void drawDeckHoverTag(QPainter *painter, const CardData &d, const QRectF &cardRect, const QFont &baseFont)
+{
+    const QString title = deckHoverTitle(d);
+    const QString desc = deckHoverDesc(d);
+
+    painter->save();
+    painter->setRenderHint(QPainter::Antialiasing, true);
+    painter->setRenderHint(QPainter::TextAntialiasing, false);
+
+    QFont titleFont = baseFont;
+    titleFont.setPixelSize(13);
+    titleFont.setBold(true);
+    QFont descFont = baseFont;
+    descFont.setPixelSize(13);
+    descFont.setBold(true);
+
+    QFontMetrics titleFm(titleFont);
+    QFontMetrics descFm(descFont);
+    const int w = qMax(58, qMax(titleFm.horizontalAdvance(title), descFm.horizontalAdvance(desc)) + 18);
+    const int titleH = 23;
+    const int descH = 23;
+    const qreal x = cardRect.center().x() - w / 2.0;
+    const qreal y = 1.0;
+
+    QRectF outer(x, y, w, titleH + descH + 3);
+    QPainterPath shadowPath;
+    shadowPath.addRoundedRect(outer.adjusted(1.8, 2.2, 1.8, 2.2), 6, 6);
+    painter->fillPath(shadowPath, QColor(0, 0, 0, 70));
+
+    QRectF titleRect(x, y, w, titleH + 1);
+    QRectF descRect(x, y + titleH - 1, w, descH + 2);
+    QColor bg(248, 255, 250);
+    QColor edge(34, 45, 48);
+
+    QPainterPath titlePath;
+    titlePath.addRoundedRect(titleRect, 6, 6);
+    painter->fillPath(titlePath, bg);
+    painter->setPen(QPen(edge, 1.6));
+    painter->drawPath(titlePath);
+
+    QPainterPath descPath;
+    descPath.addRoundedRect(descRect, 6, 6);
+    painter->fillPath(descPath, bg);
+    painter->setPen(QPen(edge, 1.6));
+    painter->drawPath(descPath);
+    painter->fillRect(QRectF(x + 2, y + titleH - 2, w - 4, 4), bg);
+    painter->setPen(QPen(edge, 1.4));
+    painter->drawLine(QPointF(x + 2, y + titleH), QPointF(x + w - 2, y + titleH));
+
+    painter->setFont(titleFont);
+    painter->setPen(QColor(31, 45, 48));
+    painter->drawText(titleRect, Qt::AlignCenter, title);
+    painter->setFont(descFont);
+    painter->setPen(QColor(42, 132, 205));
+    painter->drawText(descRect, Qt::AlignCenter, desc);
+    painter->restore();
+}
+
+class DeckCardPreviewLabel : public QLabel
+{
+public:
+    DeckCardPreviewLabel(const CardData &card, const QPixmap &pixmap, const QFont &font, QWidget *parent = nullptr)
+        : QLabel(parent), mCard(card), mPixmap(pixmap), mFont(font)
+    {
+        setMouseTracking(true);
+        setAttribute(Qt::WA_TranslucentBackground, true);
+        setStyleSheet("background:transparent; border:none;");
+        setCursor(Qt::PointingHandCursor);
+    }
+
+protected:
+    bool event(QEvent *event) override
+    {
+        if (event->type() == QEvent::Enter) {
+            mHovered = true;
+            raise();
+            update();
+        } else if (event->type() == QEvent::Leave) {
+            mHovered = false;
+            update();
+        }
+        return QLabel::event(event);
+    }
+
+    void paintEvent(QPaintEvent *) override
+    {
+        QPainter painter(this);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        painter.setRenderHint(QPainter::Antialiasing, true);
+
+        const int cardX = (width() - mPixmap.width()) / 2;
+        const int cardY = 48;
+        QRectF cardRect(cardX, cardY, mPixmap.width(), mPixmap.height());
+
+        painter.drawPixmap(cardRect.topLeft(), mPixmap);
+
+        if (mHovered) {
+            QColor blue(31, 183, 255, 245);
+            QColor glow = blue;
+            glow.setAlpha(90);
+            painter.setBrush(Qt::NoBrush);
+            painter.setPen(QPen(glow, 3.2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            painter.drawRoundedRect(cardRect.adjusted(-1.1, -1.1, 1.1, 1.1), 7, 7);
+            painter.setPen(QPen(blue, 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+            painter.drawRoundedRect(cardRect.adjusted(1.4, 1.4, -1.4, -1.4), 6, 6);
+            drawDeckHoverTag(&painter, mCard, cardRect, mFont);
+        }
+    }
+
+private:
+    CardData mCard;
+    QPixmap mPixmap;
+    QFont mFont;
+    bool mHovered = false;
+};
+} // namespace
 
 DeckViewWidget::DeckViewWidget(const QFont &cnFont, const QFont &pixelFont,
                                QWidget *parent)
@@ -44,20 +215,20 @@ void DeckViewWidget::buildUi()
     topLayout->setSpacing(10);
 
     mTitle = new QLabel("牌组", top);
-    QFont tf = mCNFont; tf.setPixelSize(28); tf.setBold(true);
+    QFont tf = mCNFont; tf.setPixelSize(deckUiPx(28)); tf.setBold(true);
     mTitle->setFont(tf);
     mTitle->setStyleSheet("color:#f3b958; background:transparent;");
     topLayout->addWidget(mTitle);
 
     mSubtitle = new QLabel("", top);
-    QFont sf = mCNFont; sf.setPixelSize(15);
+    QFont sf = mCNFont; sf.setPixelSize(deckUiPx(15));
     mSubtitle->setFont(sf);
     mSubtitle->setStyleSheet("color:#dce3e6; background:transparent;");
     topLayout->addWidget(mSubtitle, 1);
 
     mBtnClose = new QPushButton("关闭", top);
     mBtnClose->setFixedSize(90, 36);
-    QFont bf = mCNFont; bf.setPixelSize(14); bf.setBold(true);
+    QFont bf = mCNFont; bf.setPixelSize(deckUiPx(14)); bf.setBold(true);
     mBtnClose->setFont(bf);
     mBtnClose->setCursor(Qt::PointingHandCursor);
     mBtnClose->setStyleSheet(
@@ -76,7 +247,7 @@ void DeckViewWidget::buildUi()
 
     auto makeTab = [this](const QString &text) {
         auto *btn = new QPushButton(text);
-        QFont f = mCNFont; f.setPixelSize(16); f.setBold(true);
+        QFont f = mCNFont; f.setPixelSize(deckUiPx(16)); f.setBold(true);
         btn->setFont(f);
         btn->setFixedHeight(42);
         btn->setCursor(Qt::PointingHandCursor);
@@ -185,7 +356,7 @@ void DeckViewWidget::refreshGrid()
     QVector<CardData> cards = mShowingFull ? mFullDeckCards : mRemainingCards;
     if (cards.isEmpty()) {
         auto *empty = new QLabel("没有牌", mGridHost);
-        QFont f = mCNFont; f.setPixelSize(22); f.setBold(true);
+        QFont f = mCNFont; f.setPixelSize(deckUiPx(22)); f.setBold(true);
         empty->setFont(f);
         empty->setAlignment(Qt::AlignCenter);
         empty->setStyleSheet("color:#dce3e6; background:transparent;");
@@ -211,40 +382,40 @@ void DeckViewWidget::refreshGrid()
         if (rowCards.isEmpty()) return;
 
         auto *row = new QWidget(mGridHost);
-        row->setMinimumHeight(138);
+        row->setMinimumHeight(154);
         row->setStyleSheet("background:#222b33; border-radius:12px;");
 
         auto *titleLbl = new QLabel(title, row);
-        QFont tf = mCNFont; tf.setPixelSize(16); tf.setBold(true);
+        QFont tf = mCNFont; tf.setPixelSize(deckUiPx(16)); tf.setBold(true);
         titleLbl->setFont(tf);
         titleLbl->setAlignment(Qt::AlignCenter);
         titleLbl->setStyleSheet("color:#f3b958; background:transparent;");
         titleLbl->setGeometry(10, 12, 84, 28);
 
         auto *countLbl = new QLabel(QString::number(rowCards.size()), row);
-        QFont cf = mPixelFont; cf.setPixelSize(22); cf.setBold(true);
+        QFont cf = mPixelFont; cf.setPixelSize(deckUiPx(22)); cf.setBold(true);
         countLbl->setFont(cf);
         countLbl->setAlignment(Qt::AlignCenter);
         countLbl->setStyleSheet("color:white; background:#374244; border-radius:8px;");
         countLbl->setGeometry(24, 52, 52, 34);
 
         const QSize cardSize(74, 99);
+        const int previewW = cardSize.width() + 20;
+        const int previewH = cardSize.height() + 52;
         const int left = 108;
-        const int top = 18;
+        const int top = 0;
         int avail = qMax(620, mPanel ? mPanel->width() - 180 : 760);
         int step = (rowCards.size() <= 1) ? 0 : (avail - cardSize.width()) / (rowCards.size() - 1);
         step = qBound(24, step, 58); // 牌多时重叠，牌少时展开，接近原版 Deck Info 的行展示
 
         for (int i = 0; i < rowCards.size(); ++i) {
-            auto *img = new QLabel(row);
-            img->setFixedSize(cardSize);
-            img->setPixmap(renderCard(rowCards[i], cardSize));
-            img->setToolTip(rowCards[i].toString() + "\n" + cardExtraText(rowCards[i]));
-            img->setGeometry(left + i * step, top, cardSize.width(), cardSize.height());
+            auto *img = new DeckCardPreviewLabel(rowCards[i], renderCard(rowCards[i], cardSize), mCNFont, row);
+            img->setFixedSize(previewW, previewH);
+            img->setGeometry(left + i * step - 10, top, previewW, previewH);
             img->raise();
         }
 
-        int rowW = left + qMax(1, rowCards.size()) * step + cardSize.width() + 18;
+        int rowW = left + qMax(1, rowCards.size()) * step + previewW + 18;
         row->setMinimumWidth(qMax(rowW, 760));
         mGrid->addWidget(row, gridRow++, 0);
     };

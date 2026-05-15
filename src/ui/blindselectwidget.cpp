@@ -10,6 +10,41 @@
 #include <QColor>
 #include <QStyle>
 #include <QEvent>
+#include <QGuiApplication>
+#include <QScreen>
+#include <QCursor>
+#include <cmath>
+
+
+static double blindUiScale()
+{
+    QScreen *screen = QGuiApplication::screenAt(QCursor::pos());
+    if (!screen) screen = QGuiApplication::primaryScreen();
+    if (!screen) return 1.0;
+
+    const QSize logical = screen->availableGeometry().size();
+    const qreal dpr = qMax<qreal>(1.0, screen->devicePixelRatio());
+    const double logicalScale = qMin(logical.width() / 1920.0, logical.height() / 1080.0);
+    const double physicalScale = qMin((logical.width() * dpr) / 1920.0,
+                                      (logical.height() * dpr) / 1080.0);
+    double scale = qMax(logicalScale, physicalScale);
+
+    bool ok = false;
+    const double overrideScale = QString::fromLocal8Bit(qgetenv("QT_BALATRO_UI_SCALE")).toDouble(&ok);
+    if (ok && overrideScale > 0.1) scale = overrideScale;
+
+    return qBound(0.58, scale, 2.35);
+}
+
+static int dp(int px)
+{
+    return qMax(1, int(std::round(px * blindUiScale())));
+}
+
+static int fontPx(int px)
+{
+    return qMax(1, int(std::round(px * 1.18 * blindUiScale())));
+}
 
 // 把 #rrggbb 字符串解析成 RGB
 static QColor hexToColor(const QString &hex) { return QColor(hex); }
@@ -73,14 +108,14 @@ BlindSelectWidget::BlindSelectWidget(GameState *gs, const QFont &cnFont,
 {
     // 半透明遮罩,可看到下面的牌桌
     setAttribute(Qt::WA_StyledBackground, true);
-    setStyleSheet("background: rgba(0, 0, 0, 30);");
+    setStyleSheet("background: transparent;");
     buildUi();
 
     mTagPopup = new QLabel(this);
     mTagPopup->setAttribute(Qt::WA_StyledBackground, true);
     mTagPopup->setWordWrap(true);
     mTagPopup->setAlignment(Qt::AlignCenter);
-    QFont tf = mCNFont; tf.setPixelSize(15); tf.setBold(true);
+    QFont tf = mCNFont; tf.setPixelSize(fontPx(15)); tf.setBold(true);
     mTagPopup->setFont(tf);
     mTagPopup->setStyleSheet(
         "color:white; background:rgba(31,37,42,235);"
@@ -100,7 +135,7 @@ void BlindSelectWidget::buildUi()
         // ===== 卡片本身完全透明 =====
         b.card = new QWidget(this);
         b.card->setObjectName(QString("blindCard%1").arg(i));
-        b.card->setFixedSize(CARD_W, CARD_H);
+        b.card->setFixedSize(dp(CARD_W), dp(CARD_H));
         b.card->setAttribute(Qt::WA_StyledBackground, true);
         b.card->setStyleSheet(QString(
                                   "QWidget#%1 {"
@@ -111,8 +146,8 @@ void BlindSelectWidget::buildUi()
                                   ).arg(b.card->objectName()));
 
         auto *vbl = new QVBoxLayout(b.card);
-        vbl->setContentsMargins(14, 16, 14, 0);   // ← 周围留 14px 给 upperBox 不贴卡片边
-        vbl->setSpacing(10);
+        vbl->setContentsMargins(dp(14), dp(16), dp(14), 0);   // ← 周围留 14px 给 upperBox 不贴卡片边
+        vbl->setSpacing(dp(10));
 
         // ===== 上半部分 upperBox(无边框,深一点的灰) =====
         b.upperBox = new QWidget(b.card);
@@ -127,14 +162,14 @@ void BlindSelectWidget::buildUi()
                                       ).arg(b.upperBox->objectName()));
 
         auto *uvbl = new QVBoxLayout(b.upperBox);
-        uvbl->setContentsMargins(12, 12, 12, 12);
-        uvbl->setSpacing(8);
+        uvbl->setContentsMargins(dp(12), dp(12), dp(12), dp(12));
+        uvbl->setSpacing(dp(8));
         uvbl->setAlignment(Qt::AlignHCenter);
 
         // actionBtn 现在放在 upperBox 顶部
         b.actionBtn = new QPushButton("", b.upperBox);
-        b.actionBtn->setFixedSize(170, 44);
-        QFont aabf = mCNFont; aabf.setPixelSize(20); aabf.setBold(true);
+        b.actionBtn->setFixedSize(dp(170), dp(44));
+        QFont aabf = mCNFont; aabf.setPixelSize(fontPx(20)); aabf.setBold(true);
         b.actionBtn->setFont(aabf);
         b.actionBtn->setCursor(Qt::PointingHandCursor);
         connect(b.actionBtn, &QPushButton::clicked, this, [this, i]() {
@@ -145,8 +180,8 @@ void BlindSelectWidget::buildUi()
 
         // 名字横幅(parent 改成 upperBox)
         b.banner = new QLabel(labels[i], b.upperBox);
-        b.banner->setFixedSize(190, 40);
-        QFont bf = mCNFont; bf.setPixelSize(20); bf.setBold(true);
+        b.banner->setFixedSize(dp(190), dp(40));
+        QFont bf = mCNFont; bf.setPixelSize(fontPx(20)); bf.setBold(true);
         b.banner->setFont(bf);
         b.banner->setAlignment(Qt::AlignCenter);
         b.banner->setObjectName(QString("blindBanner%1").arg(i));   // ← 加
@@ -161,19 +196,19 @@ void BlindSelectWidget::buildUi()
 
         // 芯片图
         b.chipImg = new QLabel(b.upperBox);
-        b.chipImg->setFixedSize(95, 95);
+        b.chipImg->setFixedSize(dp(95), dp(95));
         b.chipImg->setAlignment(Qt::AlignCenter);
         b.chipImg->setStyleSheet("background:transparent; border:none;");
         uvbl->addWidget(b.chipImg, 0, Qt::AlignHCenter);
 
         // Boss 描述
         b.bossDescLbl = new QLabel("", b.upperBox);
-        QFont df = mCNFont; df.setPixelSize(15);
+        QFont df = mCNFont; df.setPixelSize(fontPx(15));
         b.bossDescLbl->setFont(df);
         b.bossDescLbl->setAlignment(Qt::AlignCenter);
         b.bossDescLbl->setStyleSheet("color:#ffffff; background:transparent; border:none;");
         b.bossDescLbl->setWordWrap(true);
-        b.bossDescLbl->setFixedHeight(34);
+        b.bossDescLbl->setFixedHeight(dp(34));
         uvbl->addWidget(b.bossDescLbl);
 
         // ===== scoreFrame(更暗透明圆角) =====
@@ -184,12 +219,12 @@ void BlindSelectWidget::buildUi()
             "border-radius: 8px;"
             );
         auto *sfvbl = new QVBoxLayout(scoreFrame);
-        sfvbl->setContentsMargins(8, 6, 8, 6);
-        sfvbl->setSpacing(2);
+        sfvbl->setContentsMargins(dp(8), dp(6), dp(8), dp(6));
+        sfvbl->setSpacing(dp(2));
         sfvbl->setAlignment(Qt::AlignHCenter);
 
         QLabel *targetTitle = new QLabel("至少得分", scoreFrame);
-        QFont tt2f = mCNFont; tt2f.setPixelSize(14);
+        QFont tt2f = mCNFont; tt2f.setPixelSize(fontPx(14));
         targetTitle->setFont(tt2f);
         targetTitle->setAlignment(Qt::AlignCenter);
         targetTitle->setStyleSheet("color:white; background:transparent; border:none;");
@@ -208,16 +243,16 @@ void BlindSelectWidget::buildUi()
             QPixmap chipsSheet(":/textures/images/chips.png");
             if (!chipsSheet.isNull()) {
                 QPixmap pix = chipsSheet.copy(0, 0, 58, 58);
-                chipIcon->setPixmap(pix.scaled(36, 36, Qt::KeepAspectRatio,
+                chipIcon->setPixmap(pix.scaled(dp(36), dp(36), Qt::KeepAspectRatio,
                                                Qt::SmoothTransformation));
             }
         }
-        chipIcon->setFixedSize(36, 36);
+        chipIcon->setFixedSize(dp(36), dp(36));
         chipIcon->setStyleSheet("background:transparent; border:none;");
         trbl->addWidget(chipIcon);
 
         b.targetLbl = new QLabel("300", targetRow);
-        QFont t2f = mCNFont; t2f.setPixelSize(38); t2f.setBold(true);
+        QFont t2f = mCNFont; t2f.setPixelSize(fontPx(38)); t2f.setBold(true);
         b.targetLbl->setFont(t2f);
         b.targetLbl->setAlignment(Qt::AlignVCenter | Qt::AlignLeft);
         b.targetLbl->setStyleSheet("color:#fe5f55; background:transparent; border:none;");
@@ -230,17 +265,17 @@ void BlindSelectWidget::buildUi()
         rewardRow->setStyleSheet("background:transparent; border:none;");
         auto *rrbl = new QHBoxLayout(rewardRow);
         rrbl->setContentsMargins(0, 0, 0, 0);
-        rrbl->setSpacing(4);
+        rrbl->setSpacing(dp(4));
         rrbl->setAlignment(Qt::AlignCenter);
 
         b.rewardTextLbl = new QLabel("奖励:", rewardRow);
-        QFont rtf = mCNFont; rtf.setPixelSize(16);
+        QFont rtf = mCNFont; rtf.setPixelSize(fontPx(16));
         b.rewardTextLbl->setFont(rtf);
         b.rewardTextLbl->setStyleSheet("color:white; background:transparent; border:none;");
         rrbl->addWidget(b.rewardTextLbl);
 
         b.rewardSymLbl = new QLabel("$$$+", rewardRow);
-        QFont rsf = mCNFont; rsf.setPixelSize(20);
+        QFont rsf = mCNFont; rsf.setPixelSize(fontPx(20));
         b.rewardSymLbl->setFont(rsf);
         b.rewardSymLbl->setStyleSheet("color:#eac058; background:transparent; border:none;");
         rrbl->addWidget(b.rewardSymLbl);
@@ -252,7 +287,7 @@ void BlindSelectWidget::buildUi()
 
         // ===== "或" =====
         b.orLbl = new QLabel("或", b.card);
-        QFont of = mCNFont; of.setPixelSize(20); of.setBold(true);
+        QFont of = mCNFont; of.setPixelSize(fontPx(20)); of.setBold(true);
         b.orLbl->setFont(of);
         b.orLbl->setAlignment(Qt::AlignCenter);
         b.orLbl->setStyleSheet("color:white; background:transparent; border:none;");
@@ -261,23 +296,23 @@ void BlindSelectWidget::buildUi()
         // ===== Boss 提示框(i==2 显示,其他卡 hide) =====
         b.bossPromptBox = new QWidget(b.card);
         b.bossPromptBox->setStyleSheet("background: transparent; border: none;");
-        b.bossPromptBox->setMinimumWidth(CARD_W - 40);   // ← 撑宽
+        b.bossPromptBox->setMinimumWidth(dp(CARD_W - 40));   // ← 撑宽
 
         auto *bpvbl = new QVBoxLayout(b.bossPromptBox);
-        bpvbl->setContentsMargins(20, 10, 20, 10);       // ← 左右更大边距
+        bpvbl->setContentsMargins(dp(20), dp(10), dp(20), dp(10));       // ← 左右更大边距
         // ... 后面不变 ...
-        bpvbl->setSpacing(2);
+        bpvbl->setSpacing(dp(2));
         bpvbl->setAlignment(Qt::AlignCenter);
 
         QLabel *p1 = new QLabel("提高底注", b.bossPromptBox);
-        QFont p1f = mCNFont; p1f.setPixelSize(17); p1f.setBold(true);
+        QFont p1f = mCNFont; p1f.setPixelSize(fontPx(17)); p1f.setBold(true);
         p1->setFont(p1f);
         p1->setAlignment(Qt::AlignCenter);
         p1->setStyleSheet("color:#eab93c; background:transparent; border:none;");
         //                       ↑ 之前 #f0c040
         bpvbl->addWidget(p1);
 
-        QFont p2f = mCNFont; p2f.setPixelSize(13);
+        QFont p2f = mCNFont; p2f.setPixelSize(fontPx(13));
 
         QLabel *p2 = new QLabel("加注所有盲注", b.bossPromptBox);
         p2->setFont(p2f);
@@ -292,10 +327,10 @@ void BlindSelectWidget::buildUi()
         bpvbl->addWidget(p3);
 
         b.bossRerollBtn = new QPushButton("重掷 Boss $10", b.bossPromptBox);
-        QFont rbf = mCNFont; rbf.setPixelSize(13); rbf.setBold(true);
+        QFont rbf = mCNFont; rbf.setPixelSize(fontPx(13)); rbf.setBold(true);
         b.bossRerollBtn->setFont(rbf);
         b.bossRerollBtn->setCursor(Qt::PointingHandCursor);
-        b.bossRerollBtn->setFixedHeight(32);
+        b.bossRerollBtn->setFixedHeight(dp(32));
         b.bossRerollBtn->setStyleSheet(
             "QPushButton { background:#8a4fd3; color:white; border:none; border-radius:8px; padding:4px 8px; }"
             "QPushButton:hover { background:#9f63ee; }"
@@ -312,13 +347,13 @@ void BlindSelectWidget::buildUi()
         b.skipBox = new QWidget(b.card);
         b.skipBox->setStyleSheet("background: transparent; border: none;");
         auto *shbl = new QHBoxLayout(b.skipBox);
-        shbl->setContentsMargins(8, 8, 8, 8);
-        shbl->setSpacing(8);
+        shbl->setContentsMargins(dp(8), dp(8), dp(8), dp(8));
+        shbl->setSpacing(dp(8));
         shbl->setAlignment(Qt::AlignCenter);
 
         // 跳过奖励 tag 图标。原版每个 Small/Big blind 都会预先随机一个 Tag。
         b.tagIcon = new QLabel(b.skipBox);
-        b.tagIcon->setFixedSize(48, 48);
+        b.tagIcon->setFixedSize(dp(48), dp(48));
         b.tagIcon->setStyleSheet("background:transparent; border:none;");
         b.tagIcon->setProperty("blindTagIdx", i);
         b.tagIcon->installEventFilter(this);
@@ -328,10 +363,10 @@ void BlindSelectWidget::buildUi()
         b.tagName->hide(); // 名称不占用按钮行空间，改为悬停浮窗显示。
 
         b.skipBtn = new QPushButton("跳过", b.skipBox);
-        b.skipBtn->setFixedSize(96, 48);
+        b.skipBtn->setFixedSize(dp(96), dp(48));
         b.skipBtn->setProperty("blindTagIdx", i);
         b.skipBtn->installEventFilter(this);
-        QFont skf = mCNFont; skf.setPixelSize(16); skf.setBold(true);
+        QFont skf = mCNFont; skf.setPixelSize(fontPx(16)); skf.setBold(true);
         b.skipBtn->setFont(skf);
         b.skipBtn->setCursor(Qt::PointingHandCursor);
         b.skipBtn->setStyleSheet(
@@ -380,12 +415,12 @@ void BlindSelectWidget::showTagPopup(int idx, QWidget *anchor)
     if (!mTagPopup || idx < 0 || idx > 1) return;
     TagData td = tagData(mGS->blindTag(idx));
     mTagPopup->setText(QString("%1\n%2").arg(td.name, td.description));
-    mTagPopup->setFixedWidth(260);
+    mTagPopup->setFixedWidth(dp(260));
     mTagPopup->adjustSize();
 
     QPoint globalAnchor = anchor->mapTo(this, QPoint(anchor->width() / 2, 0));
-    int x = qBound(12, globalAnchor.x() - mTagPopup->width() / 2, width() - mTagPopup->width() - 12);
-    int y = qMax(12, globalAnchor.y() - mTagPopup->height() - 10);
+    int x = qBound(dp(12), globalAnchor.x() - mTagPopup->width() / 2, width() - mTagPopup->width() - dp(12));
+    int y = qMax(dp(12), globalAnchor.y() - mTagPopup->height() - dp(10));
     mTagPopup->move(x, y);
     mTagPopup->raise();
     mTagPopup->show();
@@ -493,7 +528,7 @@ void BlindSelectWidget::refresh()
         // ===== 芯片图、目标、奖励 =====
         QPixmap pix = chipPixmap(i);
         if (!pix.isNull())
-            b.chipImg->setPixmap(pix.scaled(95, 95, Qt::KeepAspectRatio,
+            b.chipImg->setPixmap(pix.scaled(dp(95), dp(95), Qt::KeepAspectRatio,
                                             Qt::SmoothTransformation));
         else
             b.chipImg->clear();
@@ -543,7 +578,7 @@ void BlindSelectWidget::refresh()
                 QPixmap tagSheet(":/textures/images/tags.png");
                 if (!tagSheet.isNull()) {
                     QPixmap tp = tagSheet.copy(td.spritePos.x() * 68, td.spritePos.y() * 68, 68, 68);
-                    b.tagIcon->setPixmap(tp.scaled(48, 48, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+                    b.tagIcon->setPixmap(tp.scaled(dp(48), dp(48), Qt::KeepAspectRatio, Qt::SmoothTransformation));
                 }
             }
             b.skipBtn->setEnabled(state == BlindState::Current);
@@ -553,10 +588,10 @@ void BlindSelectWidget::refresh()
 
 QPoint BlindSelectWidget::cardTargetPos(int idx) const
 {
-    int x = LEFT_MARGIN + idx * (CARD_W + GAP);
-    int y = height() - CARD_H + BOTTOM_OVERFLOW;
+    int x = dp(LEFT_MARGIN) + idx * (dp(CARD_W) + dp(GAP));
+    int y = height() - dp(CARD_H) + dp(BOTTOM_OVERFLOW);
     if (mGS->blindState(idx) == BlindState::Current)
-        y -= CURRENT_LIFT;
+        y -= dp(CURRENT_LIFT);
     return QPoint(x, y);
 }
 

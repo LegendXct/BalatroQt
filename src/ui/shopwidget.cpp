@@ -9,9 +9,43 @@
 #include <QPainterPath>
 #include <QPaintEvent>
 #include <QMouseEvent>
+#include <QGuiApplication>
+#include <QScreen>
+#include <QCursor>
+#include <QtGlobal>
 #include <cmath>
 #include "../utils/shadereffects.h"
 
+
+static double shopUiScale()
+{
+    QScreen *screen = QGuiApplication::screenAt(QCursor::pos());
+    if (!screen) screen = QGuiApplication::primaryScreen();
+    if (!screen) return 1.0;
+
+    const QSize logical = screen->availableGeometry().size();
+    const qreal dpr = qMax<qreal>(1.0, screen->devicePixelRatio());
+    const double logicalScale = qMin(logical.width() / 1920.0, logical.height() / 1080.0);
+    const double physicalScale = qMin((logical.width() * dpr) / 1920.0,
+                                      (logical.height() * dpr) / 1080.0);
+    double scale = qMax(logicalScale, physicalScale);
+
+    bool ok = false;
+    const double overrideScale = QString::fromLocal8Bit(qgetenv("QT_BALATRO_UI_SCALE")).toDouble(&ok);
+    if (ok && overrideScale > 0.1) scale = overrideScale;
+
+    return qBound(0.58, scale, 2.35);
+}
+
+static int dp(int px)
+{
+    return qMax(1, int(std::round(px * shopUiScale())));
+}
+
+static int fontPx(int px)
+{
+    return qMax(1, int(std::round(px * 1.18 * shopUiScale())));
+}
 
 static QString editionDisplayName(Edition e)
 {
@@ -156,7 +190,7 @@ void ShopWidget::buildUi()
     mPanel->setObjectName("shopPanel");
     // 原版商店比例：上方商品区横向更宽，下方左 Voucher、右 Booster。
     // 不再固定 900×520，避免超级/巨型包贴图被面板裁掉。
-    mPanel->setMinimumSize(900, 650);
+    mPanel->setMinimumSize(dp(980), dp(720));
     mPanel->setAttribute(Qt::WA_StyledBackground, true);
     mPanel->setStyleSheet(
         "QWidget#shopPanel {"
@@ -167,8 +201,8 @@ void ShopWidget::buildUi()
         );
 
     auto *root = new QVBoxLayout(mPanel);
-    root->setContentsMargins(18, 16, 18, 16);
-    root->setSpacing(10);
+    root->setContentsMargins(dp(18), dp(16), dp(18), dp(16));
+    root->setSpacing(dp(10));
 
     // ── 顶部:右上角金币 ──
     auto *topRow = new QWidget(mPanel);
@@ -180,9 +214,9 @@ void ShopWidget::buildUi()
     goldBox->setAttribute(Qt::WA_StyledBackground, true);
     goldBox->setStyleSheet("background:#4f6367; border-radius:8px;");
     auto *gbl = new QHBoxLayout(goldBox);
-    gbl->setContentsMargins(12, 4, 12, 4);
+    gbl->setContentsMargins(dp(12), dp(4), dp(12), dp(4));
     mLblGold = new QLabel("$0", goldBox);
-    QFont gf = mCNFont; gf.setPixelSize(22); gf.setBold(true);
+    QFont gf = mCNFont; gf.setPixelSize(fontPx(30)); gf.setBold(true);
     mLblGold->setFont(gf);
     mLblGold->setStyleSheet("color:#f3b958; background:transparent;");
     gbl->addWidget(mLblGold);
@@ -194,18 +228,18 @@ void ShopWidget::buildUi()
     auto *upperRow = new QWidget(mPanel);
     auto *uhbl = new QHBoxLayout(upperRow);
     uhbl->setContentsMargins(0, 0, 0, 0);
-    uhbl->setSpacing(12);
+    uhbl->setSpacing(dp(12));
 
     // 左:两按钮竖排
     auto *btnCol = new QWidget(upperRow);
-    btnCol       ->setFixedWidth(140);
+    btnCol       ->setFixedWidth(dp(160));
     auto *bvbl = new QVBoxLayout(btnCol);
     bvbl->setContentsMargins(0, 0, 0, 0);
-    bvbl->setSpacing(8);
+    bvbl->setSpacing(dp(8));
 
     mBtnNextRound = new QPushButton("下一个\n回合", btnCol);
-    mBtnNextRound->setFixedSize(140, 110);
-    QFont nrf = mCNFont; nrf.setPixelSize(20); nrf.setBold(true);
+    mBtnNextRound->setFixedSize(dp(160), dp(126));
+    QFont nrf = mCNFont; nrf.setPixelSize(fontPx(26)); nrf.setBold(true);
     mBtnNextRound->setFont(nrf);
     mBtnNextRound->setCursor(Qt::PointingHandCursor);
     mBtnNextRound->setStyleSheet(
@@ -217,7 +251,7 @@ void ShopWidget::buildUi()
     bvbl->addWidget(mBtnNextRound);
 
     mBtnReroll = new QPushButton("重抽\n$5", btnCol);
-    mBtnReroll   ->setFixedSize(140, 110);
+    mBtnReroll   ->setFixedSize(dp(160), dp(126));
     mBtnReroll->setFont(nrf);
     mBtnReroll->setCursor(Qt::PointingHandCursor);
     mBtnReroll->setStyleSheet(
@@ -239,8 +273,8 @@ void ShopWidget::buildUi()
         "QWidget#shopBox { background:rgba(57,72,76,230); border:none; border-radius:14px; }"
         );
     auto *shbl = new QHBoxLayout(shopBox);
-    shbl->setContentsMargins(12, 12, 12, 12);
-    shbl->setSpacing(12);
+    shbl->setContentsMargins(dp(12), dp(12), dp(12), dp(12));
+    shbl->setSpacing(dp(12));
     shbl->setAlignment(Qt::AlignCenter);
 
     for (int i = 0; i < 4; ++i) {
@@ -257,18 +291,18 @@ void ShopWidget::buildUi()
     auto *lowerRow = new QWidget(mPanel);
     auto *lhbl = new QHBoxLayout(lowerRow);
     lhbl->setContentsMargins(0, 0, 0, 0);
-    lhbl->setSpacing(12);
+    lhbl->setSpacing(dp(12));
 
     // Voucher 单槽：原版下半区左侧优惠券，固定售价 $10
     auto *voucherBox = new QWidget(lowerRow);
     voucherBox->setObjectName("voucherBox");
-    voucherBox->setMinimumSize(172, 258);
+    voucherBox->setMinimumSize(dp(172), dp(258));
     voucherBox->setAttribute(Qt::WA_StyledBackground, true);
     voucherBox->setStyleSheet(
         "QWidget#voucherBox { background:rgba(57,72,76,230); border:none; border-radius:14px; }"
         );
     auto *vbl = new QVBoxLayout(voucherBox);
-    vbl->setContentsMargins(10, 8, 10, 8);
+    vbl->setContentsMargins(dp(10), dp(8), dp(10), dp(8));
     vbl->setAlignment(Qt::AlignCenter);
 
     OfferUi vu = createOfferSlot(voucherBox, false);
@@ -285,8 +319,8 @@ void ShopWidget::buildUi()
         "QWidget#boosterBox { background:rgba(57,72,76,230); border:none; border-radius:14px; }"
         );
     auto *bhbl = new QHBoxLayout(boosterBox);
-    bhbl->setContentsMargins(12, 8, 12, 8);
-    bhbl->setSpacing(12);
+    bhbl->setContentsMargins(dp(12), dp(8), dp(12), dp(8));
+    bhbl->setSpacing(dp(12));
     bhbl->setAlignment(Qt::AlignCenter);
 
     for (int i = 0; i < 2; ++i) {
@@ -306,19 +340,19 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
 {
     OfferUi ou;
     ou.card = new QWidget(parent);
-    if (isBooster) ou.card->setFixedSize(150, 232);
-    else           ou.card->setFixedSize(150, 232);
+    if (isBooster) ou.card->setFixedSize(dp(166), dp(262));
+    else           ou.card->setFixedSize(dp(166), dp(262));
     ou.card->setStyleSheet("background:transparent;");
 
     auto *vbl = new QVBoxLayout(ou.card);
     vbl->setContentsMargins(0, 0, 0, 0);
-    vbl->setSpacing(4);
+    vbl->setSpacing(dp(4));
     vbl->setAlignment(Qt::AlignCenter);
 
     // 顶部 $X 价格标签(深底圆角)
     ou.priceLbl = new QLabel("$0", ou.card);
-    ou.priceLbl->setFixedSize(64, 28);
-    QFont pf = mCNFont; pf.setPixelSize(16); pf.setBold(true);
+    ou.priceLbl->setFixedSize(dp(82), dp(36));
+    QFont pf = mCNFont; pf.setPixelSize(fontPx(21)); pf.setBold(true);
     ou.priceLbl->setFont(pf);
     ou.priceLbl->setAlignment(Qt::AlignCenter);
     ou.priceLbl->setStyleSheet(
@@ -330,7 +364,7 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
     ou.cardBtn = new ShopCardButton(ou.card);
     // 原版卡包和普通卡牌使用同一张卡牌宽高比例，只是贴图本身是卡包。
     // 之前这里给卡包单独放大，导致商店里卡包明显大一圈并且向下错位。
-    ou.cardBtn->setFixedSize(140, 176);
+    ou.cardBtn->setFixedSize(dp(148), dp(186));
     ou.cardBtn->setCursor(Qt::PointingHandCursor);
     ou.cardBtn->installEventFilter(this);
     ou.cardBtn->setStyleSheet(
@@ -345,12 +379,12 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
     ou.imageLbl = nullptr;   // 没用,删掉
 
     ou.nameLbl = new QLabel("", ou.card);
-    QFont nf = mCNFont; nf.setPixelSize(12);
+    QFont nf = mCNFont; nf.setPixelSize(fontPx(19));
     ou.nameLbl->setFont(nf);
     ou.nameLbl->setStyleSheet("color:white; background:transparent;");
     ou.nameLbl->setAlignment(Qt::AlignCenter);
     ou.nameLbl->setWordWrap(true);
-    ou.nameLbl->setFixedHeight(38);
+    ou.nameLbl->setFixedHeight(dp(58));
     vbl->addWidget(ou.nameLbl);
 
     return ou;
@@ -368,28 +402,28 @@ void ShopWidget::buildInfoPanel()
     );
 
     auto *vbl = new QVBoxLayout(mInfoPanel);
-    vbl->setContentsMargins(12, 10, 12, 10);
-    vbl->setSpacing(6);
+    vbl->setContentsMargins(dp(12), dp(10), dp(12), dp(10));
+    vbl->setSpacing(dp(6));
 
     mInfoTitle = new QLabel(mInfoPanel);
-    QFont tf = mCNFont; tf.setPixelSize(16); tf.setBold(true);
+    QFont tf = mCNFont; tf.setPixelSize(fontPx(22)); tf.setBold(true);
     mInfoTitle->setFont(tf);
     mInfoTitle->setAlignment(Qt::AlignCenter);
     mInfoTitle->setStyleSheet("color:#ffe9a8; background:transparent; border:none;");
     mInfoTitle->setWordWrap(true);
-    mInfoTitle->setFixedWidth(236);
+    mInfoTitle->setFixedWidth(dp(310));
     vbl->addWidget(mInfoTitle);
 
     mInfoBody = new QLabel(mInfoPanel);
-    QFont bf = mCNFont; bf.setPixelSize(12);
+    QFont bf = mCNFont; bf.setPixelSize(fontPx(18));
     mInfoBody->setFont(bf);
     mInfoBody->setAlignment(Qt::AlignCenter);
     mInfoBody->setWordWrap(true);
     mInfoBody->setStyleSheet("color:white; background:transparent; border:none;");
-    mInfoBody->setFixedWidth(236);
+    mInfoBody->setFixedWidth(dp(310));
     vbl->addWidget(mInfoBody);
 
-    mInfoPanel->setFixedWidth(270);
+    mInfoPanel->setFixedWidth(dp(344));
     mInfoPanel->hide();
 }
 
@@ -406,13 +440,13 @@ void ShopWidget::showOfferInfo(QWidget *source)
     mInfoBody->setVisible(!body.isEmpty());
     if (auto *lay = mInfoPanel->layout()) lay->activate();
     mInfoPanel->adjustSize();
-    mInfoPanel->resize(270, qBound(84, mInfoPanel->height(), 260));
+    mInfoPanel->resize(dp(344), qBound(dp(120), mInfoPanel->height(), dp(340)));
 
-    QPoint pos = source->mapTo(this, QPoint(source->width() + 12, 0));
+    QPoint pos = source->mapTo(this, QPoint(source->width() + dp(12), 0));
     if (pos.x() + mInfoPanel->width() > width() - 8)
-        pos.setX(source->mapTo(this, QPoint(-mInfoPanel->width() - 12, 0)).x());
-    pos.setX(qBound(6, pos.x(), qMax(6, width() - mInfoPanel->width() - 6)));
-    pos.setY(qBound(6, pos.y(), qMax(6, height() - mInfoPanel->height() - 6)));
+        pos.setX(source->mapTo(this, QPoint(-mInfoPanel->width() - dp(12), 0)).x());
+    pos.setX(qBound(dp(6), pos.x(), qMax(dp(6), width() - mInfoPanel->width() - dp(6))));
+    pos.setY(qBound(dp(6), pos.y(), qMax(dp(6), height() - mInfoPanel->height() - dp(6))));
 
     mInfoPanel->move(pos);
     mInfoPanel->raise();
@@ -590,7 +624,7 @@ QPixmap ShopWidget::offerPixmap(const ShopOffer &o) const
         p.drawRoundedRect(4, 4, pix.width() - 8, pix.height() - 8, 10, 10);
         p.setPen(Qt::white);
         QFont f = mCNFont;
-        f.setPixelSize(18);
+        f.setPixelSize(fontPx(18));
         f.setBold(true);
         p.setFont(f);
         p.drawText(pix.rect().adjusted(8, 8, -8, -8), Qt::AlignCenter | Qt::TextWordWrap,
@@ -694,8 +728,8 @@ void ShopWidget::layoutPanel()
 {
     if (!mPanel) return;
     // 右下角牌组要一直露出来，因此商店面板不能无限向右撑。
-    int panelW = qBound(900, int(width() * 0.84), qMax(900, width() - 28));
-    int panelH = qBound(650, int(height() * 0.84), 760);
+    int panelW = qBound(dp(980), int(width() * 0.86), qMax(dp(980), width() - dp(28)));
+    int panelH = qBound(dp(720), int(height() * 0.86), dp(840));
     mPanel->resize(panelW, panelH);
     int x = (width()  - mPanel->width())  / 2;
     int y = (height() - mPanel->height()) / 2;

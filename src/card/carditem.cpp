@@ -13,6 +13,9 @@
 #include <QSet>
 #include <QHash>
 #include <QStringList>
+#include <QFontMetrics>
+#include <QtGlobal>
+#include <QApplication>
 #include <cmath>
 #include "../utils/shadereffects.h"
 
@@ -46,6 +49,113 @@ void ensureCardShaderTimer()
 int cardShaderCacheFrame()
 {
     return int(BalatroShaders::shaderTime() * 15.0);
+}
+
+QString rankLabel(Rank r)
+{
+    switch (r) {
+    case Rank::Two: return "2";
+    case Rank::Three: return "3";
+    case Rank::Four: return "4";
+    case Rank::Five: return "5";
+    case Rank::Six: return "6";
+    case Rank::Seven: return "7";
+    case Rank::Eight: return "8";
+    case Rank::Nine: return "9";
+    case Rank::Ten: return "10";
+    case Rank::Jack: return "J";
+    case Rank::Queen: return "Q";
+    case Rank::King: return "K";
+    case Rank::Ace: return "A";
+    }
+    return "?";
+}
+
+QString suitLabel(Suit s)
+{
+    switch (s) {
+    case Suit::Spades: return QStringLiteral("黑桃");
+    case Suit::Hearts: return QStringLiteral("红桃");
+    case Suit::Diamonds: return QStringLiteral("方块");
+    case Suit::Clubs: return QStringLiteral("梅花");
+    }
+    return QString();
+}
+
+QString hoverTitleForCard(const CardData &d)
+{
+    if (d.enhancement == Enhancement::Stone)
+        return QStringLiteral("石头牌");
+    return suitLabel(d.suit) + rankLabel(d.rank);
+}
+
+QString hoverDescForCard(const CardData &d)
+{
+    int chips = d.chipValue() + d.permanentBonusChips;
+    if (d.enhancement == Enhancement::Bonus) chips += 30;
+    if (d.enhancement == Enhancement::Stone) chips = 50 + d.permanentBonusChips;
+    return QStringLiteral("+%1筹码").arg(chips);
+}
+
+void drawBalatroHoverTag(QPainter *painter, const CardData &d)
+{
+    const QString title = hoverTitleForCard(d);
+    const QString desc = hoverDescForCard(d);
+
+    painter->save();
+    painter->setRenderHint(QPainter::Antialiasing, true);
+    painter->setRenderHint(QPainter::TextAntialiasing, false);
+
+    const QString hoverFamily = qApp ? qApp->font().family() : QStringLiteral("Arial");
+    QFont titleFont(hoverFamily);
+    titleFont.setPixelSize(18);
+    titleFont.setBold(true);
+    QFont descFont(hoverFamily);
+    descFont.setPixelSize(17);
+    descFont.setBold(true);
+
+    QFontMetrics titleFm(titleFont);
+    QFontMetrics descFm(descFont);
+    const int w = qMax(76, qMax(titleFm.horizontalAdvance(title), descFm.horizontalAdvance(desc)) + 24);
+    const int titleH = 32;
+    const int descH = 31;
+    const int x = int(CardItem::WIDTH / 2 - w / 2);
+    const int y = -70;
+
+    QRectF outer(x, y, w, titleH + descH + 4);
+    QPainterPath shadowPath;
+    shadowPath.addRoundedRect(outer.adjusted(2, 3, 2, 3), 8, 8);
+    painter->fillPath(shadowPath, QColor(0, 0, 0, 70));
+
+    QRectF titleRect(x, y, w, titleH + 2);
+    QRectF descRect(x, y + titleH - 1, w, descH + 3);
+
+    QPainterPath titlePath;
+    titlePath.addRoundedRect(titleRect, 7, 7);
+    painter->fillPath(titlePath, QColor(248, 255, 250));
+    painter->setPen(QPen(QColor(34, 45, 48), 2.2));
+    painter->drawPath(titlePath);
+
+    QPainterPath descPath;
+    descPath.addRoundedRect(descRect, 7, 7);
+    painter->fillPath(descPath, QColor(248, 255, 250));
+    painter->setPen(QPen(QColor(34, 45, 48), 2.2));
+    painter->drawPath(descPath);
+
+    // 遮掉两个圆角框交界处的中间描边，让它更像正版的上下拼接标签。
+    painter->fillRect(QRectF(x + 3, y + titleH - 3, w - 6, 6), QColor(248, 255, 250));
+    painter->setPen(QPen(QColor(34, 45, 48), 2.0));
+    painter->drawLine(QPointF(x + 3, y + titleH), QPointF(x + w - 3, y + titleH));
+
+    painter->setFont(titleFont);
+    painter->setPen(QColor(31, 45, 48));
+    painter->drawText(titleRect.adjusted(2, 0, -2, 0), Qt::AlignCenter, title);
+
+    painter->setFont(descFont);
+    painter->setPen(QColor(42, 132, 205));
+    painter->drawText(descRect.adjusted(2, 0, -2, 0), Qt::AlignCenter, desc);
+
+    painter->restore();
 }
 
 // 手牌排序拖拽的启动距离。原来 8px 太敏感，点击时横向轻微抖动就会被判为拖动；
@@ -83,8 +193,8 @@ CardItem::CardItem(const CardData &data, QGraphicsItem *parent)
 }
 
 QRectF CardItem::boundingRect() const {
-    // 预留外发光和悬浮描边空间，避免 hover/selected 效果被裁掉。
-    return QRectF(-10, -12, WIDTH + 20, HEIGHT + 24);
+    // 预留外发光、选中描边，以及悬停时卡牌上方“梅花3 / +3筹码”标签的空间。
+    return QRectF(-12, -78, WIDTH + 24, HEIGHT + 92);
 }
 
 void CardItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) {
@@ -96,32 +206,23 @@ void CardItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidge
         painter->save();
         painter->setRenderHint(QPainter::Antialiasing, true);
 
-        const QColor accent = mSelected ? QColor(255, 190, 64) : QColor(82, 215, 255);
-        const QRectF outer(-6.5, -7.5, WIDTH + 13.0, HEIGHT + 15.0);
-        for (int i = 0; i < 3; ++i) {
-            QColor glow = accent;
-            glow.setAlpha(mSelected ? 52 - i * 12 : 42 - i * 10);
-            QPen glowPen(glow, 10 - i * 2);
-            glowPen.setJoinStyle(Qt::RoundJoin);
-            painter->setPen(glowPen);
-            painter->setBrush(Qt::NoBrush);
-            painter->drawRoundedRect(outer.adjusted(i * 1.8, i * 1.8, -i * 1.8, -i * 1.8), 14, 14);
-        }
+        const QColor mainColor = mSelected ? QColor(255, 211, 72, 245)
+                                           : QColor(31, 183, 255, 245);
+        QColor glowColor = mainColor;
+        glowColor.setAlpha(90);
 
-        QColor edge = accent;
-        edge.setAlpha(mSelected ? 235 : 210);
-        painter->setPen(QPen(edge, mSelected ? 3.2 : 2.4));
+        // 选中黄色框和悬停蓝色框使用统一粗细；只保留一圈柔光，避免之前黄色框过厚。
         painter->setBrush(Qt::NoBrush);
-        painter->drawRoundedRect(QRectF(1.5, 1.5, WIDTH - 3.0, HEIGHT - 3.0), 9, 9);
+        painter->setPen(QPen(glowColor, 3.2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter->drawRoundedRect(QRectF(-1.1, -1.1, WIDTH + 2.2, HEIGHT + 2.2), 10, 10);
+        painter->setPen(QPen(mainColor, 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter->drawRoundedRect(QRectF(2.0, 2.0, WIDTH - 4.0, HEIGHT - 4.0), 8, 8);
 
-        if (mHovered && !mSelected) {
-            QColor wash = accent;
-            wash.setAlpha(30);
-            painter->setPen(Qt::NoPen);
-            painter->setBrush(wash);
-            painter->drawRoundedRect(QRectF(4, 4, WIDTH - 8, HEIGHT - 8), 8, 8);
-        }
         painter->restore();
+    }
+
+    if (mHovered && mData.faceUp) {
+        drawBalatroHoverTag(painter, mData);
     }
 }
 
@@ -396,7 +497,7 @@ void CardItem::applyTransform()
 
 void CardItem::hoverEnterEvent(QGraphicsSceneHoverEvent *event) {
     mHovered = true;
-    setScale(1.035);
+    setScale(1.02);
     update();
     emit hoverChanged(this, true);
     QGraphicsObject::hoverEnterEvent(event);
@@ -404,14 +505,14 @@ void CardItem::hoverEnterEvent(QGraphicsSceneHoverEvent *event) {
 
 void CardItem::hoverMoveEvent(QGraphicsSceneHoverEvent *event) {
     if (!mHovered) return;
-    qreal lx = event->pos().x();
-    qreal ly = event->pos().y();
+    // 标签区域也属于 boundingRect，所以这里把鼠标位置限制在牌面内部，避免移到标签上方时产生夸张倾斜。
+    qreal lx = qBound<qreal>(0.0, event->pos().x(), qreal(WIDTH));
+    qreal ly = qBound<qreal>(0.0, event->pos().y(), qreal(HEIGHT));
     qreal nx = (lx / WIDTH)  - 0.5;     // [-0.5, 0.5]
     qreal ny = (ly / HEIGHT) - 0.5;
-    // 鼠标在右半 → 卡片向右后倾(Y 轴倾斜)
-    mHoverTiltY = nx * 12.0;            // 最大约 ±6°，比旧版更克制
-    // 鼠标在上半 → 卡片向上后倾(X 轴倾斜),负号让方向自然
-    mHoverTiltX = ny * 12.0;
+    // 只保留很轻的预选透视，不再出现明显“360°翻转感”。
+    mHoverTiltY = nx * 1.6;             // 最大约 ±0.8°，只给一点点预选反馈
+    mHoverTiltX = ny * 1.6;
     applyTransform();
     QGraphicsObject::hoverMoveEvent(event);
 }

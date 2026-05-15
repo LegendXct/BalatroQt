@@ -22,6 +22,11 @@
 #include <QGraphicsDropShadowEffect>
 #include <QColor>
 #include <QProgressBar>
+#include <QCoreApplication>
+#include <QDir>
+#include <QFileInfo>
+#include <QDebug>
+#include <QApplication>
 #include <QDialog>
 #include <QTabWidget>
 #include <QTextEdit>
@@ -36,16 +41,156 @@
 #include <limits>
 #include "../utils/shadereffects.h"
 
-void MainWindow::loadFonts() {
-    int pid = QFontDatabase::addApplicationFont(":/fonts/fonts/m6x11plus.ttf");
-    int cid = QFontDatabase::addApplicationFont(":/fonts/fonts/NotoSansSC-Bold.ttf");
+namespace {
+constexpr int DESIGN_WINDOW_W = 1920;
+constexpr int DESIGN_WINDOW_H = 1080;
+constexpr int DESIGN_LEFT_W   = 500;
+constexpr int DESIGN_SCENE_W  = DESIGN_WINDOW_W - DESIGN_LEFT_W;
+constexpr int DESIGN_SCENE_H  = DESIGN_WINDOW_H;
 
-    QString pixelFamily = QFontDatabase::applicationFontFamilies(pid).value(0, "Arial");
-    QString cnFamily = QFontDatabase::applicationFontFamilies(cid).value(0, "Arial");
+double gUiScale = 1.0;
+
+static double calcUiScale(QScreen *screen)
+{
+    if (!screen) return 1.0;
+
+    // 注意：Qt 在开启高 DPI 后，availableGeometry()/geometry() 返回的是“逻辑像素”。
+    // 很多 Windows 设备会因为系统缩放把笔记本屏和外接显示器折算成接近的逻辑尺寸，
+    // 导致只用逻辑像素时左侧 QWidget 看起来没有跟着设备变大/变小。
+    // 这里同时参考物理像素(devicePixelRatio)和逻辑像素，取较大的缩放，
+    // 让左侧信息栏、字体、按钮和右侧牌桌一起随显示器实际规格等比例缩放。
+    const QSize logical = screen->availableGeometry().size();
+    const qreal dpr = qMax<qreal>(1.0, screen->devicePixelRatio());
+    const QSizeF physical(logical.width() * dpr, logical.height() * dpr);
+
+    const double logicalScale = qMin(logical.width()  / double(DESIGN_WINDOW_W),
+                                     logical.height() / double(DESIGN_WINDOW_H));
+    const double physicalScale = qMin(physical.width()  / double(DESIGN_WINDOW_W),
+                                      physical.height() / double(DESIGN_WINDOW_H));
+
+    double scale = qMax(logicalScale, physicalScale);
+
+    // 可选调试覆盖：在 Qt Creator 的运行环境里设置 QT_BALATRO_UI_SCALE=1.25
+    // 可以临时验证不同缩放倍率，不设置时完全自动。
+    bool ok = false;
+    const double overrideScale = QString::fromLocal8Bit(qgetenv("QT_BALATRO_UI_SCALE")).toDouble(&ok);
+    if (ok && overrideScale > 0.1) scale = overrideScale;
+
+    return qBound(0.58, scale, 2.35);
+}
+
+static int dp(int px)
+{
+    return qMax(1, int(std::round(px * gUiScale)));
+}
+
+static int uiPx(int px)
+{
+    // 原来为了视觉效果整体放大约 1.55 倍；这里再乘设备缩放系数，
+    // 这样 1366×768 会整体缩小，2K/4K 会整体放大。
+    return qMax(1, int(std::round(px * 1.55 * gUiScale)));
+}
+}
+
+void MainWindow::loadFonts() {
+    auto firstFamily = [](int fontId, const QString &fallback) -> QString {
+        if (fontId >= 0) {
+            const QStringList families = QFontDatabase::applicationFontFamilies(fontId);
+            if (!families.isEmpty()) return families.first();
+        }
+        return fallback;
+    };
+
+    auto tryLoadFont = [](const QString &path) -> int {
+        const bool isResource = path.startsWith(':');
+        if (!isResource && !QFileInfo::exists(path)) {
+            qDebug().noquote() << "[Font] not found:" << QDir::toNativeSeparators(path);
+            return -1;
+        }
+
+        const int id = QFontDatabase::addApplicationFont(path);
+        if (id < 0) {
+            qDebug().noquote() << "[Font] load failed:" << QDir::toNativeSeparators(path);
+            return -1;
+        }
+
+        const QStringList families = QFontDatabase::applicationFontFamilies(id);
+        qDebug().noquote() << "[Font] loaded:" << QDir::toNativeSeparators(path)
+                           << "family =" << families.join(", ");
+        return id;
+    };
+
+    auto loadFirst = [&](const QStringList &paths) -> int {
+        for (const QString &path : paths) {
+            const int id = tryLoadFont(path);
+            if (id >= 0) return id;
+        }
+        return -1;
+    };
+
+    const int pid = loadFirst({
+        ":/fonts/fonts/m6x11plus.ttf",
+        QCoreApplication::applicationDirPath() + "/resources/fonts/m6x11plus.ttf",
+        QDir::currentPath() + "/resources/fonts/m6x11plus.ttf"
+    });
+
+    const QString cnFontFile = QString::fromUtf8(u8"汉仪心海行楷W.ttf");
+
+    QStringList cnFontCandidates;
+
+    auto addFontRoots = [&](const QString &root) {
+        if (root.isEmpty()) return;
+        const QDir rootDir(root);
+        cnFontCandidates << rootDir.filePath("resources/fonts/" + cnFontFile);
+        // 容错：有些同学会把 resources 拼成 resouces。
+        cnFontCandidates << rootDir.filePath("resouces/fonts/" + cnFontFile);
+    };
+
+    // 1) exe 同级目录 / build 目录。
+    addFontRoots(QCoreApplication::applicationDirPath());
+
+    // 2) Qt Creator 的当前工作目录。
+    addFontRoots(QDir::currentPath());
+
+    // 3) 当前工作目录的上级、上上级，覆盖常见 build/debug 运行结构。
+    {
+        QDir d(QDir::currentPath());
+        for (int i = 0; i < 4; ++i) {
+            d.cdUp();
+            addFontRoots(d.absolutePath());
+        }
+    }
+
+    // 4) 编译时源码目录。mainwindow.cpp 位于 src/ui，往上两级就是项目根目录。
+    // 这可以直接命中你截图里的 BalatroQt/resources/fonts/汉仪心海行楷W.ttf。
+    {
+        QDir sourceDir(QFileInfo(QString::fromUtf8(__FILE__)).absolutePath());
+        if (sourceDir.cd("../..")) {
+            addFontRoots(sourceDir.absolutePath());
+        }
+    }
+
+    // 5) 如果以后把字体加入 resource.qrc，这个路径也能命中。
+    cnFontCandidates << ":/fonts/fonts/" + cnFontFile;
+
+    // 6) 最后回退到原来的 Noto 字体。
+    cnFontCandidates << ":/fonts/fonts/NotoSansSC-Bold.ttf";
+
+    const int cid = loadFirst(cnFontCandidates);
+
+    const QString pixelFamily = firstFamily(pid, "Arial");
+    const QString cnFamily = firstFamily(cid, "Arial");
+
+    qDebug().noquote() << "[Font] appDir =" << QDir::toNativeSeparators(QCoreApplication::applicationDirPath());
+    qDebug().noquote() << "[Font] currentPath =" << QDir::toNativeSeparators(QDir::currentPath());
+    qDebug().noquote() << "[Font] final Chinese family =" << cnFamily;
 
     mPixelFont = QFont(pixelFamily);
     mPixelFont.setStyleStrategy(QFont::NoAntialias);
+
     mCNFont = QFont(cnFamily);
+    mCNFont.setStyleStrategy(QFont::PreferAntialias);
+    if (qApp) qApp->setFont(mCNFont);
 }
 
 static QPushButton *makeBtn(const QString &text, const QString &bg, const QString &hover, const QFont &font, QWidget *parent, int h = 50) {
@@ -55,17 +200,16 @@ static QPushButton *makeBtn(const QString &text, const QString &bg, const QStrin
     btn->setCursor(Qt::PointingHandCursor);
     btn->setStyleSheet(QString(
                            "QPushButton {"
-                           " background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 %2, stop:0.52 %1, stop:1 rgba(0,0,0,80));"
-                           " color:white; border:2px solid rgba(255,255,255,70);"
-                           " border-radius:11px; font-size:16px; font-weight:bold; padding:4px 8px;"
+                           " background:%1;"
+                           " color:white; border:2px solid rgba(255,255,255,90);"
+                           " border-radius:16px; font-size:%3px; font-weight:bold; padding:6px 12px;"
                            "}"
                            "QPushButton:hover {"
-                           " background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #ffffff, stop:0.04 %2, stop:1 %1);"
-                           " border:2px solid rgba(255,255,255,150);"
+                           " background:%2; border:2px solid rgba(255,255,255,170);"
                            "}"
-                           "QPushButton:pressed { background:%1; padding-top:6px; }"
+                           "QPushButton:pressed { background:%1; padding-top:8px; }"
                            "QPushButton:disabled { background:#2b3032; color:#758083; border:2px solid #3b4447; }"
-                           ).arg(bg, hover));
+                           ).arg(bg, hover).arg(uiPx(16)));
     return btn;
 }
 
@@ -108,16 +252,16 @@ static QWidget *makeInfoCard(const QString &title, const QString &body, const QF
                            "background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 rgba(50,67,71,240), stop:1 rgba(24,34,37,240)); border:2px solid %1; border-radius:14px;"
                            ).arg(accent));
     auto *v = new QVBoxLayout(box);
-    v->setContentsMargins(12, 8, 12, 8);
-    v->setSpacing(4);
+    v->setContentsMargins(dp(12), dp(8), dp(12), dp(8));
+    v->setSpacing(dp(4));
     auto *t = new QLabel(title, box);
-    QFont tf = cnFont; tf.setPixelSize(17); tf.setBold(true);
+    QFont tf = cnFont; tf.setPixelSize(uiPx(17)); tf.setBold(true);
     t->setFont(tf);
     t->setAlignment(Qt::AlignCenter);
     t->setStyleSheet("color:white; background:transparent; border:none;");
     v->addWidget(t);
     auto *b = new QLabel(body, box);
-    QFont bf = cnFont; bf.setPixelSize(14); bf.setBold(true);
+    QFont bf = cnFont; bf.setPixelSize(uiPx(14)); bf.setBold(true);
     b->setFont(bf);
     b->setAlignment(Qt::AlignCenter);
     b->setWordWrap(true);
@@ -195,31 +339,67 @@ static QString sealDesc(Seal s) {
     }
 }
 
+static QString suitText(Suit s) {
+    switch (s) {
+    case Suit::Spades: return "黑桃";
+    case Suit::Hearts: return "红桃";
+    case Suit::Diamonds: return "方块";
+    case Suit::Clubs: return "梅花";
+    }
+    return "";
+}
+
+static QString rankText(Rank r) {
+    switch (r) {
+    case Rank::Jack: return "J";
+    case Rank::Queen: return "Q";
+    case Rank::King: return "K";
+    case Rank::Ace: return "A";
+    default: return QString::number(static_cast<int>(r));
+    }
+}
+
 static QString cardTooltipTitle(const CardData &c) {
     if (c.enhancement == Enhancement::Stone) return "石头牌";
-    QString title = c.toString();
+    QString title = suitText(c.suit) + rankText(c.rank);
     if (c.enhancement != Enhancement::None) title += " · " + enhancementName(c.enhancement);
     return title;
 }
 
 static QString cardTooltipBody(const CardData &c) {
     QStringList lines;
-    lines << enhancementDesc(c.enhancement);
+    if (c.enhancement == Enhancement::Stone) {
+        lines << "+50筹码";
+    } else {
+        int chips = c.chipValue() + c.permanentBonusChips;
+        if (c.enhancement == Enhancement::Bonus) chips += 30;
+        lines << QString("+%1筹码").arg(chips);
+
+        switch (c.enhancement) {
+        case Enhancement::Mult: lines << "+4倍率"; break;
+        case Enhancement::Wild: lines << "可视作任意花色"; break;
+        case Enhancement::Glass: lines << "计分时 ×2 倍率"; break;
+        case Enhancement::Steel: lines << "留在手牌中时 ×1.5 倍率"; break;
+        case Enhancement::Gold: lines << "回合结束若仍在手牌中，获得 $3"; break;
+        case Enhancement::Lucky: lines << "概率获得 +20 倍率或 $20"; break;
+        default: break;
+        }
+    }
     if (c.edition != Edition::None)
         lines << editionName(c.edition) + "：" + editionDesc(c.edition);
     if (c.seal != Seal::None)
         lines << sealName(c.seal) + "：" + sealDesc(c.seal);
     if (c.isDebuffed)
-        lines << "被 Boss 盲注禁用：本张牌不会触发效果";
+        lines << "被 Boss 盲注禁用";
     return lines.join("\n");
 }
 
 static QLabel *makeLabel(const QString &text, int px, const QString &color, const QFont &font, QWidget *parent) {
     QLabel *lbl = new QLabel(text, parent);
     lbl->setAlignment(Qt::AlignCenter);
-    QFont f = font; f.setPixelSize(px);
+    QFont f = font; f.setPixelSize(uiPx(px));
     lbl->setFont(f);
-    lbl->setStyleSheet(QString("color: %1;").arg(color));
+    lbl->setStyleSheet(QString("color:%1; background:transparent; border:none;").arg(color));
     return lbl;
 }
 
@@ -229,16 +409,33 @@ MainWindow::MainWindow(QWidget *parent)
     , mGameState(new GameState(this))
 {
     ui->setupUi(this);
+
+    QScreen *screen = QGuiApplication::screenAt(QCursor::pos());
+    if (!screen) screen = QGuiApplication::primaryScreen();
+    const QSize sg = screen ? screen->availableGeometry().size()
+                            : QSize(DESIGN_WINDOW_W, DESIGN_WINDOW_H);
+    const qreal dpr = screen ? screen->devicePixelRatio() : 1.0;
+    gUiScale = calcUiScale(screen);
+
+    // 左侧 QWidget 和右侧 QGraphicsScene 使用同一套 1920×1080 设计稿比例。
+    // 左侧真实尺寸随设备缩放；右侧场景保持设计坐标，再通过 fitInView 等比例映射到实际视口。
+    mLeftW = dp(DESIGN_LEFT_W);
+    mWinW = sg.width();
+    mWinH = sg.height();
+    mSceneW = DESIGN_SCENE_W;
+    mSceneH = DESIGN_SCENE_H;
+
+    qDebug().noquote() << "[UI Scale] logicalScreen =" << sg.width() << "x" << sg.height()
+                       << "dpr =" << QString::number(dpr, 'f', 2)
+                       << "physicalApprox =" << int(std::round(sg.width() * dpr)) << "x" << int(std::round(sg.height() * dpr))
+                       << "scale =" << QString::number(gUiScale, 'f', 3)
+                       << "leftW =" << mLeftW
+                       << "scene =" << QString("%1x%2").arg(mSceneW).arg(mSceneH);
+
     loadFonts();
 
     menuBar()->hide();
     statusBar()->hide();
-
-    QSize sg = QGuiApplication::primaryScreen()->geometry().size();
-    mWinW = sg.width();
-    mWinH = sg.height();
-    mSceneW = mWinW - mLeftW;
-    mSceneH = mWinH;
 
     // ── 左面板（永远显示）──
     setupLeftPanel();
@@ -265,10 +462,12 @@ MainWindow::MainWindow(QWidget *parent)
 
     // ── 整体 central:左面板 + 右半边,横向并列 ──
     auto *container = new QWidget;
+    container->setObjectName("RootContainer");
     container->setAttribute(Qt::WA_StyledBackground, true);
-    container->setStyleSheet("background:#11181b;");
+    // 只给根容器本身上背景色，避免样式表向左侧面板里的普通 QWidget 级联，形成一块块黑色底框。
+    container->setStyleSheet("QWidget#RootContainer { background:#11181b; }");
     auto *cl = new QHBoxLayout(container);
-    cl->setContentsMargins(8, 8, 0, 8);
+    cl->setContentsMargins(dp(8), dp(8), 0, dp(8));
     cl->setSpacing(0);
     cl->addWidget(mLeftPanel);
     cl->addWidget(mPlayPage, 1);
@@ -318,19 +517,18 @@ void MainWindow::setupLeftPanel() {
     mLeftPanel->setFixedWidth(mLeftW);
     mLeftPanel->setAttribute(Qt::WA_StyledBackground, true);
     mLeftPanel->setStyleSheet(
-        "QWidget#LeftPanel { background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 rgba(38,49,53,245), stop:1 rgba(16,24,27,245)); border-right:2px solid rgba(132,166,168,120); border-radius: 0px; }"
-        "QWidget#LeftPanel QWidget { border: none; }"
-        "QWidget#LeftPanel QLabel { border: none; }"
-        "QWidget#LeftPanel QPushButton { border: none; }"
+        "QWidget#LeftPanel { background:#263135; border-right:none; border-radius:0px; }"
+        "QWidget#LeftPanel QLabel { border:none; }"
+        "QWidget#LeftPanel QPushButton { border:none; }"
         );
 
     QVBoxLayout *layout = new QVBoxLayout(mLeftPanel);
-    layout->setContentsMargins(12, 12, 12, 12);
-    layout->setSpacing(8);
+    layout->setContentsMargins(dp(18), dp(16), dp(18), dp(16));
+    layout->setSpacing(dp(10));
 
     // ── 上下文区 ──
     mContextArea = new QStackedWidget(mLeftPanel);
-    mContextArea->setFixedHeight(215);
+    mContextArea->setFixedHeight(dp(258));
     mContextArea->setStyleSheet("background:transparent;");
 
     // 页面 0: BlindSelect
@@ -338,11 +536,11 @@ void MainWindow::setupLeftPanel() {
     mCtxBlindSelect->setStyleSheet("background:transparent;");
     {
         auto *vl = new QVBoxLayout(mCtxBlindSelect);
-        vl->setContentsMargins(0, 16, 0, 16);
-        vl->setSpacing(2);
+        vl->setContentsMargins(0, dp(16), 0, dp(16));
+        vl->setSpacing(dp(2));
         vl->setAlignment(Qt::AlignCenter);
 
-        QFont t1f = mCNFont; t1f.setPixelSize(28); t1f.setBold(true);
+        QFont t1f = mCNFont; t1f.setPixelSize(uiPx(30)); t1f.setBold(true);
 
         QLabel *l1 = new QLabel("选择你的", mCtxBlindSelect);
         l1->setFont(t1f);
@@ -361,48 +559,48 @@ void MainWindow::setupLeftPanel() {
     // 页面 1: Blind
     mCtxBlind = new QWidget;
     mCtxBlind->setAttribute(Qt::WA_StyledBackground, true);
-    mCtxBlind->setStyleSheet("background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #46555a, stop:1 #2b373b); border:2px solid rgba(255,255,255,45); border-radius:13px;");
+    mCtxBlind->setStyleSheet("background:#334044; border:none; border-radius:16px;");
     {
         auto *hbl = new QHBoxLayout(mCtxBlind);
-        hbl->setContentsMargins(10, 8, 10, 8);
-        hbl->setSpacing(10);
+        hbl->setContentsMargins(dp(10), dp(8), dp(10), dp(8));
+        hbl->setSpacing(dp(10));
 
         mCtxBlindChipImg = new QLabel(mCtxBlind);
-        mCtxBlindChipImg->setFixedSize(80, 80);
+        mCtxBlindChipImg->setFixedSize(dp(92), dp(92));
         mCtxBlindChipImg->setAlignment(Qt::AlignCenter);
         mCtxBlindChipImg->setStyleSheet("background:transparent;");
         hbl->addWidget(mCtxBlindChipImg);
 
         auto *vbl = new QVBoxLayout;
         vbl->setContentsMargins(0, 0, 0, 0);
-        vbl->setSpacing(2);
+        vbl->setSpacing(dp(2));
 
         mLblBlind = new QLabel("小盲注", mCtxBlind);
-        QFont nbf = mCNFont; nbf.setPixelSize(15); nbf.setBold(true);
+        QFont nbf = mCNFont; nbf.setPixelSize(uiPx(17)); nbf.setBold(true);
         mLblBlind->setFont(nbf);
         mLblBlind->setAlignment(Qt::AlignCenter);
         mLblBlind->setStyleSheet(
             "color:white; background:#1679b4;"
             "border-radius:6px; padding:3px 8px;");
-        mLblBlind->setFixedHeight(28);
+        mLblBlind->setFixedHeight(dp(42));
         vbl->addWidget(mLblBlind);
 
         QLabel *tt = new QLabel("至少得分", mCtxBlind);
-        QFont ttf = mCNFont; ttf.setPixelSize(11);
+        QFont ttf = mCNFont; ttf.setPixelSize(uiPx(13));
         tt->setFont(ttf);
         tt->setStyleSheet("color:white; background:transparent;");
         tt->setAlignment(Qt::AlignCenter);
         vbl->addWidget(tt);
 
         mLblTarget = new QLabel("✳ 300", mCtxBlind);
-        QFont tf = mPixelFont; tf.setPixelSize(24);
+        QFont tf = mPixelFont; tf.setPixelSize(uiPx(28));
         mLblTarget->setFont(tf);
         mLblTarget->setStyleSheet("color:#fe5f55; background:transparent;");
         mLblTarget->setAlignment(Qt::AlignCenter);
         vbl->addWidget(mLblTarget);
 
         mLblReward = new QLabel("奖励 $$$", mCtxBlind);
-        QFont rf = mCNFont; rf.setPixelSize(12);
+        QFont rf = mCNFont; rf.setPixelSize(uiPx(14));
         mLblReward->setFont(rf);
         mLblReward->setStyleSheet("color:#f3b958; background:transparent;");
         mLblReward->setAlignment(Qt::AlignCenter);
@@ -425,7 +623,7 @@ void MainWindow::setupLeftPanel() {
         vl->addWidget(sign, 0, Qt::AlignCenter);
 
         QLabel *sub = new QLabel("来变强吧!", mCtxShop);
-        QFont subf = mCNFont; subf.setPixelSize(13);
+        QFont subf = mCNFont; subf.setPixelSize(uiPx(15));
         sub->setFont(subf);
         sub->setStyleSheet("color:white; background:transparent;");
         sub->setAlignment(Qt::AlignCenter);
@@ -437,21 +635,21 @@ void MainWindow::setupLeftPanel() {
 
     // ── 回合分数 + 目标进度条 ──
     QWidget *scoreBox = new QWidget(mLeftPanel);
-    scoreBox->setFixedHeight(88);
+    scoreBox->setFixedHeight(dp(142));
     scoreBox->setAttribute(Qt::WA_StyledBackground, true);
-    scoreBox->setStyleSheet("background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #46555a, stop:1 #2b373b); border:2px solid rgba(255,255,255,45); border-radius:13px;");
+    scoreBox->setStyleSheet("background:#334044; border:none; border-radius:16px;");
 
     auto *scoreVBox = new QVBoxLayout(scoreBox);
-    scoreVBox->setContentsMargins(10, 6, 10, 8);
-    scoreVBox->setSpacing(4);
+    scoreVBox->setContentsMargins(dp(12), dp(8), dp(12), dp(10));
+    scoreVBox->setSpacing(dp(6));
 
     QWidget *scoreTop = new QWidget(scoreBox);
     auto *sbl = new QHBoxLayout(scoreTop);
     sbl->setContentsMargins(0, 0, 0, 0);
-    sbl->setSpacing(6);
+    sbl->setSpacing(dp(6));
 
     QLabel *sTitle = new QLabel("回合\n分数", scoreTop);
-    QFont stf = mCNFont; stf.setPixelSize(12);
+    QFont stf = mCNFont; stf.setPixelSize(uiPx(15));
     sTitle->setFont(stf);
     sTitle->setStyleSheet("color:white; background:transparent;");
     sTitle->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
@@ -464,16 +662,16 @@ void MainWindow::setupLeftPanel() {
         QPixmap chipsSheet(":/textures/images/chips.png");
         if (!chipsSheet.isNull()) {
             QPixmap pix = chipsSheet.copy(0, 0, 58, 58);
-            scoreChip->setPixmap(pix.scaled(28, 28, Qt::KeepAspectRatio,
+            scoreChip->setPixmap(pix.scaled(dp(34), dp(34), Qt::KeepAspectRatio,
                                             Qt::SmoothTransformation));
         }
     }
-    scoreChip->setFixedSize(28, 28);
+    scoreChip->setFixedSize(dp(36), dp(36));
     scoreChip->setStyleSheet("background:transparent;");
     sbl->addWidget(scoreChip);
 
     mLblScore = new QLabel("0", scoreTop);
-    QFont smf = mPixelFont; smf.setPixelSize(34);
+    QFont smf = mPixelFont; smf.setPixelSize(uiPx(38));
     mLblScore->setFont(smf);
     mLblScore->setStyleSheet("color:white; background:transparent;");
     sbl->addWidget(mLblScore);
@@ -482,23 +680,23 @@ void MainWindow::setupLeftPanel() {
     mScoreProgressBar = new QProgressBar(scoreBox);
     mScoreProgressBar->setRange(0, 1000);
     mScoreProgressBar->setValue(0);
-    mScoreProgressBar->setFixedHeight(15);
+    mScoreProgressBar->setFixedHeight(dp(34));
     mScoreProgressBar->setTextVisible(true);
     mScoreProgressBar->setFormat("0%");
     mScoreProgressBar->setAlignment(Qt::AlignCenter);
-    QFont pbf = mPixelFont; pbf.setPixelSize(10);
+    QFont pbf = mPixelFont; pbf.setPixelSize(uiPx(17));
     mScoreProgressBar->setFont(pbf);
     mScoreProgressBar->setStyleSheet(
         "QProgressBar {"
-        " background:rgba(8,18,24,205);"
-        " border:2px solid #27566b;"
-        " border-radius:7px;"
+        " background:rgba(8,18,24,112);"
+        " border:none;"
+        " border-radius:14px;"
         " color:#eaffff;"
         " text-align:center;"
-        " padding:1px;"
+        " padding:2px;"
         "}"
         "QProgressBar::chunk {"
-        " border-radius:5px;"
+        " border-radius:11px;"
         " background:qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #009dff, stop:0.58 #23e6ff, stop:1 #fda200);"
         "}"
         );
@@ -529,21 +727,23 @@ void MainWindow::setupLeftPanel() {
 
     // 牌型名行
     QWidget *handNameBox = new QWidget(mLeftPanel);
-    handNameBox->setFixedHeight(54);
+    handNameBox->setAttribute(Qt::WA_StyledBackground, true);
+    handNameBox->setStyleSheet("background:transparent; border:none;");
+    handNameBox->setFixedHeight(dp(74));
     auto *hnl = new QHBoxLayout(handNameBox);
     hnl->setContentsMargins(0, 0, 0, 0);
-    hnl->setSpacing(6);
+    hnl->setSpacing(dp(6));
     hnl->setAlignment(Qt::AlignCenter);
 
     mLblHandName = new QLabel("", handNameBox);
-    QFont hnf = mCNFont; hnf.setPixelSize(22); hnf.setBold(true);
+    QFont hnf = mCNFont; hnf.setPixelSize(uiPx(24)); hnf.setBold(true);
     mLblHandName->setFont(hnf);
     mLblHandName->setStyleSheet("color:white; background:transparent;");
     mLblHandName->setAlignment(Qt::AlignCenter);
     hnl->addWidget(mLblHandName);
 
     mLblHandLevel = new QLabel("", handNameBox);
-    QFont hlf = mCNFont; hlf.setPixelSize(14);
+    QFont hlf = mCNFont; hlf.setPixelSize(uiPx(16));
     mLblHandLevel->setFont(hlf);
     mLblHandLevel->setStyleSheet("color:#ff9a00; background:transparent;");
     hnl->addWidget(mLblHandLevel);
@@ -552,14 +752,16 @@ void MainWindow::setupLeftPanel() {
 
     // 筹码 × 倍率
     QWidget *chipsRow = new QWidget(mLeftPanel);
-    chipsRow->setFixedHeight(74);
+    chipsRow->setAttribute(Qt::WA_StyledBackground, true);
+    chipsRow->setStyleSheet("background:transparent; border:none;");
+    chipsRow->setFixedHeight(dp(96));
     QHBoxLayout *chipsLayout = new QHBoxLayout(chipsRow);
     chipsLayout->setContentsMargins(0, 0, 0, 0);
-    chipsLayout->setSpacing(4);
+    chipsLayout->setSpacing(dp(4));
 
     mLblChips = new QLabel("0", chipsRow);
     mLblChips->setAlignment(Qt::AlignCenter);
-    QFont cf = mPixelFont; cf.setPixelSize(38);
+    QFont cf = mPixelFont; cf.setPixelSize(uiPx(42));
     mLblChips->setFont(cf);
     mLblChips->setStyleSheet(
         "background: #009dff; color: white;"
@@ -568,10 +770,10 @@ void MainWindow::setupLeftPanel() {
 
     QLabel *lblX = new QLabel("×", chipsRow);
     lblX->setAlignment(Qt::AlignCenter);
-    QFont xf = mCNFont; xf.setPixelSize(24);
+    QFont xf = mCNFont; xf.setPixelSize(uiPx(28));
     lblX->setFont(xf);
     lblX->setStyleSheet("color: white;");
-    lblX->setFixedWidth(28);
+    lblX->setFixedWidth(dp(32));
 
     mLblMult = new QLabel("0", chipsRow);
     mLblMult->setAlignment(Qt::AlignCenter);
@@ -636,17 +838,27 @@ void MainWindow::setupLeftPanel() {
     mFlameTick->start(33);
 
     QWidget *bottomRow = new QWidget(mLeftPanel);
+    bottomRow->setAttribute(Qt::WA_StyledBackground, true);
+    bottomRow->setStyleSheet("background:transparent; border:none;");
     auto *brl = new QHBoxLayout(bottomRow);
     brl->setContentsMargins(0, 0, 0, 0);
-    brl->setSpacing(8);
+    brl->setSpacing(dp(8));
 
     QWidget *btnCol = new QWidget(bottomRow);
+    btnCol->setAttribute(Qt::WA_StyledBackground, true);
+    btnCol->setStyleSheet("background:transparent; border:none;");
     auto *btnVbl = new QVBoxLayout(btnCol);
     btnVbl->setContentsMargins(0, 0, 0, 0);
-    btnVbl->setSpacing(6);
+    btnVbl->setSpacing(dp(6));
 
-    QPushButton *btnInfo = makeBtn("比赛\n信息", "#fe5f55", "#ff7066", mCNFont, btnCol, 70);
-    btnInfo->setFixedWidth(76);
+    QPushButton *btnInfo = makeBtn("比赛\n信息", "#fe5f55", "#ff7066", mCNFont, btnCol, dp(82));
+    btnInfo->setFixedWidth(dp(86));
+    btnInfo->setStyleSheet(
+        "QPushButton { background:#fe5f55; color:white; border:2px solid rgba(255,255,255,80);"
+        " border-radius:16px; font-size:25px; font-weight:bold; padding:6px 10px; }"
+        "QPushButton:hover { background:#ff7066; border:2px solid rgba(255,255,255,150); }"
+        "QPushButton:pressed { background:#d94a42; padding-top:6px; }"
+        );
     btnVbl->addWidget(btnInfo);
     connect(btnInfo, &QPushButton::clicked, this, [this]() {
         auto handName = [](HandType t) {
@@ -705,10 +917,10 @@ void MainWindow::setupLeftPanel() {
         topL->setContentsMargins(0,0,0,0);
         topL->setSpacing(3);
         QLabel *arrow = new QLabel("▼", top);
-        QFont af = mCNFont; af.setPixelSize(24); af.setBold(true);
+        QFont af = mCNFont; af.setPixelSize(uiPx(24)); af.setBold(true);
         arrow->setFont(af);
         arrow->setAlignment(Qt::AlignCenter);
-        arrow->setFixedSize(36, 26);
+        arrow->setFixedHeight(26);
         arrow->setStyleSheet("color:#ff5f55;");
         // 不把箭头交给 layout 管理，否则初始位置容易被 layout 拉回最左侧。
         // 只预留一行高度，然后用 move() 精确指向当前 tab 的中心。
@@ -727,17 +939,21 @@ void MainWindow::setupLeftPanel() {
 
         auto moveArrowToTab = [arrow](QPushButton *tab) {
             if (!arrow || !tab || !arrow->parentWidget()) return;
-            const QPoint center = tab->mapTo(arrow->parentWidget(), QPoint(tab->width() / 2, 0));
-            arrow->move(center.x() - arrow->width() / 2, arrow->y());
+            QWidget *parent = arrow->parentWidget();
+            const QPoint topLeft = tab->mapTo(parent, QPoint(0, 0));
+            const int tabW = qMax(1, tab->width());
+            // 让 QLabel 占满整个按钮宽度，文字居中；这样箭头视觉中心稳定落在“牌型”按钮正中间。
+            arrow->setGeometry(topLeft.x(), 0, tabW, 26);
+            arrow->raise();
         };
 
         auto makeTab = [&](const QString &txt, int pageIdx) {
             auto *b = new QPushButton(txt, tabRow);
-            QFont f = mCNFont; f.setPixelSize(19); f.setBold(true);
+            QFont f = mCNFont; f.setPixelSize(uiPx(19)); f.setBold(true);
             b->setFont(f);
             b->setFixedHeight(50);
             b->setStyleSheet(
-                "QPushButton { background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #ff7a70, stop:1 #d63f39); color:white; border:2px solid rgba(255,255,255,70); border-radius:12px; padding:8px 24px; }"
+                "QPushButton { background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #ff7a70, stop:1 #d63f39); color:white; border:2px solid rgba(255,255,255,70); border-radius:14px; padding:8px 24px; }"
                 "QPushButton:hover { background:#ff756d; border:2px solid rgba(255,255,255,150); }"
                 "QPushButton:pressed { background:#bb342f; }"
                 );
@@ -760,13 +976,13 @@ void MainWindow::setupLeftPanel() {
             QWidget *row = new QWidget(parent);
             row->setFixedHeight(48);
             row->setAttribute(Qt::WA_StyledBackground, true);
-            row->setStyleSheet("background:qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 rgba(235,243,239,240), stop:1 rgba(199,218,212,235)); border:2px solid #d7e9e5; border-radius:12px;");
+            row->setStyleSheet("background:qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 rgba(235,243,239,240), stop:1 rgba(199,218,212,235)); border:2px solid #d7e9e5; border-radius:14px;");
             auto *h = new QHBoxLayout(row);
             h->setContentsMargins(8,4,8,4);
             h->setSpacing(8);
             auto addPill = [&](const QString &txt, const QString &bg, int w) {
                 QLabel *l = new QLabel(txt, row);
-                QFont f = mCNFont; f.setPixelSize(16); f.setBold(true);
+                QFont f = mCNFont; f.setPixelSize(uiPx(16)); f.setBold(true);
                 l->setFont(f); l->setAlignment(Qt::AlignCenter);
                 l->setFixedWidth(w);
                 l->setStyleSheet(QString("background:%1; color:white; border-radius:10px; padding:3px 8px;").arg(bg));
@@ -775,12 +991,12 @@ void MainWindow::setupLeftPanel() {
             };
             addPill(level, "#eef7f4", 92)->setStyleSheet("background:#eef7f4; color:#23584f; border-radius:10px; padding:3px 8px;");
             QLabel *n = new QLabel(name, row);
-            QFont nf = mCNFont; nf.setPixelSize(17); nf.setBold(true);
+            QFont nf = mCNFont; nf.setPixelSize(uiPx(17)); nf.setBold(true);
             n->setFont(nf); n->setAlignment(Qt::AlignCenter); n->setStyleSheet("color:white; background:transparent;");
             h->addWidget(n, 1);
             addPill(chips, "#009dff", 86);
             QLabel *x = new QLabel("X", row);
-            QFont xf = mCNFont; xf.setPixelSize(18); xf.setBold(true); x->setFont(xf); x->setStyleSheet("color:#fe5f55; background:transparent;");
+            QFont xf = mCNFont; xf.setPixelSize(uiPx(18)); xf.setBold(true); x->setFont(xf); x->setStyleSheet("color:#fe5f55; background:transparent;");
             h->addWidget(x);
             addPill(mult, "#fe5f55", 72);
             QLabel *hash = new QLabel("#", row); hash->setFont(xf); hash->setStyleSheet("color:white; background:transparent;"); h->addWidget(hash);
@@ -792,8 +1008,8 @@ void MainWindow::setupLeftPanel() {
             tile->setAttribute(Qt::WA_StyledBackground, true);
             tile->setStyleSheet(QString("background:rgba(14,23,25,215); border:3px solid %1; border-radius:13px;").arg(accent));
             auto *v = new QVBoxLayout(tile); v->setContentsMargins(12,8,12,8); v->setSpacing(5);
-            QLabel *t = new QLabel(title, tile); QFont tf2=mCNFont; tf2.setPixelSize(19); tf2.setBold(true); t->setFont(tf2); t->setAlignment(Qt::AlignCenter); t->setStyleSheet(QString("color:%1;").arg(accent)); v->addWidget(t);
-            QLabel *b = new QLabel(body, tile); QFont bf=mCNFont; bf.setPixelSize(15); bf.setBold(true); b->setFont(bf); b->setAlignment(Qt::AlignCenter); b->setWordWrap(true); b->setStyleSheet("color:#f4fbfb;"); v->addWidget(b,1);
+            QLabel *t = new QLabel(title, tile); QFont tf2=mCNFont; tf2.setPixelSize(uiPx(19)); tf2.setBold(true); t->setFont(tf2); t->setAlignment(Qt::AlignCenter); t->setStyleSheet(QString("color:%1;").arg(accent)); v->addWidget(t);
+            QLabel *b = new QLabel(body, tile); QFont bf=mCNFont; bf.setPixelSize(uiPx(15)); bf.setBold(true); b->setFont(bf); b->setAlignment(Qt::AlignCenter); b->setWordWrap(true); b->setStyleSheet("color:#f4fbfb;"); v->addWidget(b,1);
             return tile;
         };
 
@@ -830,9 +1046,9 @@ void MainWindow::setupLeftPanel() {
 
         QWidget *voucherPage = makeDarkPage(pages);
         auto *voucherV = new QVBoxLayout(voucherPage); voucherV->setContentsMargins(70, 34, 70, 34); voucherV->setSpacing(18); voucherV->setAlignment(Qt::AlignCenter);
-        QLabel *voucherTitle = new QLabel("本赛局兑换的优惠券", voucherPage); QFont vtf=mCNFont; vtf.setPixelSize(25); vtf.setBold(true); voucherTitle->setFont(vtf); voucherTitle->setAlignment(Qt::AlignCenter); voucherV->addWidget(voucherTitle);
+        QLabel *voucherTitle = new QLabel("本赛局兑换的优惠券", voucherPage); QFont vtf=mCNFont; vtf.setPixelSize(uiPx(25)); vtf.setBold(true); voucherTitle->setFont(vtf); voucherTitle->setAlignment(Qt::AlignCenter); voucherV->addWidget(voucherTitle);
         if (mGameState->redeemedVouchers().isEmpty()) {
-            QLabel *empty = new QLabel("本赛局尚未兑换任何优惠券", voucherPage); QFont ef=mCNFont; ef.setPixelSize(22); ef.setBold(true); empty->setFont(ef); empty->setAlignment(Qt::AlignCenter); voucherV->addWidget(empty, 1);
+            QLabel *empty = new QLabel("本赛局尚未兑换任何优惠券", voucherPage); QFont ef=mCNFont; ef.setPixelSize(uiPx(22)); ef.setBold(true); empty->setFont(ef); empty->setAlignment(Qt::AlignCenter); voucherV->addWidget(empty, 1);
         } else {
             QWidget *gridW = new QWidget(voucherPage); auto *grid = new QGridLayout(gridW); grid->setSpacing(12); grid->setContentsMargins(0,0,0,0);
             int vi = 0;
@@ -849,7 +1065,7 @@ void MainWindow::setupLeftPanel() {
                     img->setPixmap(pm.scaled(img->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
                 }
                 h->addWidget(img);
-                QLabel *txt = new QLabel(vd.name + "\n" + vd.description, card); QFont txf=mCNFont; txf.setPixelSize(13); txf.setBold(true); txt->setFont(txf); txt->setWordWrap(true); txt->setStyleSheet("color:white;"); h->addWidget(txt,1);
+                QLabel *txt = new QLabel(vd.name + "\n" + vd.description, card); QFont txf=mCNFont; txf.setPixelSize(uiPx(13)); txf.setBold(true); txt->setFont(txf); txt->setWordWrap(true); txt->setStyleSheet("color:white;"); h->addWidget(txt,1);
                 grid->addWidget(card, vi/2, vi%2); ++vi;
             }
             voucherV->addWidget(gridW, 1, Qt::AlignCenter);
@@ -876,100 +1092,117 @@ void MainWindow::setupLeftPanel() {
         QTimer::singleShot(80, &dlg, [moveArrowToTab, firstTab = tabButtons.value(0)]() {
             moveArrowToTab(firstTab);
         });
+        QTimer::singleShot(160, &dlg, [moveArrowToTab, firstTab = tabButtons.value(0)]() {
+            moveArrowToTab(firstTab);
+        });
 
         auto *back = new QPushButton("返回", &dlg);
-        QFont bf = mCNFont; bf.setPixelSize(21); bf.setBold(true); back->setFont(bf);
+        QFont bf = mCNFont; bf.setPixelSize(uiPx(21)); bf.setBold(true); back->setFont(bf);
         back->setFixedHeight(46);
-        back->setStyleSheet("QPushButton { background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #ffc45b, stop:1 #e58c00); color:white; border:2px solid #ffe2a0; border-radius:12px; } QPushButton:hover { background:#ffb730; }");
+        back->setStyleSheet("QPushButton { background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #ffc45b, stop:1 #e58c00); color:white; border:2px solid #ffe2a0; border-radius:14px; } QPushButton:hover { background:#ffb730; }");
         connect(back, &QPushButton::clicked, &dlg, &QDialog::accept);
         root->addWidget(back);
         dlg.exec();
     });
 
-    QPushButton *btnOptions = makeBtn("选项", "#fda200", "#ffb730", mCNFont, btnCol, 70);
-    btnOptions->setFixedWidth(76);
+    QPushButton *btnOptions = makeBtn("选项", "#fda200", "#ffb730", mCNFont, btnCol, dp(82));
+    btnOptions->setFixedWidth(dp(86));
+    btnOptions->setStyleSheet(
+        "QPushButton { background:#fda200; color:white; border:2px solid rgba(255,255,255,80);"
+        " border-radius:16px; font-size:25px; font-weight:bold; padding:6px 10px; }"
+        "QPushButton:hover { background:#ffb730; border:2px solid rgba(255,255,255,150); }"
+        "QPushButton:pressed { background:#d98a00; padding-top:6px; }"
+        );
     btnVbl->addWidget(btnOptions);
     connect(btnOptions, &QPushButton::clicked, this, &MainWindow::showOptionsOverlay);
 
     brl->addWidget(btnCol);
 
     QWidget *rightCol = new QWidget(bottomRow);
+    rightCol->setAttribute(Qt::WA_StyledBackground, true);
+    rightCol->setStyleSheet("background:transparent; border:none;");
     auto *rcvbl = new QVBoxLayout(rightCol);
     rcvbl->setContentsMargins(0, 0, 0, 0);
-    rcvbl->setSpacing(6);
+    rcvbl->setSpacing(dp(6));
 
     QWidget *handsRow = new QWidget(rightCol);
-    handsRow->setFixedHeight(66);
+    handsRow->setFixedHeight(dp(104));
     handsRow->setAttribute(Qt::WA_StyledBackground, true);
-    handsRow->setStyleSheet("background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #46555a, stop:1 #2b373b); border:2px solid rgba(255,255,255,38); border-radius:13px;");
+    handsRow->setStyleSheet("background:#334044; border:none; border-radius:16px;");
     auto *hrl = new QHBoxLayout(handsRow);
-    hrl->setContentsMargins(8, 4, 8, 4);
-    hrl->setSpacing(4);
+    hrl->setContentsMargins(dp(8), dp(4), dp(8), dp(4));
+    hrl->setSpacing(dp(4));
 
     QWidget *hCell = new QWidget(handsRow);
+    hCell->setAttribute(Qt::WA_StyledBackground, true);
+    hCell->setStyleSheet("background:transparent; border:none;");
     auto *hcv = new QVBoxLayout(hCell);
     hcv->setContentsMargins(0, 0, 0, 0);
     hcv->setSpacing(0);
     hcv->setAlignment(Qt::AlignCenter);
-    hcv->addWidget(makeLabel("出牌", 11, "white", mCNFont, hCell));
-    mLblHands = makeLabel("4", 22, "#009dff", mPixelFont, hCell);
+    hcv->addWidget(makeLabel("出牌", 17, "white", mCNFont, hCell));
+    mLblHands = makeLabel("4", 28, "#009dff", mPixelFont, hCell);
     hcv->addWidget(mLblHands);
     hrl->addWidget(hCell);
 
     QWidget *dCell = new QWidget(handsRow);
+    dCell->setAttribute(Qt::WA_StyledBackground, true);
+    dCell->setStyleSheet("background:transparent; border:none;");
     auto *dcv = new QVBoxLayout(dCell);
     dcv->setContentsMargins(0, 0, 0, 0);
     dcv->setSpacing(0);
     dcv->setAlignment(Qt::AlignCenter);
-    dcv->addWidget(makeLabel("弃牌", 11, "white", mCNFont, dCell));
-    mLblDiscards = makeLabel("3", 22, "#fe5f55", mPixelFont, dCell);
+    dcv->addWidget(makeLabel("弃牌", 17, "white", mCNFont, dCell));
+    mLblDiscards = makeLabel("3", 28, "#fe5f55", mPixelFont, dCell);
     dcv->addWidget(mLblDiscards);
     hrl->addWidget(dCell);
 
     rcvbl->addWidget(handsRow);
 
     QWidget *goldRow = new QWidget(rightCol);
-    goldRow->setFixedHeight(48);
+    goldRow->setFixedHeight(dp(76));
     goldRow->setAttribute(Qt::WA_StyledBackground, true);
-    goldRow->setStyleSheet("background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #3b4a3f, stop:1 #222e27); border:2px solid rgba(243,185,88,80); border-radius:13px;");
+    goldRow->setStyleSheet("background:#304235; border:none; border-radius:16px;");
     auto *gbl = new QHBoxLayout(goldRow);
-    gbl->setContentsMargins(10, 4, 10, 4);
-    gbl->setSpacing(8);
+    gbl->setContentsMargins(dp(10), dp(4), dp(10), dp(4));
+    gbl->setSpacing(dp(8));
     gbl->setAlignment(Qt::AlignCenter);
 
-    mLblGold = makeLabel("$4", 24, "#f3b958", mPixelFont, goldRow);
+    mLblGold = makeLabel("$4", 31, "#f3b958", mPixelFont, goldRow);
     gbl->addWidget(mLblGold);
     rcvbl->addWidget(goldRow);
 
     QWidget *anteRow2 = new QWidget(rightCol);
+    anteRow2->setAttribute(Qt::WA_StyledBackground, true);
+    anteRow2->setStyleSheet("background:transparent; border:none;");
     auto *arl = new QHBoxLayout(anteRow2);
     arl->setContentsMargins(0, 0, 0, 0);
-    arl->setSpacing(4);
+    arl->setSpacing(dp(4));
 
     QWidget *anteBox = new QWidget(anteRow2);
-    anteBox->setFixedHeight(54);
+    anteBox->setFixedHeight(dp(88));
     anteBox->setAttribute(Qt::WA_StyledBackground, true);
-    anteBox->setStyleSheet("background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #46555a, stop:1 #2b373b); border:2px solid rgba(255,255,255,38); border-radius:13px;");
+    anteBox->setStyleSheet("background:#334044; border:none; border-radius:16px;");
     auto *avbl = new QVBoxLayout(anteBox);
-    avbl->setContentsMargins(6, 3, 6, 3);
+    avbl->setContentsMargins(dp(6), dp(3), dp(6), dp(3));
     avbl->setSpacing(0);
     avbl->setAlignment(Qt::AlignCenter);
-    avbl->addWidget(makeLabel("底注", 11, "white", mCNFont, anteBox));
-    mLblAnte = makeLabel("1<font color='white'>/8</font>", 16, "#ff9a00", mPixelFont, anteBox);
+    avbl->addWidget(makeLabel("底注", 17, "white", mCNFont, anteBox));
+    mLblAnte = makeLabel("1<font color='white'>/8</font>", 23, "#ff9a00", mPixelFont, anteBox);
     mLblAnte->setTextFormat(Qt::RichText);
     avbl->addWidget(mLblAnte);
     arl->addWidget(anteBox);
 
     QWidget *roundBox = new QWidget(anteRow2);
-    roundBox->setFixedHeight(54);
+    roundBox->setFixedHeight(dp(88));
     roundBox->setAttribute(Qt::WA_StyledBackground, true);
-    roundBox->setStyleSheet("background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #46555a, stop:1 #2b373b); border:2px solid rgba(255,255,255,38); border-radius:13px;");
+    roundBox->setStyleSheet("background:#334044; border:none; border-radius:16px;");
     auto *rvbl = new QVBoxLayout(roundBox);
-    rvbl->setContentsMargins(6, 3, 6, 3);
+    rvbl->setContentsMargins(dp(6), dp(3), dp(6), dp(3));
     rvbl->setSpacing(0);
     rvbl->setAlignment(Qt::AlignCenter);
-    rvbl->addWidget(makeLabel("回合", 11, "white", mCNFont, roundBox));
-    mLblRound = makeLabel("1", 16, "#ff9a00", mPixelFont, roundBox);
+    rvbl->addWidget(makeLabel("回合", 17, "white", mCNFont, roundBox));
+    mLblRound = makeLabel("1", 23, "#ff9a00", mPixelFont, roundBox);
     rvbl->addWidget(mLblRound);
     arl->addWidget(roundBox);
 
@@ -1001,7 +1234,7 @@ void MainWindow::showOptionsOverlay()
         "QWidget#OptionsOverlay { background:rgba(0,0,0,88); }"
         "QFrame#OptionsPanel { background:rgba(36,51,54,245); border:3px solid #dce9e9; border-radius:18px; }"
         "QLabel { color:white; background:transparent; }"
-        "QPushButton { background:#fe5f55; color:white; border:none; border-radius:10px; padding:13px 24px; font-size:20px; font-weight:bold; }"
+        "QPushButton { background:#fe5f55; color:white; border:none; border-radius:10px; padding:13px 24px; font-size:31px; font-weight:bold; }"
         "QPushButton:hover { background:#ff7066; }"
         "QPushButton:pressed { background:#d94a42; }"
         "QPushButton:disabled { background:#394347; color:#8f9a9c; }"
@@ -1020,13 +1253,13 @@ void MainWindow::showOptionsOverlay()
 
     auto *panel = new QFrame(mOptionsOverlay);
     panel->setObjectName("OptionsPanel");
-    panel->setFixedSize(520, 560);
+    panel->setFixedSize(dp(520), dp(560));
     auto *v = new QVBoxLayout(panel);
-    v->setContentsMargins(34, 30, 34, 30);
-    v->setSpacing(14);
+    v->setContentsMargins(dp(34), dp(30), dp(34), dp(30));
+    v->setSpacing(dp(14));
 
     QFont titleFont = mCNFont;
-    titleFont.setPixelSize(25);
+    titleFont.setPixelSize(uiPx(25));
     titleFont.setBold(true);
 
     auto *title = new QLabel("选项", panel);
@@ -1101,6 +1334,7 @@ void MainWindow::setupScene() {
     mView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     mView->setRenderHints(QPainter::Antialiasing | QPainter::SmoothPixmapTransform);
     mView->setFrameShape(QFrame::NoFrame);
+    mView->setAlignment(Qt::AlignCenter);
     mView->setStyleSheet("background: transparent; border: none;");
     mView->setAttribute(Qt::WA_TranslucentBackground, true);
     mView->setAutoFillBackground(false);
@@ -1114,15 +1348,16 @@ void MainWindow::setupScene() {
 
     mScene->setSceneRect(0, 0, mSceneW, mSceneH);
     mScene->setBackgroundBrush(QBrush(Qt::NoBrush));
+    QTimer::singleShot(0, this, &MainWindow::fitSceneToView);
 
     mJokerCountLabel = mScene->addText("0/5");
     mJokerCountLabel->setDefaultTextColor(QColor("#d7e7d2"));
-    mJokerCountLabel->setFont(mCNFont);
+    { QFont countFont = mCNFont; countFont.setPixelSize(uiPx(14)); countFont.setBold(true); mJokerCountLabel->setFont(countFont); }
     mJokerCountLabel->setZValue(30);
 
     mConsCountLabel = mScene->addText("0/2");
     mConsCountLabel->setDefaultTextColor(QColor("#d7e7d2"));
-    mConsCountLabel->setFont(mCNFont);
+    { QFont countFont = mCNFont; countFont.setPixelSize(uiPx(14)); countFont.setBold(true); mConsCountLabel->setFont(countFont); }
     mConsCountLabel->setZValue(30);
 
     refreshJokerSlotFrames();
@@ -1131,38 +1366,41 @@ void MainWindow::setupScene() {
     mPlayBgRect = nullptr;
 
     mHandCountLabel = mScene->addText("8/8");
-    QFont hcf = mCNFont; hcf.setPixelSize(13);
+    QFont hcf = mCNFont; hcf.setPixelSize(uiPx(13));
     mHandCountLabel->setFont(hcf);
     mHandCountLabel->setDefaultTextColor(QColor("#aaddaa"));
     mHandCountLabel->setZValue(30);
 
     CardData backData;
     backData.faceUp = false;
+    mHandYNormal  = mSceneH - CARD_H - 150;
+    mHandYScoring = mSceneH - CARD_H - 90;
+    mHandY = mHandYNormal;
+    mBtnY  = mSceneH - 118;
+
     mDeckBackCard = new CardItem(backData);
-    mDeckBackCard->setPos(mSceneW - CARD_W - 60, mSceneH - CARD_H - 36);
+    // 右下角牌组标识初始高度与手牌对齐。
+    mDeckBackCard->setPos(mSceneW - CARD_W - 60, mHandYNormal);
     mDeckBackCard->setZValue(1);
     mScene->addItem(mDeckBackCard);
     connect(mDeckBackCard, &CardItem::clicked, this, &MainWindow::onDeckClicked);
 
     mDeckLabel = mScene->addText("52/52");
-    QFont df = mCNFont; df.setPixelSize(12);
+    QFont df = mCNFont; df.setPixelSize(uiPx(12));
     mDeckLabel->setFont(df);
     mDeckLabel->setDefaultTextColor(QColor("#cccccc"));
     mDeckLabel->setPos(mSceneW - CARD_W - 4, mSceneH - 34);
     mDeckLabel->setZValue(2);
 
-    mHandYNormal  = mSceneH - CARD_H - 150;     // 正常 740
-    mHandYScoring = mSceneH - CARD_H - 90;      // 出牌时下移 60 → 800
-    mHandY = mHandYNormal;
-    mBtnY  = mSceneH - 88;
-
-    mDeckLabel->setPos(mSceneW - CARD_W - 54, mSceneH - 34);
+    QRectF deckTextBr = mDeckLabel->boundingRect();
+    mDeckLabel->setPos(mSceneW - CARD_W - 60 + (CARD_W - deckTextBr.width()) / 2.0,
+                       mHandYNormal + CARD_H + 6);
 }
 
 void MainWindow::setupSceneButtons() {
-    int btnW = 160;
-    int btnH = 50;
-    int gap = 12;
+    int btnW = 176;
+    int btnH = 78;
+    int gap = 16;
     int totalW = btnW * 3 + gap * 2;
     int startX = (mSceneW - HAND_RIGHT_RESERVE - totalW) / 2;
     int y = mBtnY;
@@ -1177,16 +1415,17 @@ void MainWindow::setupSceneButtons() {
     sortContainer->setFixedSize(btnW, btnH);
     sortContainer->setAttribute(Qt::WA_StyledBackground, true);
     sortContainer->setStyleSheet(
-        "background: white;"
-        "border-radius: 8px;"
+        "background:#eef7f4;"
+        "border:2px solid rgba(255,255,255,125);"
+        "border-radius:16px;"
         );
     auto *scbl = new QVBoxLayout(sortContainer);
-    scbl->setContentsMargins(4, 2, 4, 4);
-    scbl->setSpacing(2);
+    scbl->setContentsMargins(8, 6, 8, 8);
+    scbl->setSpacing(5);
     scbl->setAlignment(Qt::AlignCenter);
 
     QLabel *sortLbl = new QLabel("理牌", sortContainer);
-    QFont slf = mCNFont; slf.setPixelSize(14); slf.setBold(true);
+    QFont slf = mCNFont; slf.setPixelSize(uiPx(16)); slf.setBold(true);
     sortLbl->setFont(slf);
     sortLbl->setAlignment(Qt::AlignCenter);
     sortLbl->setStyleSheet("color:#374244; background:transparent;");
@@ -1197,8 +1436,8 @@ void MainWindow::setupSceneButtons() {
     auto *subl = new QHBoxLayout(subRow);
     subl->setContentsMargins(0, 0, 0, 0);
     subl->setSpacing(4);
-    mBtnSortNum  = makeBtn("点数", "#fda200", "#ffb730", mCNFont, subRow, 22);
-    mBtnSortSuit = makeBtn("花色", "#fda200", "#ffb730", mCNFont, subRow, 22);
+    mBtnSortNum  = makeBtn("点数", "#fda200", "#ffb730", mCNFont, subRow, 38);
+    mBtnSortSuit = makeBtn("花色", "#fda200", "#ffb730", mCNFont, subRow, 38);
     subl->addWidget(mBtnSortNum);
     subl->addWidget(mBtnSortSuit);
     scbl->addWidget(subRow);
@@ -1293,7 +1532,7 @@ void MainWindow::refreshHand() {
         }
     }
 
-    QPointF deckPos(mSceneW - CARD_W - 10, mSceneH - CARD_H - 36);
+    QPointF deckPos(mSceneW - CARD_W - 60, mHandYNormal);
     QVector<CardItem*> reordered;
     QVector<CardItem*> remaining = mHandCards;
     for (const auto &hc : hand) {
@@ -1320,7 +1559,8 @@ void MainWindow::refreshHand() {
                     this, [this](CardItem *c, bool hovered) {
                         if (hovered) {
                             c->setZValue(720);
-                            showCardInfo(c);
+                            // 扑克牌悬停提示现在由 CardItem 自绘，避免 QGraphicsProxyWidget 在 OpenGL 视口下偶发不显示。
+                            hideCardInfo();
                         } else {
                             hideCardInfo();
                             layoutHandCards();
@@ -1421,22 +1661,22 @@ void MainWindow::updateScoreProgressBar(double displayedScore, bool animate)
     ratio = std::max(0.0, ratio);
 
     const int barValue = qBound(0, int(std::round(std::min(ratio, 1.0) * 1000.0)), 1000);
-    const int percent = qMin(999, int(std::round(ratio * 100.0)));
+    const int percent = qBound(0, int(std::round(std::min(ratio, 1.0) * 100.0)), 100);
     mScoreProgressBar->setFormat(QString("%1%").arg(percent));
 
     const QString border = barValue >= 1000 ? "#ffb000" : "#27566b";
     const QString chunkEnd = barValue >= 1000 ? "#ffdf68" : "#fda200";
     mScoreProgressBar->setStyleSheet(QString(
         "QProgressBar {"
-        " background:rgba(8,18,24,205);"
-        " border:2px solid %1;"
-        " border-radius:7px;"
+        " background:rgba(8,18,24,112);"
+        " border:3px solid %1;"
+        " border-radius:14px;"
         " color:#eaffff;"
         " text-align:center;"
-        " padding:1px;"
+        " padding:2px;"
         "}"
         "QProgressBar::chunk {"
-        " border-radius:5px;"
+        " border-radius:11px;"
         " background:qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #009dff, stop:0.58 #23e6ff, stop:1 %2);"
         "}"
         ).arg(border, chunkEnd));
@@ -1529,20 +1769,20 @@ void MainWindow::refreshCounters() {
             QString("%1/%2").arg(formatScoreNumber(mGameState->deckRemaining())).arg(formatScoreNumber(mGameState->deckTotal())));
         QRectF br = mDeckLabel->boundingRect();
         mDeckLabel->setPos(mSceneW - CARD_W - 60 + (CARD_W - br.width()) / 2.0,
-                           mSceneH - 34);
+                           mHandYNormal + CARD_H + 6);
     }
     if (mJokerCountLabel) {
         mJokerCountLabel->setPlainText(QString("%1/%2")
                                            .arg(mGameState->jokers().size()).arg(mGameState->jokerSlots()));
         QRectF br = mJokerCountLabel->boundingRect();
-        mJokerCountLabel->setPos(22, JOKER_Y + CARD_H + 24);
+        mJokerCountLabel->setPos(22, JOKER_Y + CARD_H + 40);
     }
     if (mConsCountLabel) {
         QRectF br = mConsCountLabel->boundingRect();
         int visualSlots = Constants::MAX_CONSUMABLE_SLOTS;
         int totalW = CARD_W + qMax(0, visualSlots - 1) * (CARD_W + 14);
-        int startX = mSceneW - 8 - totalW;
-        mConsCountLabel->setPos(startX + totalW - br.width() - 2, JOKER_Y + CARD_H + 24);
+        int startX = mSceneW - 22 - totalW;
+        mConsCountLabel->setPos(startX + totalW - br.width() - 2, JOKER_Y + CARD_H + 40);
     }
 }
 
@@ -1582,41 +1822,43 @@ void MainWindow::showCardInfo(CardItem *card)
         mCardInfoPanel = new QWidget;
         mCardInfoPanel->setAttribute(Qt::WA_StyledBackground, true);
         mCardInfoPanel->setStyleSheet(
-            "background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 rgba(34,44,47,248), stop:1 rgba(12,20,23,248));"
-            "border:3px solid #6fd3ff;"
-            "border-radius:14px;"
+            "background:#f5fbf5;"
+            "border:3px solid #223034;"
+            "border-radius:8px;"
             );
         auto *infoGlow = new QGraphicsDropShadowEffect(mCardInfoPanel);
-        infoGlow->setBlurRadius(24);
-        infoGlow->setOffset(0, 0);
-        infoGlow->setColor(QColor(0, 0, 0, 180));
+        infoGlow->setBlurRadius(14);
+        infoGlow->setOffset(0, 4);
+        infoGlow->setColor(QColor(0, 0, 0, 135));
         mCardInfoPanel->setGraphicsEffect(infoGlow);
         auto *v = new QVBoxLayout(mCardInfoPanel);
-        v->setContentsMargins(14, 11, 14, 12);
-        v->setSpacing(7);
+        v->setContentsMargins(0, 0, 0, 0);
+        v->setSpacing(0);
 
         mCardInfoName = new QLabel(mCardInfoPanel);
-        QFont nf = mCNFont; nf.setPixelSize(18); nf.setBold(true);
+        QFont nf = mCNFont; nf.setPixelSize(uiPx(22)); nf.setBold(true);
         mCardInfoName->setFont(nf);
-        mCardInfoName->setStyleSheet("color:#ffe9a8; background:transparent;");
+        mCardInfoName->setStyleSheet("color:#243235; background:#f8fff8; border:none; border-bottom:2px solid #223034; padding:4px 8px;");
         mCardInfoName->setAlignment(Qt::AlignCenter);
         v->addWidget(mCardInfoName);
 
         mCardInfoDesc = new QLabel(mCardInfoPanel);
-        QFont df = mCNFont; df.setPixelSize(13);
+        QFont df = mCNFont; df.setPixelSize(uiPx(18)); df.setBold(true);
         mCardInfoDesc->setFont(df);
-        mCardInfoDesc->setStyleSheet("color:#eefcff; background:transparent; line-height:130%;");
+        mCardInfoDesc->setStyleSheet("color:#2a86c8; background:#f8fff8; border:none; padding:5px 8px;");
         mCardInfoDesc->setWordWrap(true);
-        mCardInfoDesc->setAlignment(Qt::AlignLeft | Qt::AlignTop);
+        mCardInfoDesc->setAlignment(Qt::AlignCenter);
         v->addWidget(mCardInfoDesc);
 
-        mCardInfoPanel->setFixedWidth(272);
+        mCardInfoPanel->setFixedWidth(150);
         mCardInfoProxy = mScene->addWidget(mCardInfoPanel);
         mCardInfoProxy->setZValue(900);
     }
 
     mCardInfoName->setText(cardTooltipTitle(d));
     mCardInfoDesc->setText(cardTooltipBody(d));
+    const int preferredTooltipW = (mCardInfoDesc->text().contains('\n') || mCardInfoName->text().size() > 5) ? 210 : 150;
+    mCardInfoPanel->setFixedWidth(preferredTooltipW);
     mCardInfoPanel->adjustSize();
 
     QPointF p(card->scenePos().x() + CardItem::WIDTH / 2.0 - mCardInfoPanel->width() / 2.0,
@@ -1909,9 +2151,20 @@ void MainWindow::onGameOver(bool won)
     showGameOverOverlay(won);
 }
 
+void MainWindow::fitSceneToView()
+{
+    if (!mView || !mScene) return;
+    const QRectF sr = mScene->sceneRect();
+    if (sr.isEmpty() || mView->viewport()->width() <= 1 || mView->viewport()->height() <= 1) return;
+
+    mView->resetTransform();
+    mView->fitInView(sr, Qt::KeepAspectRatio);
+}
+
 void MainWindow::resizeEvent(QResizeEvent *event)
 {
     QMainWindow::resizeEvent(event);
+    fitSceneToView();
 
     if (mPlayPage) {
         QRect r = mPlayPage->rect();
@@ -1920,6 +2173,7 @@ void MainWindow::resizeEvent(QResizeEvent *event)
             mDynamicBg->setSceneSize(r.width(), r.height());
             mDynamicBg->lower();
         }
+        fitSceneToView();
         if (mBlindSelectWidget) { mBlindSelectWidget->setGeometry(lowerOverlayRect()); if (mBlindSelectWidget->isVisible()) mBlindSelectWidget->raise(); }
         if (mRoundEndOverlay)   { mRoundEndOverlay  ->setGeometry(r);                 if (mRoundEndOverlay->isVisible())   mRoundEndOverlay->raise(); }
         if (mShopWidget)        { mShopWidget       ->setGeometry(lowerOverlayRect()); if (mShopWidget->isVisible())        mShopWidget->raise(); }
@@ -1944,11 +2198,11 @@ void MainWindow::refreshJokerSlotFrames()
     int visualSlots = Constants::MAX_JOKER_SLOTS;
     int step = CARD_W + 14;
     int totalW = CARD_W + qMax(0, visualSlots - 1) * step;
-    int available = qMin(mSceneW - 430, 780);
-    int startX = 8;
-    if (totalW < available) startX = 8 + (available - totalW) / 2;
+    int available = qMin(mSceneW - 470, 840);
+    int startX = 18;
+    if (totalW < available) startX = 18 + (available - totalW) / 2;
 
-    QRectF bg(startX - 12, JOKER_Y + 8, totalW + 24, CARD_H + 32);
+    QRectF bg(startX - 20, JOKER_Y + 12, totalW + 40, CARD_H + 18);
     auto *r = mScene->addRect(bg,
                               QPen(Qt::NoPen),
                               QBrush(QColor(0, 0, 0, 44)));
@@ -1971,16 +2225,16 @@ void MainWindow::refreshJokerSlots()
     int n = js.size();
     if (mJokerCountLabel) {
         mJokerCountLabel->setPlainText(QString("%1/%2").arg(n).arg(mGameState->jokerSlots()));
-        mJokerCountLabel->setPos(22, JOKER_Y + CARD_H + 24);
+        mJokerCountLabel->setPos(22, JOKER_Y + CARD_H + 40);
     }
     if (mPackOpenWidget && mPackOpenWidget->isVisible())
         mPackOpenWidget->setFreeJokerSlots(mGameState->jokerSlots() - n);
     int visualSlots = Constants::MAX_JOKER_SLOTS;
     int visualStep = CARD_W + 14;
     int visualW = CARD_W + qMax(0, visualSlots - 1) * visualStep;
-    int available = qMin(mSceneW - 430, 780);
-    int startX = 8;
-    if (visualW < available) startX = 8 + (available - visualW) / 2;
+    int available = qMin(mSceneW - 470, 840);
+    int startX = 18;
+    if (visualW < available) startX = 18 + (available - visualW) / 2;
     int step = (n > 1) ? (visualW - CARD_W) / qMax(1, n - 1) : visualStep;
     step = qBound(42, step, visualStep);
 
@@ -2018,37 +2272,37 @@ void MainWindow::showJokerInfo(int idx, bool showSellButton)
         mJokerInfoPanel->setStyleSheet(
             "background:rgba(31,37,42,235);"
             "border:2px solid #fda200;"
-            "border-radius:12px;"
+            "border-radius:14px;"
             );
         auto *vbl = new QVBoxLayout(mJokerInfoPanel);
-        vbl->setContentsMargins(12, 10, 12, 10);
-        vbl->setSpacing(6);
+        vbl->setContentsMargins(dp(12), dp(10), dp(12), dp(10));
+        vbl->setSpacing(dp(6));
 
         mJokerInfoName = new QLabel(mJokerInfoPanel);
-        QFont nf = mCNFont; nf.setPixelSize(18); nf.setBold(true);
+        QFont nf = mCNFont; nf.setPixelSize(uiPx(22)); nf.setBold(true);
         mJokerInfoName->setFont(nf);
         mJokerInfoName->setStyleSheet("color:#ffe9a8; background:transparent; border:none;");
         mJokerInfoName->setAlignment(Qt::AlignCenter);
         vbl->addWidget(mJokerInfoName);
 
         mJokerInfoMeta = new QLabel(mJokerInfoPanel);
-        QFont mf = mCNFont; mf.setPixelSize(13);
+        QFont mf = mCNFont; mf.setPixelSize(uiPx(16));
         mJokerInfoMeta->setFont(mf);
         mJokerInfoMeta->setStyleSheet("color:#cbd6dc; background:transparent; border:none;");
         mJokerInfoMeta->setAlignment(Qt::AlignCenter);
         vbl->addWidget(mJokerInfoMeta);
 
         mJokerInfoDesc = new QLabel(mJokerInfoPanel);
-        QFont df = mCNFont; df.setPixelSize(13);
+        QFont df = mCNFont; df.setPixelSize(uiPx(16));
         mJokerInfoDesc->setFont(df);
         mJokerInfoDesc->setWordWrap(true);
         mJokerInfoDesc->setAlignment(Qt::AlignCenter);
         mJokerInfoDesc->setStyleSheet("color:white; background:transparent; border:none;");
-        mJokerInfoDesc->setFixedWidth(240);
+        mJokerInfoDesc->setFixedWidth(dp(310));
         vbl->addWidget(mJokerInfoDesc);
 
         mJokerSellButton = new QPushButton(mJokerInfoPanel);
-        QFont sf = mCNFont; sf.setPixelSize(16); sf.setBold(true);
+        QFont sf = mCNFont; sf.setPixelSize(uiPx(16)); sf.setBold(true);
         mJokerSellButton->setFont(sf);
         mJokerSellButton->setCursor(Qt::PointingHandCursor);
         mJokerSellButton->setStyleSheet(
@@ -2111,16 +2365,16 @@ void MainWindow::showJokerInfo(int idx, bool showSellButton)
             lay->setSpacing(0);
         }
         mJokerInfoPanel->setStyleSheet("background:transparent; border:none;");
-        mJokerInfoPanel->setFixedSize(76, 58);
+        mJokerInfoPanel->setFixedSize(dp(76), dp(58));
 
         mJokerInfoMeta->clear();
         mJokerInfoMeta->setVisible(false);
         mJokerInfoMeta->setFixedHeight(0);
 
-        QFont sf = mCNFont; sf.setPixelSize(15); sf.setBold(true);
+        QFont sf = mCNFont; sf.setPixelSize(uiPx(15)); sf.setBold(true);
         mJokerSellButton->setFont(sf);
         mJokerSellButton->setText(QString("售出\n$%1").arg(qMax(1, j.sellValue)));
-        mJokerSellButton->setFixedSize(76, 58);
+        mJokerSellButton->setFixedSize(dp(76), dp(58));
         mJokerSellButton->setStyleSheet(
             "QPushButton { background:#10372f; color:white; border:0px;"
             "border-radius:11px; padding:0px; text-align:center; }"
@@ -2129,21 +2383,21 @@ void MainWindow::showJokerInfo(int idx, bool showSellButton)
             );
     } else {
         if (auto *lay = mJokerInfoPanel->layout()) {
-            lay->setContentsMargins(12, 10, 12, 10);
-            lay->setSpacing(6);
+            lay->setContentsMargins(dp(12), dp(10), dp(12), dp(10));
+            lay->setSpacing(dp(6));
         }
         mJokerInfoPanel->setMinimumSize(0, 0);
         mJokerInfoPanel->setMaximumSize(16777215, 16777215);
         mJokerInfoPanel->setStyleSheet(
             "background:rgba(31,37,42,235);"
             "border:2px solid #fda200;"
-            "border-radius:12px;"
+            "border-radius:14px;"
             );
-        mJokerInfoPanel->setFixedWidth(286);
-        mJokerInfoName->setFixedWidth(250);
-        mJokerInfoMeta->setFixedWidth(250);
-        mJokerInfoDesc->setFixedWidth(250);
-        QFont mf = mCNFont; mf.setPixelSize(13); mf.setBold(false);
+        mJokerInfoPanel->setFixedWidth(dp(350));
+        mJokerInfoName->setFixedWidth(dp(314));
+        mJokerInfoMeta->setFixedWidth(dp(314));
+        mJokerInfoDesc->setFixedWidth(dp(314));
+        QFont mf = mCNFont; mf.setPixelSize(uiPx(16)); mf.setBold(false);
         mJokerInfoMeta->setFont(mf);
         mJokerInfoMeta->setVisible(true);
         mJokerInfoMeta->setStyleSheet("color:#cbd6dc; background:transparent; border:none;");
@@ -2158,7 +2412,7 @@ void MainWindow::showJokerInfo(int idx, bool showSellButton)
     if (!showSellButton) {
         if (auto *lay = mJokerInfoPanel->layout()) lay->activate();
         mJokerInfoPanel->adjustSize();
-        mJokerInfoPanel->resize(286, qBound(112, mJokerInfoPanel->height(), 286));
+        mJokerInfoPanel->resize(dp(350), qBound(dp(142), mJokerInfoPanel->height(), dp(360)));
     }
 
     disconnect(mJokerSellButton, nullptr, this, nullptr);
@@ -2196,8 +2450,8 @@ void MainWindow::showJokerInfo(int idx, bool showSellButton)
     if (mJokerInfoPanel->parentWidget() != mPlayPage) mJokerInfoPanel->setParent(mPlayPage);
     QPoint viewPoint = mView->mapFromScene(QPointF(x, y));
     QPoint pagePoint = mView->mapTo(mPlayPage, viewPoint);
-    pagePoint.setX(qBound(6, pagePoint.x(), qMax(6, mPlayPage->width() - mJokerInfoPanel->width() - 6)));
-    pagePoint.setY(qBound(6, pagePoint.y(), qMax(6, mPlayPage->height() - mJokerInfoPanel->height() - 6)));
+    pagePoint.setX(qBound(dp(6), pagePoint.x(), qMax(dp(6), mPlayPage->width() - mJokerInfoPanel->width() - dp(6))));
+    pagePoint.setY(qBound(dp(6), pagePoint.y(), qMax(dp(6), mPlayPage->height() - mJokerInfoPanel->height() - dp(6))));
     mJokerInfoPanel->move(pagePoint);
     mJokerInfoPanel->raise();
     mJokerInfoPanel->show();
@@ -2230,9 +2484,9 @@ void MainWindow::onJokerDragMoved(JokerItem *item, QPointF scenePos)
     int visualSlots = Constants::MAX_JOKER_SLOTS;
     int visualStep = CARD_W + 14;
     int visualW = CARD_W + qMax(0, visualSlots - 1) * visualStep;
-    int available = qMin(mSceneW - 430, 780);
-    int startX = 8;
-    if (visualW < available) startX = 8 + (available - visualW) / 2;
+    int available = qMin(mSceneW - 470, 840);
+    int startX = 18;
+    if (visualW < available) startX = 18 + (available - visualW) / 2;
     int step = (n > 1) ? (visualW - CARD_W) / qMax(1, n - 1) : visualStep;
     step = qBound(42, step, visualStep);
 
@@ -2274,9 +2528,9 @@ void MainWindow::onJokerDragReleased(JokerItem *item, QPointF scenePos)
     int visualSlots = Constants::MAX_JOKER_SLOTS;
     int visualStep = CARD_W + 14;
     int visualW = CARD_W + qMax(0, visualSlots - 1) * visualStep;
-    int available = qMin(mSceneW - 430, 780);
-    int startX = 8;
-    if (visualW < available) startX = 8 + (available - visualW) / 2;
+    int available = qMin(mSceneW - 470, 840);
+    int startX = 18;
+    if (visualW < available) startX = 18 + (available - visualW) / 2;
     int step = (n > 1) ? (visualW - CARD_W) / qMax(1, n - 1) : visualStep;
     step = qBound(42, step, visualStep);
 
@@ -2319,21 +2573,21 @@ void MainWindow::showConsumableAction(int idx)
         auto *h = new QHBoxLayout(row);
         h->setContentsMargins(0,0,0,0);
         h->setSpacing(4);
-        QFont bf = mCNFont; bf.setPixelSize(12); bf.setBold(true);
+        QFont bf = mCNFont; bf.setPixelSize(uiPx(12)); bf.setBold(true);
         mConsumableUseButton = new QPushButton("使用", row);
         mConsumableSellButton = new QPushButton("售出", row);
         for (QPushButton *b : {mConsumableUseButton, mConsumableSellButton}) {
             b->setFont(bf);
             b->setFixedSize(54, 46);
             b->setStyleSheet(
-                "QPushButton { background:#10372f; color:white; border:0px; border-radius:9px; padding:0px; text-align:center; }"
+                "QPushButton { background:#10372f; color:white; border:0px; border-radius:11px; padding:0px; text-align:center; }"
                 "QPushButton:hover { background:#145143; }"
                 "QPushButton:pressed { background:#0b2923; }"
                 );
             h->addWidget(b);
         }
         mConsumableUseButton->setStyleSheet(
-            "QPushButton { background:#0a86cf; color:white; border:0px; border-radius:9px; padding:0px; text-align:center; }"
+            "QPushButton { background:#0a86cf; color:white; border:0px; border-radius:11px; padding:0px; text-align:center; }"
             "QPushButton:hover { background:#11a7ff; }"
             "QPushButton:pressed { background:#006aa3; }"
             );
@@ -2422,8 +2676,8 @@ void MainWindow::refreshConsumableSlotFrames()
     int visualSlots = Constants::MAX_CONSUMABLE_SLOTS;
     int step = CARD_W + 14;
     int totalW = CARD_W + qMax(0, visualSlots - 1) * step;
-    int startX = mSceneW - 8 - totalW;
-    QRectF bg(startX - 12, JOKER_Y + 8, totalW + 24, CARD_H + 32);
+    int startX = mSceneW - 22 - totalW;
+    QRectF bg(startX - 20, JOKER_Y + 12, totalW + 40, CARD_H + 18);
     auto *r = mScene->addRect(bg,
                               QPen(Qt::NoPen),
                               QBrush(QColor(0, 0, 0, 44)));
@@ -2449,13 +2703,13 @@ void MainWindow::refreshConsumableSlots()
         QRectF br = mConsCountLabel->boundingRect();
         int visualSlots = Constants::MAX_CONSUMABLE_SLOTS;
         int totalW = CARD_W + qMax(0, visualSlots - 1) * (CARD_W + 14);
-        int startX = mSceneW - 8 - totalW;
-        mConsCountLabel->setPos(startX + totalW - br.width() - 2, JOKER_Y + CARD_H + 24);
+        int startX = mSceneW - 22 - totalW;
+        mConsCountLabel->setPos(startX + totalW - br.width() - 2, JOKER_Y + CARD_H + 40);
     }
 
     int visualSlots = Constants::MAX_CONSUMABLE_SLOTS;
     int totalW = CARD_W + qMax(0, visualSlots - 1) * (CARD_W + 14);
-    int startX = mSceneW - 8 - totalW;
+    int startX = mSceneW - 22 - totalW;
     int step = (cs.size() > 1) ? (totalW - CARD_W) / qMax(1, cs.size() - 1) : (CARD_W + 14);
     step = qBound(42, step, CARD_W + 14);
     for (int i = 0; i < cs.size(); ++i) {
@@ -2484,7 +2738,7 @@ void MainWindow::layoutConsumableItems(bool animate)
 
     int visualSlots = Constants::MAX_CONSUMABLE_SLOTS;
     int totalW = CARD_W + qMax(0, visualSlots - 1) * (CARD_W + 14);
-    int startX = mSceneW - 8 - totalW;
+    int startX = mSceneW - 22 - totalW;
     int step = (n > 1) ? (totalW - CARD_W) / qMax(1, n - 1) : (CARD_W + 14);
     step = qBound(42, step, CARD_W + 14);
 
@@ -2613,7 +2867,7 @@ void MainWindow::onConsumableDragMoved(ConsumableItem *item, QPointF scenePos)
 
     int visualSlots = Constants::MAX_CONSUMABLE_SLOTS;
     int totalW = CARD_W + qMax(0, visualSlots - 1) * (CARD_W + 14);
-    int startX = mSceneW - 8 - totalW;
+    int startX = mSceneW - 22 - totalW;
     int step = (n > 1) ? (totalW - CARD_W) / qMax(1, n - 1) : (CARD_W + 14);
     step = qBound(42, step, CARD_W + 14);
 
@@ -2654,7 +2908,7 @@ void MainWindow::onConsumableDragReleased(ConsumableItem *item, QPointF scenePos
 
     int visualSlots = Constants::MAX_CONSUMABLE_SLOTS;
     int totalW = CARD_W + qMax(0, visualSlots - 1) * (CARD_W + 14);
-    int startX = mSceneW - 8 - totalW;
+    int startX = mSceneW - 22 - totalW;
     int step = (n > 1) ? (totalW - CARD_W) / qMax(1, n - 1) : (CARD_W + 14);
     step = qBound(42, step, CARD_W + 14);
 
@@ -2749,9 +3003,9 @@ void MainWindow::onLeaveShopClicked()
 QRect MainWindow::lowerOverlayRect() const
 {
     if (!mPlayPage) return QRect();
-    const int y = JOKER_Y + JOKER_H + 10;
-    const int rightDeckReserve = CARD_W + 150;
-    return QRect(0, y, qMax(600, mPlayPage->width() - rightDeckReserve), qMax(0, mPlayPage->height() - y));
+    const int y = dp(JOKER_Y + JOKER_H + 10);
+    const int rightDeckReserve = dp(CARD_W + 150);
+    return QRect(0, y, qMax(dp(600), mPlayPage->width() - rightDeckReserve), qMax(0, mPlayPage->height() - y));
 }
 
 void MainWindow::showShopOverlay()
@@ -2786,6 +3040,7 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev)
             mDynamicBg->setSceneSize(r.width(), r.height());
             mDynamicBg->lower();
         }
+        fitSceneToView();
         if (mBlindSelectWidget) { mBlindSelectWidget->setGeometry(lowerOverlayRect()); if (mBlindSelectWidget->isVisible()) mBlindSelectWidget->raise(); }
         if (mRoundEndOverlay)   { mRoundEndOverlay  ->setGeometry(r);                 if (mRoundEndOverlay->isVisible())   mRoundEndOverlay->raise(); }
         if (mShopWidget)        { mShopWidget       ->setGeometry(lowerOverlayRect()); if (mShopWidget->isVisible())        mShopWidget->raise(); }
@@ -2940,7 +3195,7 @@ void MainWindow::animateCollectRoundCardsThen(std::function<void()> after)
     for (auto *c : mHandCards) if (c) cards.append(c);
     for (auto *c : mPlayedCards) if (c) cards.append(c);
 
-    QPointF deckPos(mSceneW - CARD_W - 10, mSceneH - CARD_H - 36);
+    QPointF deckPos(mSceneW - CARD_W - 60, mHandYNormal);
     const int duration = cards.isEmpty() ? 0 : 420;
 
     for (int i = 0; i < cards.size(); ++i) {
@@ -3123,7 +3378,7 @@ void MainWindow::addObtainedTag(int tagCol, int tagRow)
     // 牌堆右侧只有 60px 余地,只能放 1 个 tag(48px),多个则向上叠。
     int deckRightX = mSceneW - 60;
     int x = deckRightX + 6;
-    int y = mSceneH - CARD_H - 36 + (CARD_H - 48) / 2 - idx * 56;   // 多张往上叠
+    int y = mHandYNormal + (CARD_H - 48) / 2 - idx * 56;   // 多张往上叠
     item->setPos(x, y);
     item->setZValue(5);
     mScene->addItem(item);
@@ -3304,7 +3559,7 @@ void MainWindow::animateScoreTotalThenFinalize(double gained, int /*delayAfterEv
         mLblScore->setText(formatScoreNumber(shown));
         updateScoreProgressBar(shown, true);
         QFont f = mLblScore->font();
-        f.setPixelSize(30 + (int(std::llround(std::fmod(std::abs(shown), 2.0)))));
+        f.setPixelSize(uiPx(30) + (int(std::llround(std::fmod(std::abs(shown), 2.0)))));
         mLblScore->setFont(f);
     });
     connect(anim, &QVariantAnimation::finished, this, [this, after]() {
@@ -3332,7 +3587,7 @@ void MainWindow::animateScoreTotalThenFinalize(double gained, int /*delayAfterEv
 void MainWindow::animatePlayedCardsToDiscardThen(std::function<void()> after)
 {
     QVector<CardItem*> cards = mPlayedCards;
-    QPointF deckPos(mSceneW - CARD_W - 10, mSceneH - CARD_H - 36);
+    QPointF deckPos(mSceneW - CARD_W - 60, mHandYNormal);
     int duration = cards.isEmpty() ? 0 : 420;
     for (int i = 0; i < cards.size(); ++i) {
         CardItem *c = cards[i];
@@ -3383,14 +3638,14 @@ void MainWindow::showGameOverOverlay(bool won)
         vl->setSpacing(14);
         auto *title = new QLabel(mGameOverPanel);
         title->setObjectName("gameOverTitle");
-        QFont tf = mCNFont; tf.setPixelSize(42); tf.setBold(true);
+        QFont tf = mCNFont; tf.setPixelSize(uiPx(42)); tf.setBold(true);
         title->setFont(tf);
         title->setAlignment(Qt::AlignCenter);
         title->setStyleSheet("color:#fe5f55; background:transparent; border:none;");
         vl->addWidget(title);
         auto *body = new QLabel(mGameOverPanel);
         body->setObjectName("gameOverBody");
-        QFont bf = mCNFont; bf.setPixelSize(18);
+        QFont bf = mCNFont; bf.setPixelSize(uiPx(18));
         body->setFont(bf);
         body->setAlignment(Qt::AlignCenter);
         body->setWordWrap(true);

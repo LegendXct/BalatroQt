@@ -89,7 +89,7 @@ private:
     RoundEndOverlay *mRoundEndOverlay = nullptr;
 
     // 布局常量
-    int mLeftW = 390;
+    int mLeftW = 500;
     int mWinW = 1920;
     int mWinH = 1080;
     int mSceneW = 1620;
@@ -295,6 +295,7 @@ private:
 
     void hidePlayControlsForScoring();
     void showPlayControlsAfterScoring();
+    void fitSceneToView();
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
