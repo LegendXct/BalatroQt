@@ -1080,6 +1080,11 @@ void MainWindow::setupSceneButtons() {
     mDiscardProxy = mScene->addWidget(mBtnDiscard);
     mDiscardProxy->setPos(startX + (btnW + gap) * 2, y);
     mDiscardProxy->setZValue(50);
+
+    // 记录三个按钮的原位,出牌时滑出屏幕,计分完成后滑回。
+    mPlayBtnHome    = mPlayProxy->pos();
+    mSortBtnHome    = mSortProxy->pos();
+    mDiscardBtnHome = mDiscardProxy->pos();
 }
 
 void MainWindow::setupConnections() {
@@ -1538,6 +1543,8 @@ void MainWindow::onPlayClicked() {
     mScoringInProgress = true;
     if (mBtnPlay) mBtnPlay->setEnabled(false);
     if (mBtnDiscard) mBtnDiscard->setEnabled(false);
+
+    hidePlayControlsForScoring();   // ← 加这一行,按钮滑出屏幕
 
     QVector<int> sortedIdx = mSelected;
     std::sort(sortedIdx.begin(), sortedIdx.end());
@@ -2672,6 +2679,13 @@ void MainWindow::onBlindStarted()
     mScoringInProgress = false;
     resetScoreFlame();
     if (mBtnPlay) mBtnPlay->setEnabled(true);
+
+    // 确保按钮回到 home 位置(可能上一局结束时按钮滑出去了)
+    if (mPlayProxy && !mPlayBtnHome.isNull())    mPlayProxy->setPos(mPlayBtnHome);
+    if (mSortProxy && !mSortBtnHome.isNull())    mSortProxy->setPos(mSortBtnHome);
+    if (mDiscardProxy && !mDiscardBtnHome.isNull()) mDiscardProxy->setPos(mDiscardBtnHome);
+
+    if (mBtnPlay) mBtnPlay->setEnabled(true);
     if (mBtnDiscard) mBtnDiscard->setEnabled(true);
 }
 
@@ -2963,35 +2977,57 @@ void MainWindow::spawnFloatingText(const QPointF &nearPos, const QString &text, 
 {
     auto *fs = new FloatingScore(text, color, mPixelFont);
     fs->setZValue(100);
-    QPointF center = nearPos + QPointF(CARD_W / 2, -20);
-    fs->setPos(center);
+    QPointF basePos = nearPos + QPointF(CARD_W / 2, -20);
+    fs->setPos(basePos);
     mScene->addItem(fs);
-
-    auto *pause = new QPauseAnimation(600);
-    auto *fade  = new QPropertyAnimation(fs, "opacity");
-    fade->setDuration(300);
-    fade->setStartValue(1.0);
-    fade->setEndValue(0.0);
-    fade->setEasingCurve(QEasingCurve::InQuad);
-
-    auto *seq = new QSequentialAnimationGroup(this);
-    seq->addAnimation(pause);
-    seq->addAnimation(fade);
-    pause->setParent(seq);
-    fade->setParent(seq);
-
-    connect(seq, &QAbstractAnimation::finished, fs, [this, fs]() {
-        if (fs->scene()) mScene->removeItem(fs);
-        fs->deleteLater();
-    });
-    seq->start(QAbstractAnimation::DeleteWhenStopped);
 
     mFloatingScores.append(fs);
     connect(fs, &QObject::destroyed, this, [this, fs]() {
         mFloatingScores.removeAll(fs);
     });
-}
 
+    // ── 阶段 1: hold 期(600ms) ──
+    // 对应原版 DynaText float=true + Particles 缓慢自转 r_vel
+    // 上下飘动 sin 波 ±3px + 每帧自转 0.4°(约 12°/秒, 对应 r_vel ≈ 0.2 rad/s)。
+    auto *bob = new QVariantAnimation(this);
+    bob->setDuration(600);
+    bob->setStartValue(0.0);
+    bob->setEndValue(1.0);
+    connect(bob, &QVariantAnimation::valueChanged, fs, [fs, basePos](const QVariant &v) {
+        if (!fs) return;
+        double t = v.toDouble();
+        fs->setPos(basePos + QPointF(0, std::sin(t * 6.28 * 1.2) * 3.0));
+        fs->setTiltDeg(fs->tiltDeg() + 0.4);
+    });
+    bob->start(QAbstractAnimation::DeleteWhenStopped);
+
+    // ── 阶段 2: pop_out(向上飞) + fade,300ms ──
+    // 对应原版 args.text:pop_out(3) + 后续 fade alpha → 0
+    QTimer::singleShot(600, this, [this, fs, basePos]() {
+        if (!fs) return;
+        auto *popOut = new QVariantAnimation(this);
+        popOut->setDuration(300);
+        popOut->setStartValue(0.0);
+        popOut->setEndValue(24.0);
+        connect(popOut, &QVariantAnimation::valueChanged, fs, [fs, basePos](const QVariant &v) {
+            if (!fs) return;
+            fs->setPos(basePos + QPointF(0, -v.toDouble()));
+            fs->setTiltDeg(fs->tiltDeg() + 0.4);
+        });
+        popOut->start(QAbstractAnimation::DeleteWhenStopped);
+
+        auto *fade = new QPropertyAnimation(fs, "opacity", this);
+        fade->setDuration(300);
+        fade->setStartValue(1.0);
+        fade->setEndValue(0.0);
+        fade->setEasingCurve(QEasingCurve::InQuad);
+        connect(fade, &QPropertyAnimation::finished, fs, [this, fs]() {
+            if (fs->scene()) mScene->removeItem(fs);
+            fs->deleteLater();
+        });
+        fade->start(QAbstractAnimation::DeleteWhenStopped);
+    });
+}
 
 void MainWindow::animateScoreTotalThenFinalize(double gained, int /*delayAfterEvents*/)
 {
@@ -3021,6 +3057,7 @@ void MainWindow::animateScoreTotalThenFinalize(double gained, int /*delayAfterEv
             if (mGameState->phase() == GamePhase::Blind) {
                 if (mBtnPlay) mBtnPlay->setEnabled(true);
                 if (mBtnDiscard) mBtnDiscard->setEnabled(true);
+                showPlayControlsAfterScoring();   // ← 加这一行,按钮滑回原位
             }
         });
     });
@@ -3305,4 +3342,39 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev)
     // updateFlameIntensity 内部按 earned >= required 判定,未达标 target=0 火焰自然隐藏,
     // 跨过门槛后按 log5 公式渐强。
     updateFlameIntensity();
+}
+
+void MainWindow::hidePlayControlsForScoring()
+{
+    // 对应原版 game.lua:3188 update_hand_played 的 buttons:remove()。
+    // 我们用 280ms 滑出屏幕底部代替彻底销毁,这样不用重建 QGraphicsProxyWidget。
+    auto slideOut = [this](QGraphicsProxyWidget *proxy, QPointF home) {
+        if (!proxy) return;
+        auto *anim = new QPropertyAnimation(proxy, "pos", this);
+        anim->setDuration(280);
+        anim->setStartValue(proxy->pos());
+        anim->setEndValue(home + QPointF(0, 160));   // 向下 160px,出按钮区域
+        anim->setEasingCurve(QEasingCurve::InCubic);
+        anim->start(QAbstractAnimation::DeleteWhenStopped);
+    };
+    slideOut(mPlayProxy,    mPlayBtnHome);
+    slideOut(mSortProxy,    mSortBtnHome);
+    slideOut(mDiscardProxy, mDiscardBtnHome);
+}
+
+void MainWindow::showPlayControlsAfterScoring()
+{
+    // 对应原版 update_selecting_hand 的按钮重建,带飞入动画。
+    auto slideIn = [this](QGraphicsProxyWidget *proxy, QPointF home) {
+        if (!proxy) return;
+        auto *anim = new QPropertyAnimation(proxy, "pos", this);
+        anim->setDuration(280);
+        anim->setStartValue(proxy->pos());
+        anim->setEndValue(home);
+        anim->setEasingCurve(QEasingCurve::OutCubic);
+        anim->start(QAbstractAnimation::DeleteWhenStopped);
+    };
+    slideIn(mPlayProxy,    mPlayBtnHome);
+    slideIn(mSortProxy,    mSortBtnHome);
+    slideIn(mDiscardProxy, mDiscardBtnHome);
 }

@@ -92,7 +92,7 @@ private:
 
     static constexpr int JOKER_Y = 8;
     static constexpr int JOKER_H = CARD_H + 20;
-    static constexpr int PLAY_Y = JOKER_H + 16;
+    static constexpr int PLAY_Y = JOKER_H + 150;   // ← 原 +16, 改成 +150
     static constexpr int PLAY_H = 240;
     int mBtnY = 0;
     int mHandY = 0;
@@ -263,6 +263,10 @@ private:
     int mLastHandCardDragTo = -1;
     int mLastConsumableDragTo = -1;
 
+    QPointF mPlayBtnHome;
+    QPointF mSortBtnHome;
+    QPointF mDiscardBtnHome;
+
     void updateHandPreview();
     void playScoreEvent(const ScoreEvent &ev);
     void animateScoreTotalThenFinalize(double gained, int delayAfterEvents);
@@ -270,6 +274,9 @@ private:
     void showGameOverOverlay(bool won);
     void hideGameOverOverlay();
     void resetTransientOverlaysForNewRun();
+
+    void hidePlayControlsForScoring();
+    void showPlayControlsAfterScoring();
 
 protected:
     void resizeEvent(QResizeEvent *event) override;
