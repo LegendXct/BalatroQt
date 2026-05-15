@@ -46,6 +46,10 @@ int cardShaderCacheFrame()
 {
     return int(BalatroShaders::shaderTime() * 15.0);
 }
+
+// 手牌排序拖拽的启动距离。原来 8px 太敏感，点击时横向轻微抖动就会被判为拖动；
+// 提高阈值后，小幅移动仍会作为点击选牌处理。
+constexpr qreal kCardDragStartDistance = 22.0;
 }
 
 
@@ -262,7 +266,7 @@ void CardItem::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
         QGraphicsObject::mouseMoveEvent(event);
         return;
     }
-    if (!mDragging && QLineF(event->scenePos(), mPressScenePos).length() > 8.0) {
+    if (!mDragging && QLineF(event->scenePos(), mPressScenePos).length() > kCardDragStartDistance) {
         mDragging = true;
         setZValue(600);
     }

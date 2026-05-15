@@ -35,6 +35,10 @@ class MainWindow;
 }
 QT_END_NAMESPACE
 
+class QProgressBar;
+class QGraphicsDropShadowEffect;
+class QPropertyAnimation;
+
 class MainWindow : public QMainWindow
 {
     Q_OBJECT
@@ -58,6 +62,9 @@ private:
     QLabel *mLblTarget = nullptr; // 目标分数
     QLabel *mLblReward = nullptr;
     QLabel *mLblScore = nullptr; // 回合分数
+    QProgressBar *mScoreProgressBar = nullptr; // 回合分数 / 目标分数进度条
+    QGraphicsDropShadowEffect *mScoreProgressGlow = nullptr; // 进度条发光效果
+    QPropertyAnimation *mScoreProgressAnim = nullptr; // 进度条平滑过渡
     QLabel *mLblChips = nullptr; // 筹码值
     QLabel *mLblMult = nullptr; // 倍率值
     QLabel *mLblHands = nullptr; // 剩余出牌次数
@@ -172,6 +179,7 @@ private:
 
     void refreshHand();
     void refreshScore();
+    void updateScoreProgressBar(double displayedScore, bool animate = true);
     void refreshGold();
     void refreshCounters();
     void clearPlayedCards();

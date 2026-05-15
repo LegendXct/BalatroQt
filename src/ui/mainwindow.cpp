@@ -19,6 +19,8 @@
 #include <QParallelAnimationGroup>
 #include <QPointer>
 #include <QVariantAnimation>
+#include <QGraphicsDropShadowEffect>
+#include <QProgressBar>
 #include <QDialog>
 #include <QTabWidget>
 #include <QTextEdit>
@@ -427,16 +429,22 @@ void MainWindow::setupLeftPanel() {
 
     layout->addWidget(mContextArea);
 
-    // ── 回合分数 ──
+    // ── 回合分数 + 目标进度条 ──
     QWidget *scoreBox = new QWidget(mLeftPanel);
-    scoreBox->setFixedHeight(66);
+    scoreBox->setFixedHeight(88);
     scoreBox->setAttribute(Qt::WA_StyledBackground, true);
     scoreBox->setStyleSheet("background:#374244; border:none; border-radius:8px;");
-    auto *sbl = new QHBoxLayout(scoreBox);
-    sbl->setContentsMargins(10, 6, 10, 6);
+
+    auto *scoreVBox = new QVBoxLayout(scoreBox);
+    scoreVBox->setContentsMargins(10, 6, 10, 8);
+    scoreVBox->setSpacing(4);
+
+    QWidget *scoreTop = new QWidget(scoreBox);
+    auto *sbl = new QHBoxLayout(scoreTop);
+    sbl->setContentsMargins(0, 0, 0, 0);
     sbl->setSpacing(6);
 
-    QLabel *sTitle = new QLabel("回合\n分数", scoreBox);
+    QLabel *sTitle = new QLabel("回合\n分数", scoreTop);
     QFont stf = mCNFont; stf.setPixelSize(12);
     sTitle->setFont(stf);
     sTitle->setStyleSheet("color:white; background:transparent;");
@@ -445,7 +453,7 @@ void MainWindow::setupLeftPanel() {
 
     sbl->addStretch();
 
-    QLabel *scoreChip = new QLabel(scoreBox);
+    QLabel *scoreChip = new QLabel(scoreTop);
     {
         QPixmap chipsSheet(":/textures/images/chips.png");
         if (!chipsSheet.isNull()) {
@@ -458,11 +466,58 @@ void MainWindow::setupLeftPanel() {
     scoreChip->setStyleSheet("background:transparent;");
     sbl->addWidget(scoreChip);
 
-    mLblScore = new QLabel("0", scoreBox);
-    QFont smf = mPixelFont; smf.setPixelSize(36);
+    mLblScore = new QLabel("0", scoreTop);
+    QFont smf = mPixelFont; smf.setPixelSize(34);
     mLblScore->setFont(smf);
     mLblScore->setStyleSheet("color:white; background:transparent;");
     sbl->addWidget(mLblScore);
+    scoreVBox->addWidget(scoreTop);
+
+    mScoreProgressBar = new QProgressBar(scoreBox);
+    mScoreProgressBar->setRange(0, 1000);
+    mScoreProgressBar->setValue(0);
+    mScoreProgressBar->setFixedHeight(15);
+    mScoreProgressBar->setTextVisible(true);
+    mScoreProgressBar->setFormat("0%");
+    mScoreProgressBar->setAlignment(Qt::AlignCenter);
+    QFont pbf = mPixelFont; pbf.setPixelSize(10);
+    mScoreProgressBar->setFont(pbf);
+    mScoreProgressBar->setStyleSheet(
+        "QProgressBar {"
+        " background:rgba(8,18,24,205);"
+        " border:2px solid #27566b;"
+        " border-radius:7px;"
+        " color:#eaffff;"
+        " text-align:center;"
+        " padding:1px;"
+        "}"
+        "QProgressBar::chunk {"
+        " border-radius:5px;"
+        " background:qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #009dff, stop:0.58 #23e6ff, stop:1 #fda200);"
+        "}"
+        );
+    mScoreProgressGlow = new QGraphicsDropShadowEffect(mScoreProgressBar);
+    mScoreProgressGlow->setBlurRadius(16);
+    mScoreProgressGlow->setOffset(0, 0);
+    mScoreProgressGlow->setColor(QColor(35, 230, 255, 120));
+    mScoreProgressBar->setGraphicsEffect(mScoreProgressGlow);
+    scoreVBox->addWidget(mScoreProgressBar);
+
+    auto *scorePulse = new QVariantAnimation(this);
+    scorePulse->setDuration(1800);
+    scorePulse->setLoopCount(-1);
+    scorePulse->setStartValue(0.0);
+    scorePulse->setEndValue(1.0);
+    connect(scorePulse, &QVariantAnimation::valueChanged, this, [this](const QVariant &v) {
+        if (!mScoreProgressGlow || !mScoreProgressBar) return;
+        const double wave = (std::sin(v.toDouble() * 6.28318530718) + 1.0) * 0.5;
+        const bool passed = mScoreProgressBar->value() >= mScoreProgressBar->maximum();
+        QColor glow = passed ? QColor(255, 176, 0) : QColor(35, 230, 255);
+        glow.setAlpha(80 + int(70 * wave));
+        mScoreProgressGlow->setColor(glow);
+        mScoreProgressGlow->setBlurRadius((passed ? 20 : 14) + int(7 * wave));
+    });
+    scorePulse->start(QAbstractAnimation::DeleteWhenStopped);
 
     layout->addWidget(scoreBox);
 
@@ -647,8 +702,9 @@ void MainWindow::setupLeftPanel() {
         QFont af = mCNFont; af.setPixelSize(24); af.setBold(true);
         arrow->setFont(af);
         arrow->setAlignment(Qt::AlignCenter);
+        arrow->setFixedSize(36, 26);
         arrow->setStyleSheet("color:#ff5f55;");
-        topL->addWidget(arrow);
+        topL->addWidget(arrow, 0, Qt::AlignLeft);
         QWidget *tabRow = new QWidget(top);
         auto *tabL = new QHBoxLayout(tabRow);
         tabL->setContentsMargins(70,0,70,0);
@@ -672,7 +728,11 @@ void MainWindow::setupLeftPanel() {
                 );
             connect(b, &QPushButton::clicked, this, [pages, pageIdx, arrow, b]() {
                 pages->setCurrentIndex(pageIdx);
-                arrow->move(b->x() + b->width()/2 - arrow->width()/2, arrow->y());
+                if (arrow && b && arrow->parentWidget()) {
+                    const QPoint p = b->mapTo(arrow->parentWidget(),
+                                              QPoint(b->width() / 2 - arrow->width() / 2, 0));
+                    arrow->move(p.x(), arrow->y());
+                }
             });
             tabL->addWidget(b, 1);
             return b;
@@ -799,6 +859,12 @@ void MainWindow::setupLeftPanel() {
         QVector<QPushButton*> tabButtons;
         tabButtons << makeTab("牌型", 0) << makeTab("盲注", 1) << makeTab("优惠券", 2) << makeTab("赌注", 3);
         pages->setCurrentIndex(0);
+        QTimer::singleShot(0, &dlg, [arrow, firstTab = tabButtons.value(0)]() {
+            if (!arrow || !firstTab || !arrow->parentWidget()) return;
+            const QPoint p = firstTab->mapTo(arrow->parentWidget(),
+                                             QPoint(firstTab->width() / 2 - arrow->width() / 2, 0));
+            arrow->move(p.x(), arrow->y());
+        });
 
         auto *back = new QPushButton("返回", &dlg);
         QFont bf = mCNFont; bf.setPixelSize(21); bf.setBold(true); back->setFont(bf);
@@ -1319,8 +1385,61 @@ void MainWindow::layoutPlayedCards() {
 }
 
 void MainWindow::refreshScore() {
-    mLblScore->setText(formatScoreNumber(mGameState->score()));
+    const double score = mGameState->score();
+    mLblScore->setText(formatScoreNumber(score));
     mLblTarget->setText(formatScoreNumber(mGameState->targetScore()));
+    updateScoreProgressBar(score, true);
+}
+
+void MainWindow::updateScoreProgressBar(double displayedScore, bool animate)
+{
+    if (!mScoreProgressBar || !mGameState) return;
+
+    const double target = mGameState->targetScore();
+    double ratio = 0.0;
+    if (target > 0.0 && std::isfinite(displayedScore)) {
+        ratio = displayedScore / target;
+    } else if (target > 0.0 && std::isinf(displayedScore)) {
+        ratio = 1.0;
+    }
+    ratio = std::max(0.0, ratio);
+
+    const int barValue = qBound(0, int(std::round(std::min(ratio, 1.0) * 1000.0)), 1000);
+    const int percent = qMin(999, int(std::round(ratio * 100.0)));
+    mScoreProgressBar->setFormat(QString("%1%").arg(percent));
+
+    const QString border = barValue >= 1000 ? "#ffb000" : "#27566b";
+    const QString chunkEnd = barValue >= 1000 ? "#ffdf68" : "#fda200";
+    mScoreProgressBar->setStyleSheet(QString(
+        "QProgressBar {"
+        " background:rgba(8,18,24,205);"
+        " border:2px solid %1;"
+        " border-radius:7px;"
+        " color:#eaffff;"
+        " text-align:center;"
+        " padding:1px;"
+        "}"
+        "QProgressBar::chunk {"
+        " border-radius:5px;"
+        " background:qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #009dff, stop:0.58 #23e6ff, stop:1 %2);"
+        "}"
+        ).arg(border, chunkEnd));
+
+    if (!animate) {
+        mScoreProgressBar->setValue(barValue);
+        return;
+    }
+
+    if (!mScoreProgressAnim) {
+        mScoreProgressAnim = new QPropertyAnimation(mScoreProgressBar, "value", this);
+        mScoreProgressAnim->setDuration(420);
+        mScoreProgressAnim->setEasingCurve(QEasingCurve::OutCubic);
+    }
+    if (mScoreProgressAnim->state() == QAbstractAnimation::Running)
+        mScoreProgressAnim->stop();
+    mScoreProgressAnim->setStartValue(mScoreProgressBar->value());
+    mScoreProgressAnim->setEndValue(barValue);
+    mScoreProgressAnim->start();
 }
 
 void MainWindow::refreshGold() {
@@ -3150,13 +3269,16 @@ void MainWindow::animateScoreTotalThenFinalize(double gained, int /*delayAfterEv
     anim->setEndValue(after);
     anim->setEasingCurve(QEasingCurve::OutCubic);
     connect(anim, &QVariantAnimation::valueChanged, this, [this](const QVariant &v) {
-        mLblScore->setText(formatScoreNumber(v.toDouble()));
+        const double shown = v.toDouble();
+        mLblScore->setText(formatScoreNumber(shown));
+        updateScoreProgressBar(shown, true);
         QFont f = mLblScore->font();
-        f.setPixelSize(30 + (int(std::llround(std::fmod(std::abs(v.toDouble()), 2.0)))));
+        f.setPixelSize(30 + (int(std::llround(std::fmod(std::abs(shown), 2.0)))));
         mLblScore->setFont(f);
     });
     connect(anim, &QVariantAnimation::finished, this, [this, after]() {
         mLblScore->setText(formatScoreNumber(after));
+        updateScoreProgressBar(after, true);
         // 火焰目标在 900ms 后归零(spring ease 自然熄灭)
         QTimer::singleShot(900, this, [this]() { resetScoreFlame(); });
 
