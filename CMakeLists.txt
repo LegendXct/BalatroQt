@@ -36,6 +36,7 @@ qt_add_executable(BalatroQt
     src/ui/shopsignwidget.h src/ui/shopsignwidget.cpp
     src/ui/deckviewwidget.h src/ui/deckviewwidget.cpp
     src/ui/dynamicbackgrounditem.h src/ui/dynamicbackgrounditem.cpp
+    src/ui/splashshaderoverlay.h src/ui/splashshaderoverlay.cpp
 )
 
 target_include_directories(BalatroQt

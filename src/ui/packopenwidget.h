@@ -9,7 +9,9 @@
 class QLabel;
 class QPushButton;
 class QTimer;
-class PackHandCardWidget;
+class QGraphicsScene;
+class QGraphicsView;
+class CardItem;
 
 class PackOpenWidget : public QWidget
 {
@@ -18,9 +20,6 @@ public:
     explicit PackOpenWidget(const QFont &cnFont, const QFont &pixelFont,
                             QWidget *parent = nullptr);
 
-    // 二级开包界面：
-    // content：包里刷出的牌；packHand：这次开包临时翻出的一手牌；
-    // inventoryConsumables：玩家仓库里的塔罗/星球/幻灵，可在开包界面右侧使用。
     void open(const PackContent &content,
               const QVector<CardData> &packHand,
               const QVector<Consumable> &inventoryConsumables,
@@ -33,10 +32,10 @@ public:
     const QVector<CardData> &packHand() const { return mPackHand; }
 
 signals:
-    void choiceMade(int chosenIdx, QVector<int> selectedHandIdx);    // 选择/使用包里的第 chosenIdx 张
+    void choiceMade(int chosenIdx, QVector<int> selectedHandIdx);
     void inventoryConsumableRequested(int inventoryIdx, QVector<int> selectedHandIdx);
     void packHandReordered(QVector<CardData> packHand);
-    void packFinished();                                             // 达到 choose 数或跳过
+    void packFinished();
 
 protected:
     void resizeEvent(QResizeEvent *e) override;
@@ -44,10 +43,10 @@ protected:
 private slots:
     void onChoose(int idx);
     void onUseInventory(int idx);
-    void onHandCardClicked(int idx);
-    void onHandCardDragged(int idx, QPoint localPos);
-    void onHandCardReleased(int idx, QPoint localPos);
     void onSkip();
+    void onPackCardClicked(CardItem *card);
+    void onPackCardDragMoved(CardItem *card, QPointF scenePos);
+    void onPackCardDragReleased(CardItem *card, QPointF scenePos);
 
 private:
     QFont mCNFont, mPixelFont;
@@ -61,19 +60,16 @@ private:
     QVector<int> mSelectedHand;
     bool mFinishing = false;
     QTimer *mSoulAnimTimer = nullptr;
+    int mLastDragTo = -1;
 
     QWidget *mPanel = nullptr;
-    QWidget *mHandBox = nullptr;
+    QGraphicsScene *mHandScene = nullptr;
+    QGraphicsView  *mHandView  = nullptr;
+    QVector<CardItem*> mPackHandItems;
     QWidget *mInventoryBox = nullptr;
     QLabel *mLblTitle = nullptr;
     QLabel *mLblChoose = nullptr;
     QPushButton *mBtnSkip = nullptr;
-
-    struct HandUi {
-        PackHandCardWidget *btn = nullptr;
-        QLabel *nameLbl = nullptr;
-    };
-    QVector<HandUi> mHandUi;
 
     struct OptUi {
         QWidget *card = nullptr;
@@ -94,7 +90,7 @@ private:
 
     void buildUi();
     void layoutPanel();
-    void layoutPackHand();
+    void layoutPackHand(int skipIdx = -1, bool instant = false);
     void refreshAll();
     void refreshHandUi();
     void refreshOptionUi();

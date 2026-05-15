@@ -27,6 +27,7 @@
 #include "floatingscore.h"
 #include "deckviewwidget.h"
 #include "dynamicbackgrounditem.h"
+#include "splashshaderoverlay.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -91,10 +92,13 @@ private:
 
     static constexpr int JOKER_Y = 8;
     static constexpr int JOKER_H = CARD_H + 20;
-    static constexpr int PLAY_Y = JOKER_H + 16;
+    static constexpr int PLAY_Y = JOKER_H + 150;   // ← 原 +16, 改成 +150
     static constexpr int PLAY_H = 240;
+    static constexpr int HAND_RIGHT_RESERVE = 230;
     int mBtnY = 0;
     int mHandY = 0;
+    int mHandYNormal  = 0;   // 选牌期间的 hand y
+    int mHandYScoring = 0;   // 出牌计分期间的 hand y(下移让出 play 区下方空间)
 
     bool mGameOverHandled = false;
     bool mScoringInProgress = false;
@@ -105,6 +109,7 @@ private:
     PackOpenWidget *mPackOpenWidget = nullptr;
     DeckViewWidget *mDeckViewWidget = nullptr;
     DynamicBackgroundItem *mDynamicBg = nullptr;
+    SplashShaderOverlay *mSplashOverlay = nullptr;
     PackContent     mPendingPack;        // 当前正在打开的包
     QVector<CardData> mPendingPackHand;  // 开包界面临时翻出的一手牌
     bool mPackFromTag = false;
@@ -151,7 +156,13 @@ private:
     void hideJokerInfo();
 
     void refreshConsumableSlots();
+    void layoutConsumableItems(bool animate = true);
     void onConsumableClicked(ConsumableItem *item, Qt::MouseButton btn);
+    void onConsumablePressed(ConsumableItem *item, Qt::MouseButton btn);
+    void onConsumableDragMoved(ConsumableItem *item, QPointF scenePos);
+    void onConsumableDragReleased(ConsumableItem *item, QPointF scenePos);
+    void animateConsumableUseThen(int idx, std::function<void()> after);
+    void flashConsumableActionError();
 
     void loadFonts();
     void setupLeftPanel();
@@ -233,27 +244,42 @@ private:
     void spawnFloatingText(const QPointF &nearPos, const QString &text, const QColor &color);
     void clearFloatingScores();
 
-    int mDisplayedChips = 0;   // 当前显示中的 chips(动画过程中)
-    int mDisplayedMult  = 0;
+    double mDisplayedChips = 0.0;   // 当前显示中的 chips(动画过程中)，用 double 避免高倍率溢出
+    double mDisplayedMult  = 0.0;
 
-    // 倍率×筹码 ≥ 目标分数时点燃的旗标，每手清空；用于火焰在分数累计过程中即时出现。
-    bool mFlameTriggered = false;
-    QWidget *mFlameOverlay = nullptr;        // 盖在 chipsRow 上方的火焰层
-    QWidget *mChipsRowWidget = nullptr;      // 引用 chipsRow 用于定位 mFlameOverlay
-    void triggerScoreFlame();                // 立即点火（带原版橙边）
-    void resetScoreFlame();                  // 复位边框与火焰
+    // 原版每次累加分数都重算火焰强度:earned >= required 才点燃,log5 公式控制大小。
+    // 不再用单次触发布尔,真正按"当前 displayed chips × mult"实时驱动。
+    QWidget *mChipFlame = nullptr;       // 蓝色筹码方块上的火焰
+    QWidget *mMultFlame = nullptr;       // 红色倍率方块上的火焰
+    double   mChipFlameTarget = 0.0;
+    double   mMultFlameTarget = 0.0;
+    double   mChipFlameReal   = 0.0;
+    double   mMultFlameReal   = 0.0;
+    QTimer  *mFlameTick = nullptr;
+    QWidget *mChipsRowWidget = nullptr;      // 引用 chipsRow 用于定位火焰
+    void triggerSplashShader();              // 原版 splash.fs 全屏 GPU 溅射(占位)
+    void updateFlameIntensity();
+    void resetScoreFlame();
 
     // 拖拽时记录上一次目标位置，避免每次 dragMoved 都触发 moveTo()
     int mLastJokerDragTo = -1;
     int mLastHandCardDragTo = -1;
+    int mLastConsumableDragTo = -1;
+
+    QPointF mPlayBtnHome;
+    QPointF mSortBtnHome;
+    QPointF mDiscardBtnHome;
 
     void updateHandPreview();
     void playScoreEvent(const ScoreEvent &ev);
-    void animateScoreTotalThenFinalize(int gained, int delayAfterEvents);
+    void animateScoreTotalThenFinalize(double gained, int delayAfterEvents);
     void animatePlayedCardsToDiscardThen(std::function<void()> after);
     void showGameOverOverlay(bool won);
     void hideGameOverOverlay();
     void resetTransientOverlaysForNewRun();
+
+    void hidePlayControlsForScoring();
+    void showPlayControlsAfterScoring();
 
 protected:
     void resizeEvent(QResizeEvent *event) override;

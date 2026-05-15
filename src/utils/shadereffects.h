@@ -57,7 +57,10 @@ void paintDissolveGlow(QPainter *p, const QRectF &rect,
                        const QColor &burn2 = QColor(120, 180, 255, 50),
                        double intensity = 1.0);
 void paintDebuff(QPainter *p, const QRectF &rect, double intensity = 1.0);
-void paintFlame(QPainter *p, const QRectF &rect, double intensity = 1.0);
+void paintFlame(QPainter *p, const QRectF &rect, double amount,
+                const QColor &colour1 = QColor(255, 70, 30),
+                const QColor &colour2 = QColor(255, 220, 70),
+                double idSeed = 1.0);
 void paintGoldSealGlow(QPainter *p, const QRectF &rect, double intensity = 1.0);
 
 // The Soul 的 shared_soul 前景层：原版 game.lua 把 shared_soul 直接放在 ASSET_ATLAS["centers"]

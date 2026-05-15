@@ -12,6 +12,7 @@
 #include <QStringList>
 #include <QFrame>
 #include <algorithm>
+#include "../utils/shadereffects.h"
 
 DeckViewWidget::DeckViewWidget(const QFont &cnFont, const QFont &pixelFont,
                                QWidget *parent)
@@ -335,33 +336,38 @@ QPixmap DeckViewWidget::renderCard(const CardData &c, const QSize &size) const
     if (sCol >= 0 && !enhSheet.isNull())
         p.drawPixmap(QRect(0, 0, W, H), enhSheet, QRect(sCol*W, sRow*H, W, H));
 
-    switch (c.edition) {
-    case Edition::Foil:
-        p.setPen(QPen(QColor(120, 200, 255, 200), 4));
-        p.drawRoundedRect(2, 2, W-4, H-4, 8, 8); break;
-    case Edition::Holographic:
-        p.setPen(QPen(QColor(255, 100, 200, 200), 4));
-        p.drawRoundedRect(2, 2, W-4, H-4, 8, 8); break;
-    case Edition::Polychrome: {
-        QLinearGradient g(0, 0, W, H);
-        g.setColorAt(0,   QColor(255, 100, 100, 220));
-        g.setColorAt(0.5, QColor(100, 255, 100, 220));
-        g.setColorAt(1,   QColor(100, 100, 255, 220));
-        p.setPen(QPen(QBrush(g), 4));
-        p.drawRoundedRect(2, 2, W-4, H-4, 8, 8); break;
-    }
-    case Edition::Negative:
-        p.fillRect(0, 0, W, H, QColor(40, 0, 60, 120));
-        p.setPen(QPen(QColor(180, 100, 255, 200), 4));
-        p.drawRoundedRect(2, 2, W-4, H-4, 8, 8); break;
-    default: break;
+    // 后续可能重新赋值 pix；必须先结束 QPainter，否则完整牌组里遇到 debuff
+    // 卡时会出现 QPixmap 正在被绘制又被替换，导致闪退。
+    p.end();
+
+    {
+        QPainter ep(&pix);
+        ep.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        switch (c.edition) {
+        case Edition::Foil:
+            ep.setPen(QPen(QColor(120, 200, 255, 200), 4));
+            ep.drawRoundedRect(2, 2, W-4, H-4, 8, 8); break;
+        case Edition::Holographic:
+            ep.setPen(QPen(QColor(255, 100, 200, 200), 4));
+            ep.drawRoundedRect(2, 2, W-4, H-4, 8, 8); break;
+        case Edition::Polychrome: {
+            QLinearGradient g(0, 0, W, H);
+            g.setColorAt(0,   QColor(255, 100, 100, 220));
+            g.setColorAt(0.5, QColor(100, 255, 100, 220));
+            g.setColorAt(1,   QColor(100, 100, 255, 220));
+            ep.setPen(QPen(QBrush(g), 4));
+            ep.drawRoundedRect(2, 2, W-4, H-4, 8, 8); break;
+        }
+        case Edition::Negative:
+            ep.fillRect(0, 0, W, H, QColor(40, 0, 60, 120));
+            ep.setPen(QPen(QColor(180, 100, 255, 200), 4));
+            ep.drawRoundedRect(2, 2, W-4, H-4, 8, 8); break;
+        default: break;
+        }
     }
 
     if (c.isDebuffed) {
-        p.fillRect(0, 0, W, H, QColor(0, 0, 0, 130));
-        p.setPen(QPen(QColor(255, 80, 80), 5));
-        p.drawLine(10, 10, W - 10, H - 10);
-        p.drawLine(W - 10, 10, 10, H - 10);
+        pix = BalatroShaders::renderDebuffedPixmap(pix, 1.0);
     }
 
     return pix.scaled(size, Qt::KeepAspectRatio, Qt::SmoothTransformation);

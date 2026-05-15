@@ -5,11 +5,11 @@
 #include <QHBoxLayout>
 #include <QResizeEvent>
 #include <QPainter>
-#include <QGraphicsDropShadowEffect>
 #include <QEvent>
 #include <QPainterPath>
 #include <QPaintEvent>
 #include <QMouseEvent>
+#include <cmath>
 #include "../utils/shadereffects.h"
 
 
@@ -46,6 +46,9 @@ public:
         setIcon(QIcon());
         setText(QString());
         setFlat(true);
+        setAttribute(Qt::WA_TranslucentBackground, true);
+        setAttribute(Qt::WA_NoSystemBackground, true);
+        setAutoFillBackground(false);
     }
 
     void setDisplayPixmap(const QPixmap &pix)
@@ -74,12 +77,12 @@ protected:
     void mouseMoveEvent(QMouseEvent *event) override
     {
         if (mHovered && !mPixmap.isNull()) {
+            // 和 CardItem / JokerItem 同方向：鼠标在牌面哪个角，牌面就按同一套
+            // 原版顶点倾斜感响应，不再使用 QWidget shear 的反向近似。
             const qreal nx = event->position().x() / qMax(1, width()) - 0.5;
             const qreal ny = event->position().y() / qMax(1, height()) - 0.5;
-            // 原版 hover 不是改变贴图像素，而是顶点阶段做轻微透视。
-            // 这里保持原始清晰贴图，只变换最终四边形。
-            mTiltY = qBound(-0.12, nx * 0.24, 0.12);
-            mTiltX = qBound(-0.10, ny * 0.20, 0.10);
+            mTiltY = qBound(-10.0, nx * 20.0, 10.0);
+            mTiltX = qBound(-10.0, ny * 20.0, 10.0);
         }
         QPushButton::mouseMoveEvent(event);
         update();
@@ -91,13 +94,12 @@ protected:
         p.setRenderHint(QPainter::Antialiasing, true);
         p.setRenderHint(QPainter::SmoothPixmapTransform, false);
 
-        const QColor bg = !isEnabled() ? QColor("#2a3035") : (mHovered ? QColor("#4f6367") : QColor("#374244"));
-        p.setPen(Qt::NoPen);
-        p.setBrush(bg);
-        p.drawRoundedRect(rect().adjusted(0, 0, -1, -1), 7, 7);
-
+        // 原版卡牌/卡包自己带阴影和高光，商店槽位按钮不应该再画一层黑底。
+        // 之前的黑色矩形和卡片后面的脏阴影就是这里的按钮背景造成的。
         if (mPixmap.isNull()) return;
-        QSize target = size() - QSize(10, 10);
+        // 留出 hover 透视和放大余量；否则鼠标靠角落时 QPainter 会被按钮矩形裁掉。
+        // 卡包、塔罗、优惠券都按原版同一卡牌宽高节奏展示，不再把卡包撑大。
+        QSize target(int(width() * 0.80), int(height() * 0.80));
         QSize pixSize = mPixmap.size();
         pixSize.scale(target, Qt::KeepAspectRatio);
         QRectF pr(QPointF(-pixSize.width() / 2.0, -pixSize.height() / 2.0), pixSize);
@@ -106,18 +108,24 @@ protected:
         p.setOpacity(isEnabled() ? 1.0 : 0.42);
         p.translate(width() / 2.0, height() / 2.0 + (mHovered ? -4.0 : 0.0));
 
-        QTransform t;
-        t.shear(mTiltY, -mTiltX);
-        t.scale(1.0 + (mHovered ? 0.035 : 0.0), 1.0 + (mHovered ? 0.035 : 0.0));
-        p.setTransform(t, true);
+        const qreal tiltX = mTiltX * 3.14159265358979323846 / 180.0;
+        const qreal tiltY = mTiltY * 3.14159265358979323846 / 180.0;
+        const qreal cosY = std::cos(tiltY);
+        const qreal cosX = std::cos(tiltX);
+        const qreal sinY = std::sin(tiltY);
+        const qreal sinX = std::sin(tiltX);
 
-        // 先画投影，再画原始像素贴图；不对贴图做降采样处理。
-        p.save();
-        p.setOpacity(isEnabled() ? 0.32 : 0.16);
-        p.translate(6, 8);
-        p.setBrush(QColor(0,0,0,180));
-        p.drawRoundedRect(pr.adjusted(4, 5, -4, -2), 8, 8);
-        p.restore();
+        QTransform persp;
+        persp.setMatrix(
+            cosY,           sinY * sinX,    0.0048 * sinY,
+            0,              cosX,           0.0048 * sinX,
+            0,              0,              1
+        );
+        QTransform t;
+        const qreal hoverScale = 1.0 + (mHovered ? 0.045 : 0.0);
+        t.scale(hoverScale, hoverScale);
+        t = persp * t;
+        p.setTransform(t, true);
 
         p.drawPixmap(pr, mPixmap, QRectF(0, 0, mPixmap.width(), mPixmap.height()));
         p.restore();
@@ -126,7 +134,7 @@ protected:
 private:
     QPixmap mPixmap;
     bool mHovered = false;
-    qreal mTiltX = 0.0;
+    qreal mTiltX = 0.0; // degrees, same direction as CardItem/JokerItem
     qreal mTiltY = 0.0;
 };
 }
@@ -137,7 +145,8 @@ ShopWidget::ShopWidget(GameState *gs,
     : QWidget(parent), mGS(gs), mCNFont(cnFont), mPixelFont(pixelFont)
 {
     setAttribute(Qt::WA_StyledBackground, true);
-    setStyleSheet("background: rgba(0, 0, 0, 60);");   // 商店露出动态背景
+    setAttribute(Qt::WA_TranslucentBackground, true);
+    setStyleSheet("background: transparent;");   // 原版商店外侧不额外铺黑色遮罩
     buildUi();
 }
 
@@ -227,7 +236,7 @@ void ShopWidget::buildUi()
     shopBox->setObjectName("shopBox");
     shopBox->setAttribute(Qt::WA_StyledBackground, true);
     shopBox->setStyleSheet(
-        "QWidget#shopBox { background:rgba(57,72,76,230); border:3px solid #202b2e; border-radius:14px; }"
+        "QWidget#shopBox { background:rgba(57,72,76,230); border:none; border-radius:14px; }"
         );
     auto *shbl = new QHBoxLayout(shopBox);
     shbl->setContentsMargins(12, 12, 12, 12);
@@ -253,10 +262,10 @@ void ShopWidget::buildUi()
     // Voucher 单槽：原版下半区左侧优惠券，固定售价 $10
     auto *voucherBox = new QWidget(lowerRow);
     voucherBox->setObjectName("voucherBox");
-    voucherBox->setMinimumSize(185, 275);
+    voucherBox->setMinimumSize(172, 258);
     voucherBox->setAttribute(Qt::WA_StyledBackground, true);
     voucherBox->setStyleSheet(
-        "QWidget#voucherBox { background:rgba(57,72,76,230); border:3px solid #202b2e; border-radius:14px; }"
+        "QWidget#voucherBox { background:rgba(57,72,76,230); border:none; border-radius:14px; }"
         );
     auto *vbl = new QVBoxLayout(voucherBox);
     vbl->setContentsMargins(10, 8, 10, 8);
@@ -273,7 +282,7 @@ void ShopWidget::buildUi()
     boosterBox->setObjectName("boosterBox");
     boosterBox->setAttribute(Qt::WA_StyledBackground, true);
     boosterBox->setStyleSheet(
-        "QWidget#boosterBox { background:rgba(57,72,76,230); border:3px solid #202b2e; border-radius:14px; }"
+        "QWidget#boosterBox { background:rgba(57,72,76,230); border:none; border-radius:14px; }"
         );
     auto *bhbl = new QHBoxLayout(boosterBox);
     bhbl->setContentsMargins(12, 8, 12, 8);
@@ -297,8 +306,8 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
 {
     OfferUi ou;
     ou.card = new QWidget(parent);
-    if (isBooster) ou.card->setFixedSize(225, 318);
-    else           ou.card->setFixedSize(150, 260);
+    if (isBooster) ou.card->setFixedSize(150, 232);
+    else           ou.card->setFixedSize(150, 232);
     ou.card->setStyleSheet("background:transparent;");
 
     auto *vbl = new QVBoxLayout(ou.card);
@@ -319,23 +328,16 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
 
     // 卡图(整张点击)
     ou.cardBtn = new ShopCardButton(ou.card);
-    // Booster 在原版商店区使用约 1.27×牌宽的显示区域，给它单独更宽的按钮。
-    if (isBooster) ou.cardBtn->setFixedSize(190, 252);
-    else           ou.cardBtn->setFixedSize(126, 174);
+    // 原版卡包和普通卡牌使用同一张卡牌宽高比例，只是贴图本身是卡包。
+    // 之前这里给卡包单独放大，导致商店里卡包明显大一圈并且向下错位。
+    ou.cardBtn->setFixedSize(140, 176);
     ou.cardBtn->setCursor(Qt::PointingHandCursor);
     ou.cardBtn->installEventFilter(this);
     ou.cardBtn->setStyleSheet(
-        "QPushButton { background:#374244; border-radius:6px; border:none; }"
-        "QPushButton:hover { background:#4f6367; }"
-        "QPushButton:disabled { background:#2a3035; }"
+        "QPushButton { background:transparent; border-radius:0px; border:none; }"
+        "QPushButton:hover { background:transparent; }"
+        "QPushButton:disabled { background:transparent; }"
         );
-    if (isBooster) {
-        auto *shadow = new QGraphicsDropShadowEffect(ou.cardBtn);
-        shadow->setBlurRadius(22);
-        shadow->setOffset(10, 14);
-        shadow->setColor(QColor(0, 0, 0, 150));
-        ou.cardBtn->setGraphicsEffect(shadow);
-    }
 
     // 图片用 QIcon，booster 贴图本身已经在 offerPixmap 里额外绘制厚度/高光。
     vbl->addWidget(ou.cardBtn, 0, Qt::AlignCenter);
@@ -576,7 +578,7 @@ QPixmap ShopWidget::offerPixmap(const ShopOffer &o) const
                                            c.y() * ConsumableItem::HEIGHT,
                                            ConsumableItem::WIDTH,
                                            ConsumableItem::HEIGHT);
-            return BalatroShaders::renderVoucherPixmap(pix, 0.9);
+            return BalatroShaders::renderVoucherPixmap(pix, 1.0);
         }
 
         QPixmap pix(ConsumableItem::WIDTH, ConsumableItem::HEIGHT);
@@ -656,7 +658,7 @@ QPixmap ShopWidget::playingCardPixmap(const CardData &c) const
             sp.drawPixmap(QRect(0, 0, W, H), enhSheet, QRect(sCol * W, sRow * H, W, H));
         }
         if (c.seal == Seal::Gold)
-            sealPix = BalatroShaders::renderVoucherPixmap(sealPix, 0.95);
+            sealPix = BalatroShaders::renderVoucherPixmap(sealPix, 1.0);
         QPainter fp(&pix);
         fp.drawPixmap(QRect(0, 0, W, H), sealPix);
     }

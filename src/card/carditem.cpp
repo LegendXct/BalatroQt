@@ -251,7 +251,6 @@ void CardItem::mousePressEvent(QGraphicsSceneMouseEvent *event) {
         mPressed = true;
         mDragging = false;
         mPressScenePos = event->scenePos();
-        setZValue(100);
         event->accept();
     }
     else QGraphicsObject::mousePressEvent(event);
@@ -263,8 +262,10 @@ void CardItem::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
         QGraphicsObject::mouseMoveEvent(event);
         return;
     }
-    if (!mDragging && QLineF(event->scenePos(), mPressScenePos).length() > 8.0)
+    if (!mDragging && QLineF(event->scenePos(), mPressScenePos).length() > 8.0) {
         mDragging = true;
+        setZValue(600);
+    }
 
     if (mDragging) {
         setPos(event->scenePos() - QPointF(WIDTH / 2.0, HEIGHT / 2.0));

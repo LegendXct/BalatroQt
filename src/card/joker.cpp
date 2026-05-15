@@ -474,7 +474,9 @@ Joker createJoker(JokerType type) {
         j.effect = [](TriggerContext &ctx) {
             bool ok = !ctx.hand.isEmpty();
             for (const CardData &c : ctx.hand) {
-                if (c.enhancement == Enhancement::Stone) continue;
+                // 石头牌没有花色；原版黑板要求手牌中所有有牌面的牌都必须是♠/♣，
+                // 石头留在手牌会破坏这个条件，而不是被忽略。
+                if (c.enhancement == Enhancement::Stone) { ok = false; break; }
                 if (!(c.suit == Suit::Spades || c.suit == Suit::Clubs)) { ok = false; break; }
             }
             if (ok) ctx.result.xmult *= 3.0;

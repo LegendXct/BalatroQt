@@ -345,6 +345,11 @@ static V4 shaderPixel(const QImage &src, ShaderKind kind, int x, int y, double s
         return dissolveMask(tex, uv, w, h, dissolve, seedTime, false, burn1, burn2);
     }
     case ShaderKind::Debuff: {
+        // 原版 debuff.fs 会把 sprite 自身变灰红并画两条对角叉。
+        // Qt 这里是离屏生成 pixmap，如果照搬 alpha=0.3，牌面会在普通 QWidget/QLabel
+        // 背景上显得“透明漏底”，完整牌组预览里尤其明显。
+        // 因此保留原版 HSL 变色和叉线宽度，但保持牌面 alpha，不再把非叉区域打穿。
+        const double origA = tex.a;
         V4 sat = HSL(add(mul(tex, 0.8), {0.2, 0.0, 0.0, tex.a * 0.2}));
         sat.g = 0.5;
         const double width = 0.1;
@@ -354,13 +359,15 @@ static V4 shaderPixel(const QImage &src, ShaderKind kind, int x, int y, double s
             sat.r = 1.0;
             sat.g = 0.7;
             sat.b = 0.8 * sat.b;
+            V4 crossCol = RGB(sat);
+            tex = mix(tex, crossCol, 0.78);
         } else {
             sat.g *= 0.5;
             sat.b *= 0.7;
+            V4 dimCol = RGB(sat);
+            tex = mix(tex, dimCol, 0.62);
         }
-        tex = RGB(sat);
-        if (!cross) tex.a *= 0.3;
-        tex.a *= intensity;
+        tex.a = origA * intensity;
         return dissolveMask(tex, uv, w, h, dissolve, seedTime, false, burn1, burn2);
     }
     case ShaderKind::Played: {
@@ -509,7 +516,18 @@ QPixmap renderEditionPixmap(const QPixmap &base, Edition edition, double intensi
 
     bool gpuOk = false;
     QPixmap gpu = renderEditionPixmapGpu(base, edition, intensity, &gpuOk);
-    if (gpuOk && !gpu.isNull()) return gpu;
+    if (gpuOk && !gpu.isNull()) {
+        if (edition == Edition::Negative) {
+            bool shineOk = false;
+            QPixmap shine = renderShaderPixmapGpu(base, QStringLiteral("negative_shine"), intensity, false, &shineOk);
+            if (shineOk && !shine.isNull()) {
+                QPainter gp(&gpu);
+                gp.setCompositionMode(QPainter::CompositionMode_SourceOver);
+                gp.drawPixmap(0, 0, shine);
+            }
+        }
+        return gpu;
+    }
 
     switch (edition) {
     case Edition::Foil:        return processPixmap(base, ShaderKind::Foil, intensity, true);
@@ -555,9 +573,10 @@ QPixmap renderHologramPixmap(const QPixmap &base, double intensity)
 
 QPixmap renderDebuffedPixmap(const QPixmap &base, double intensity)
 {
-    bool ok = false;
-    QPixmap gpu = renderShaderPixmapGpu(base, QStringLiteral("debuff"), intensity, true, &ok);
-    return (ok && !gpu.isNull()) ? gpu : processPixmap(base, ShaderKind::Debuff, intensity, true);
+    // 暂时不要走 GPU debuff。QOpenGL 离屏在 DeckView 的 QLabel 预览里会触发
+    // 不稳定上下文/透明 alpha 问题，导致完整牌组闪退或牌面漏成透明。
+    // 使用稳定 CPU 转写：不重绘整场景，只在卡图生成缓存时执行一次。
+    return processPixmap(base, ShaderKind::Debuff, intensity, false);
 }
 
 QPixmap renderPlayedPixmap(const QPixmap &base, double intensity)
@@ -764,32 +783,105 @@ void paintDebuff(QPainter *p, const QRectF &r, double intensity)
     p->restore();
 }
 
-void paintFlame(QPainter *p, const QRectF &r, double intensity)
+void paintFlame(QPainter *p, const QRectF &rect, double amount,
+                const QColor &colour1, const QColor &colour2, double idSeed)
 {
-    if (!p || intensity <= 0.01) return;
+    if (!p || amount <= 0.05 || rect.width() <= 1 || rect.height() <= 1) return;
+
+    // 移植 flame.fs:小分辨率(60×W^h格)的 fractal noise,每帧重新算
+    const double intensity = std::min(10.0, amount);
+    const int W = qBound(24, int(rect.width()  * 0.35), 80);
+    const int H = qBound(24, int(rect.height() * 0.35), 80);
+
+    QImage img(W, H, QImage::Format_ARGB32_Premultiplied);
+    img.fill(0);
+
     const double t = shaderTime();
-    p->save();
-    p->setCompositionMode(QPainter::CompositionMode_Screen);
-    p->setRenderHint(QPainter::Antialiasing, true);
-    for (int i = 0; i < 18; ++i) {
-        const double u = (i + 0.5) / 18.0 - 0.5;
-        const double phase = t * 4.0 + i * 1.781;
-        const double h = r.height() * (0.25 + 0.20 * intensity + 0.12 * std::sin(phase));
-        const double x = r.center().x() + u * r.width() * 0.9;
-        QPainterPath flame;
-        flame.moveTo(x, r.bottom());
-        flame.cubicTo(x - r.width() * 0.08, r.bottom() - h * 0.45,
-                       x + std::sin(phase) * 12.0, r.bottom() - h * 0.92,
-                       x + std::sin(phase * 0.7) * 7.0, r.bottom() - h * 1.15);
-        flame.cubicTo(x + r.width() * 0.09, r.bottom() - h * 0.62,
-                       x + r.width() * 0.05, r.bottom() - h * 0.18,
-                       x, r.bottom());
-        QLinearGradient g(QPointF(x, r.bottom()), QPointF(x, r.bottom() - h));
-        g.setColorAt(0.0, QColor(255, 55, 25, int(125 * intensity)));
-        g.setColorAt(0.45, QColor(255, 140, 28, int(110 * intensity)));
-        g.setColorAt(1.0, QColor(255, 255, 155, int(65 * intensity)));
-        p->fillPath(flame, g);
+    const double id = idSeed;
+    const double flameUpY = std::fmod(4.0 * t, 10000.0) - 5000.0 + std::fmod(1.781 * id, 1000.0);
+    const double scaleFac = 7.5 + 3.0 / (2.0 + 2.0 * intensity);
+    const double speed   = std::fmod(20.781 * id, 100.0) + 1.0 * std::sin(t + id) * std::cos(t * 0.151 + id);
+
+    auto col1r = colour1.redF(),   col1g = colour1.greenF(),   col1b = colour1.blueF();
+    auto col2r = colour2.redF(),   col2g = colour2.greenF(),   col2b = colour2.blueF();
+
+    for (int py = 0; py < H; ++py) {
+        QRgb *row = reinterpret_cast<QRgb *>(img.scanLine(py));
+        // 翻转 y:火焰底部在 widget 底部
+        double v_norm = double(H - 1 - py) / double(H - 1);
+        for (int px = 0; px < W; ++px) {
+            double u_norm = double(px) / double(W - 1);
+            // uv 类似原版 - 0.5 中心化
+            double ux = u_norm - 0.5;
+            double uy = v_norm - 0.5;
+            double fux = ux;     // 已经是低分辨率,不再 floor
+            double fuy = uy;
+            // 微小扰动
+            double pert = 0.01 * std::sin(-1.123 * fux + 0.2 * t) * std::cos(5.3332 * fuy + t * 0.931);
+            double sx = fux * (1.0 + pert);
+            double sy = fuy * (1.0 + pert);
+
+            double svx = sx * scaleFac;
+            double svy = sy * scaleFac + flameUpY;
+            double sv2x = 0.0, sv2y = 0.0;
+            for (int i = 0; i < 5; ++i) {
+                double sgn = ((i % 2) == 1) ? -1.0 : 1.0;
+                double lenSv = std::sqrt(svx * svx + svy * svy);
+                double cosL = std::cos(lenSv * 0.411);
+                double sinL = std::sin(lenSv);
+                double cosL2 = std::cos(lenSv);
+                sv2x += svx + 0.05 * sv2y * sgn + 0.3 * (cosL + 0.3344 * sinL - 0.23 * cosL2);
+                sv2y += svy + 0.05 * sv2x * sgn + 0.3 * (cosL + 0.3344 * sinL - 0.23 * cosL2);
+                double nx = 0.5 * (std::cos(std::cos(sv2y) + speed * 0.0812) * std::sin(3.22 + sv2x - speed * 0.1531));
+                double ny = 0.5 * (std::sin(-sv2x * 1.21222 + 0.113785 * speed) * std::cos(sv2y * 0.91213 - 0.13582 * speed));
+                svx += nx;
+                svy += ny;
+            }
+
+            double sLenX = (svx - 0) / scaleFac * 5.0;
+            double sLenY = (svy - flameUpY) / scaleFac * 5.0;
+            double sLen = std::sqrt(sLenX * sLenX + sLenY * sLenY);
+            double uLen = std::sqrt(sx * sx + sy * sy);
+            double smokeRes = std::max(0.0, (sLen + 0.1 * (uLen - 0.5)) * (2.0 / (2.0 + intensity * 0.2)));
+            smokeRes += std::max(0.0, 2.0 - 0.3 * intensity) * std::max(0.0, 2.0 * (sy - 0.5) * (sy - 0.5));
+
+            if (std::abs(ux) > 0.4) smokeRes += 10.0 * (std::abs(ux) - 0.4);
+            double dx = ux * 0.19;
+            double dy = uy - 0.1;
+            double dLen = std::sqrt(dx * dx + dy * dy);
+            double thresh = std::min(0.1, intensity * 0.5);
+            if (dLen < thresh && smokeRes > 1.0) {
+                smokeRes += std::min(8.5, intensity * 10.0) * (dLen - 0.1);
+            }
+
+            if (smokeRes > 1.0) {
+                row[px] = 0;
+                continue;
+            }
+            double r = col1r, g = col1g, b = col1b;
+            if (uy < 0.12) {
+                double k = 0.12 - uy;
+                r = r * (1.0 - 0.5 * k) + 2.5 * k * col2r;
+                g = g * (1.0 - 0.5 * k) + 2.5 * k * col2g;
+                b = b * (1.0 - 0.5 * k) + 2.5 * k * col2b;
+                double mix = (-2.0 + 0.5 * intensity * smokeRes) * k;
+                r += r * mix;  g += g * mix;  b += b * mix;
+            }
+            int ir = qBound(0, int(r * 255.0), 255);
+            int ig = qBound(0, int(g * 255.0), 255);
+            int ib = qBound(0, int(b * 255.0), 255);
+            // 顶部边缘 alpha 渐隐让火焰收尾平滑
+            double a = 1.0;
+            if (uy > 0.35) a *= std::max(0.0, 1.0 - (uy - 0.35) * 4.0);
+            int ia = qBound(0, int(a * 255.0), 255);
+            // premultiplied
+            row[px] = qRgba(int(ir * a), int(ig * a), int(ib * a), ia);
+        }
     }
+
+    p->save();
+    p->setRenderHint(QPainter::SmoothPixmapTransform, true);
+    p->drawImage(rect, img);
     p->restore();
 }
 
@@ -844,30 +936,10 @@ void paintSoulCrystal(QPainter *p, const QRectF &rect, const QPixmap &enhancersS
 QPixmap makeBooster3DPixmap(const QPixmap &base)
 {
     if (base.isNull()) return QPixmap();
-    QPixmap shaded = renderBoosterPixmap(base, 0.95);
-    QPixmap pix(base.width() + 10, base.height() + 14);
-    pix.fill(Qt::transparent);
-    QPainter p(&pix);
-    p.setRenderHint(QPainter::Antialiasing, true);
-    p.setRenderHint(QPainter::SmoothPixmapTransform, true);
-    QRectF r(4, 2, base.width(), base.height());
-    p.setPen(Qt::NoPen);
-    p.setBrush(QColor(0,0,0,130));
-    p.drawRoundedRect(r.translated(5, 9), 11, 11);
-    QPainterPath side;
-    side.addRoundedRect(r.translated(4, 6), 10, 10);
-    QLinearGradient sg(r.topRight(), r.bottomRight() + QPointF(6, 7));
-    sg.setColorAt(0.0, QColor(255,255,255,52));
-    sg.setColorAt(0.5, QColor(55,55,65,72));
-    sg.setColorAt(1.0, QColor(0,0,0,110));
-    p.fillPath(side, sg);
-    p.save();
-    p.translate(r.center());
-    p.rotate(-1.7);
-    QRectF target(-base.width()/2.0, -base.height()/2.0, base.width(), base.height());
-    p.drawPixmap(target, shaded, shaded.rect());
-    p.restore();
-    return pix;
+    // 原版 booster.fs 直接作用在卡包 sprite 上。这里用同一套 GPU/CPU shader
+    // 处理真实卡包贴图；如果透明边缘出现异常则自动回退原图，避免黑底。
+    QPixmap fx = renderBoosterPixmap(base, 1.0);
+    return fx.isNull() ? base : fx;
 }
 
 } // namespace BalatroShaders

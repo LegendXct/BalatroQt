@@ -300,7 +300,6 @@ void JokerItem::mousePressEvent(QGraphicsSceneMouseEvent *e)
         applyHoverTransform();
         mPressScenePos = e->scenePos();
         mRestZ = zValue();
-        setZValue(500);
         e->accept();
         return;
     }
@@ -313,8 +312,10 @@ void JokerItem::mouseMoveEvent(QGraphicsSceneMouseEvent *e)
         QGraphicsObject::mouseMoveEvent(e);
         return;
     }
-    if (!mDragging && QLineF(e->scenePos(), mPressScenePos).length() > 7.0)
+    if (!mDragging && QLineF(e->scenePos(), mPressScenePos).length() > 7.0) {
         mDragging = true;
+        setZValue(650);
+    }
 
     if (mDragging) {
         setPos(e->scenePos() - QPointF(WIDTH / 2.0, HEIGHT / 2.0));
@@ -335,7 +336,6 @@ void JokerItem::mouseReleaseEvent(QGraphicsSceneMouseEvent *e)
         } else {
             emit pressed(this, e->button());
             if (e->button() == Qt::LeftButton) emit clicked(this);
-            setZValue(mRestZ);
         }
         e->accept();
         return;
@@ -372,7 +372,6 @@ void JokerItem::hoverEnterEvent(QGraphicsSceneHoverEvent *e)
 {
     mHovered = true;
     setTransformOriginPoint(WIDTH / 2.0, HEIGHT / 2.0);
-    setZValue(qMax<qreal>(zValue(), 120));
     animateScale(1.08, 100);
     emit hoverChanged(this, true);
     update();
