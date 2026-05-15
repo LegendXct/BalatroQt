@@ -812,61 +812,7 @@ void MainWindow::setupLeftPanel() {
     QPushButton *btnOptions = makeBtn("选项", "#fda200", "#ffb730", mCNFont, btnCol, 70);
     btnOptions->setFixedWidth(76);
     btnVbl->addWidget(btnOptions);
-    connect(btnOptions, &QPushButton::clicked, this, [this]() {
-        QDialog dlg(this);
-        dlg.setWindowTitle("选项");
-        dlg.setModal(true);
-        dlg.resize(520, 560);
-        dlg.setStyleSheet(
-            "QDialog { background:rgba(36,51,54,245); border:3px solid #dce9e9; border-radius:18px; }"
-            "QPushButton { background:#fe5f55; color:white; border:none; border-radius:10px; padding:13px 24px; font-size:20px; font-weight:bold; }"
-            "QPushButton:hover { background:#ff7066; }"
-            "QPushButton#back { background:#fda200; }"
-            "QLabel { color:white; background:transparent; }"
-            );
-        auto *v = new QVBoxLayout(&dlg);
-        v->setContentsMargins(34, 30, 34, 30);
-        v->setSpacing(14);
-        QFont titleFont = mCNFont; titleFont.setPixelSize(25); titleFont.setBold(true);
-        auto *title = new QLabel("选项", &dlg);
-        title->setFont(titleFont);
-        title->setAlignment(Qt::AlignCenter);
-        v->addWidget(title);
-
-        QStringList items = {"设置", "开始新的一局", "主菜单", "统计数据", "收藏", "定制牌组"};
-        for (const QString &txt : items) {
-            auto *b = new QPushButton(txt, &dlg);
-            b->setFont(titleFont);
-            if (txt == "开始新的一局") {
-                connect(b, &QPushButton::clicked, this, [this, &dlg]() {
-                    dlg.accept();
-                    // 开新局会同时清理商店/包/计分火焰并重新进入盲注选择。
-                    // 暂停一次窗口重绘，避免中间帧把中央黑底绘出来造成黑屏闪烁。
-                    setUpdatesEnabled(false);
-                    resetTransientOverlaysForNewRun();
-                    mGameState->startGame();
-                    refreshHand();
-                    refreshJokerSlots();
-                    refreshConsumableSlots();
-                    refreshCounters();
-                    refreshScore();
-                    refreshGold();
-                    QTimer::singleShot(0, this, [this]() {
-                        setUpdatesEnabled(true);
-                        update();
-                    });
-                });
-            } else {
-                b->setEnabled(false);
-            }
-            v->addWidget(b);
-        }
-        auto *back = new QPushButton("返回", &dlg);
-        back->setObjectName("back");
-        connect(back, &QPushButton::clicked, &dlg, &QDialog::accept);
-        v->addWidget(back);
-        dlg.exec();
-    });
+    connect(btnOptions, &QPushButton::clicked, this, &MainWindow::showOptionsOverlay);
 
     brl->addWidget(btnCol);
 
@@ -955,6 +901,113 @@ void MainWindow::setupLeftPanel() {
     brl->addWidget(rightCol, 1);
     layout->addStretch();
     layout->addWidget(bottomRow);
+}
+
+
+void MainWindow::showOptionsOverlay()
+{
+    // 不再使用 QDialog::exec()：全屏窗口上叠加/关闭顶层原生对话框时，
+    // QOpenGLWidget 可能在部分 Windows 显卡驱动上重建后台缓冲，表现为瞬时黑屏。
+    // 这里改为普通子 QWidget 覆盖层，和游戏场景共用同一个窗口，不触发原生窗口切换。
+    if (mOptionsOverlay) {
+        mOptionsOverlay->setGeometry(centralWidget() ? centralWidget()->rect() : rect());
+        mOptionsOverlay->raise();
+        mOptionsOverlay->show();
+        return;
+    }
+
+    QWidget *host = centralWidget() ? centralWidget() : this;
+    mOptionsOverlay = new QWidget(host);
+    mOptionsOverlay->setObjectName("OptionsOverlay");
+    mOptionsOverlay->setAttribute(Qt::WA_StyledBackground, true);
+    mOptionsOverlay->setStyleSheet(
+        "QWidget#OptionsOverlay { background:rgba(0,0,0,88); }"
+        "QFrame#OptionsPanel { background:rgba(36,51,54,245); border:3px solid #dce9e9; border-radius:18px; }"
+        "QLabel { color:white; background:transparent; }"
+        "QPushButton { background:#fe5f55; color:white; border:none; border-radius:10px; padding:13px 24px; font-size:20px; font-weight:bold; }"
+        "QPushButton:hover { background:#ff7066; }"
+        "QPushButton:pressed { background:#d94a42; }"
+        "QPushButton:disabled { background:#394347; color:#8f9a9c; }"
+        "QPushButton#back { background:#fda200; }"
+        "QPushButton#back:hover { background:#ffb730; }"
+        );
+
+    auto *root = new QVBoxLayout(mOptionsOverlay);
+    root->setContentsMargins(0, 0, 0, 0);
+    root->setSpacing(0);
+    root->addStretch(1);
+
+    auto *centerRow = new QHBoxLayout;
+    centerRow->setContentsMargins(0, 0, 0, 0);
+    centerRow->addStretch(1);
+
+    auto *panel = new QFrame(mOptionsOverlay);
+    panel->setObjectName("OptionsPanel");
+    panel->setFixedSize(520, 560);
+    auto *v = new QVBoxLayout(panel);
+    v->setContentsMargins(34, 30, 34, 30);
+    v->setSpacing(14);
+
+    QFont titleFont = mCNFont;
+    titleFont.setPixelSize(25);
+    titleFont.setBold(true);
+
+    auto *title = new QLabel("选项", panel);
+    title->setFont(titleFont);
+    title->setAlignment(Qt::AlignCenter);
+    v->addWidget(title);
+
+    const QStringList items = {"设置", "开始新的一局", "主菜单", "统计数据", "收藏", "定制牌组"};
+    for (const QString &txt : items) {
+        auto *b = new QPushButton(txt, panel);
+        b->setFont(titleFont);
+        if (txt == "开始新的一局") {
+            connect(b, &QPushButton::clicked, this, &MainWindow::startNewRunFromOptions);
+        } else {
+            b->setEnabled(false);
+        }
+        v->addWidget(b);
+    }
+
+    auto *back = new QPushButton("返回", panel);
+    back->setObjectName("back");
+    back->setFont(titleFont);
+    connect(back, &QPushButton::clicked, this, &MainWindow::hideOptionsOverlay);
+    v->addWidget(back);
+
+    centerRow->addWidget(panel);
+    centerRow->addStretch(1);
+    root->addLayout(centerRow);
+    root->addStretch(1);
+
+    mOptionsOverlay->setGeometry(host->rect());
+    mOptionsOverlay->raise();
+    mOptionsOverlay->show();
+}
+
+void MainWindow::hideOptionsOverlay()
+{
+    if (!mOptionsOverlay) return;
+    mOptionsOverlay->hide();
+}
+
+void MainWindow::startNewRunFromOptions()
+{
+    // 保持覆盖层可见直到所有状态和界面刷新完成，避免玩家看到半帧清空场景。
+    // 不再 setUpdatesEnabled(false)，因为整窗禁用/恢复更新也会在部分机器上触发黑底中间帧。
+    resetTransientOverlaysForNewRun();
+    mGameState->startGame();
+    refreshHand();
+    refreshJokerSlots();
+    refreshConsumableSlots();
+    refreshCounters();
+    refreshScore();
+    refreshGold();
+
+    if (mView) mView->viewport()->update();
+    if (mDynamicBg) mDynamicBg->update();
+    update();
+    hideOptionsOverlay();
 }
 
 void MainWindow::setupScene() {
@@ -1733,6 +1786,10 @@ void MainWindow::resizeEvent(QResizeEvent *event)
         if (mPackOpenWidget)    { mPackOpenWidget   ->setGeometry(lowerOverlayRect()); if (mPackOpenWidget->isVisible())    mPackOpenWidget->raise(); }
         if (mSplashOverlay)     { mSplashOverlay    ->setGeometry(r);                 if (mSplashOverlay->isVisible())     mSplashOverlay->raise(); }
         if (mDeckViewWidget)    { mDeckViewWidget   ->setGeometry(r);                 if (mDeckViewWidget->isVisible())    mDeckViewWidget->raise(); }
+    }
+    if (mOptionsOverlay && centralWidget()) {
+        mOptionsOverlay->setGeometry(centralWidget()->rect());
+        if (mOptionsOverlay->isVisible()) mOptionsOverlay->raise();
     }
 }
 
@@ -2594,6 +2651,10 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev)
         if (mShopWidget)        { mShopWidget       ->setGeometry(lowerOverlayRect()); if (mShopWidget->isVisible())        mShopWidget->raise(); }
         if (mPackOpenWidget)    { mPackOpenWidget   ->setGeometry(lowerOverlayRect()); if (mPackOpenWidget->isVisible())    mPackOpenWidget->raise(); }
         if (mDeckViewWidget)    { mDeckViewWidget   ->setGeometry(r);                 if (mDeckViewWidget->isVisible())    mDeckViewWidget->raise(); }
+        if (mOptionsOverlay && centralWidget()) {
+            mOptionsOverlay->setGeometry(centralWidget()->rect());
+            if (mOptionsOverlay->isVisible()) mOptionsOverlay->raise();
+        }
     }
     return QMainWindow::eventFilter(obj, ev);
 }
@@ -3193,7 +3254,6 @@ void MainWindow::showGameOverOverlay(bool won)
         hl->addWidget(quit);
         vl->addWidget(row);
         connect(restart, &QPushButton::clicked, this, [this]() {
-            setUpdatesEnabled(false);
             resetTransientOverlaysForNewRun();
             for (auto *c : mHandCards) { if (c->scene()) mScene->removeItem(c); c->deleteLater(); }
             mHandCards.clear();
@@ -3203,10 +3263,9 @@ void MainWindow::showGameOverOverlay(bool won)
             refreshJokerSlots();
             refreshConsumableSlots();
             refreshScore();
-            QTimer::singleShot(0, this, [this]() {
-                setUpdatesEnabled(true);
-                update();
-            });
+            if (mView) mView->viewport()->update();
+            if (mDynamicBg) mDynamicBg->update();
+            update();
         });
         connect(quit, &QPushButton::clicked, this, &MainWindow::close);
         mGameOverProxy = mScene->addWidget(mGameOverPanel);

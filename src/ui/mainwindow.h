@@ -278,6 +278,13 @@ private:
     void hideGameOverOverlay();
     void resetTransientOverlaysForNewRun();
 
+    // 选项菜单使用主窗口内覆盖层，避免全屏 + QOpenGLWidget 场景中弹出原生 QDialog
+    // 在部分显卡/驱动上触发黑屏重建。
+    QWidget *mOptionsOverlay = nullptr;
+    void showOptionsOverlay();
+    void hideOptionsOverlay();
+    void startNewRunFromOptions();
+
     void hidePlayControlsForScoring();
     void showPlayControlsAfterScoring();
 
