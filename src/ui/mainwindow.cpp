@@ -56,24 +56,19 @@ static double calcUiScale(QScreen *screen)
 {
     if (!screen) return 1.0;
 
-    // 注意：Qt 在开启高 DPI 后，availableGeometry()/geometry() 返回的是“逻辑像素”。
-    // 很多 Windows 设备会因为系统缩放把笔记本屏和外接显示器折算成接近的逻辑尺寸，
-    // 导致只用逻辑像素时左侧 QWidget 看起来没有跟着设备变大/变小。
-    // 这里同时参考物理像素(devicePixelRatio)和逻辑像素，取较大的缩放，
-    // 让左侧信息栏、字体、按钮和右侧牌桌一起随显示器实际规格等比例缩放。
+    // Qt 在开启高 DPI 后，availableGeometry() 返回的就是“逻辑像素”——也是
+    // QWidget 自己用来布局的单位。之前混入 devicePixelRatio 取 qMax 会让高 DPR
+    // 屏（笔记本系统缩放 150%/175% 等）误以为屏幕特别大，dp(380) 计算出的左侧
+    // 信息栏被撑到 600+ 逻辑像素，挤压右侧牌桌。
+    // 因此只用 logicalScale；Qt 内部会按设备像素比把整张窗口放大显示，UI 元素
+    // 之间相对比例不会变。
     const QSize logical = screen->availableGeometry().size();
-    const qreal dpr = qMax<qreal>(1.0, screen->devicePixelRatio());
-    const QSizeF physical(logical.width() * dpr, logical.height() * dpr);
-
     const double logicalScale = qMin(logical.width()  / double(DESIGN_WINDOW_W),
                                      logical.height() / double(DESIGN_WINDOW_H));
-    const double physicalScale = qMin(physical.width()  / double(DESIGN_WINDOW_W),
-                                      physical.height() / double(DESIGN_WINDOW_H));
 
-    double scale = qMax(logicalScale, physicalScale);
+    double scale = logicalScale;
 
-    // 可选调试覆盖：在 Qt Creator 的运行环境里设置 QT_BALATRO_UI_SCALE=1.25
-    // 可以临时验证不同缩放倍率，不设置时完全自动。
+    // 调试覆盖：QT_BALATRO_UI_SCALE=1.25 可以临时强制缩放。
     bool ok = false;
     const double overrideScale = QString::fromLocal8Bit(qgetenv("QT_BALATRO_UI_SCALE")).toDouble(&ok);
     if (ok && overrideScale > 0.1) scale = overrideScale;
@@ -1666,7 +1661,8 @@ void MainWindow::layoutHandCards() {
         double t = (-n / 2.0 - 0.5 + (i + 1)) / n;
         double angleDeg = 0.2 * t * 180.0 / M_PI;
         int x = startX + i * step;
-        int y = mHandY + (sel ? -50 : 0);
+        // 选中上提量按 CARD_H 比例（≈26%），卡牌放大后这里同步加大才不会"点了感觉没动"。
+        int y = mHandY + (sel ? -CARD_H * 26 / 100 : 0);
         mHandCards[i]->setBaseRotation(angleDeg);
         mHandCards[i]->setZValue(i);
         mHandCards[i]->moveTo(QPointF(x, y), 220);
@@ -1973,7 +1969,8 @@ void MainWindow::onHandCardDragMoved(CardItem *card, QPointF scenePos)
         double t = (-n / 2.0 - 0.5 + (vi + 1)) / n;
         double angleDeg = 0.2 * t * 180.0 / M_PI;
         int x = startX + vi * step;
-        int y = mHandY + (sel ? -50 : 0);
+        // 选中上提量按 CARD_H 比例（≈26%），卡牌放大后这里同步加大才不会"点了感觉没动"。
+        int y = mHandY + (sel ? -CARD_H * 26 / 100 : 0);
         ci->setBaseRotation(angleDeg);
         ci->setZValue(10 + vi);
         ci->moveTo(QPointF(x, y), 60);
@@ -3048,8 +3045,11 @@ QRect MainWindow::lowerOverlayRect() const
 {
     if (!mPlayPage) return QRect();
     const int y = dp(JOKER_Y + JOKER_H + 10);
-    const int rightDeckReserve = dp(CARD_W + 150);
-    return QRect(0, y, qMax(dp(600), mPlayPage->width() - rightDeckReserve), qMax(0, mPlayPage->height() - y));
+    // 牌组在场景里贴右边，按 fitInView 的实际缩放比例换算到 widget 像素宽度。
+    // 之前用固定 dp(CARD_W + 150)，在卡牌放大后会把 BlindSelect 的右侧 Boss 卡裁掉。
+    const double sceneScale = mSceneH > 0 ? double(mPlayPage->height()) / mSceneH : 1.0;
+    const int deckReserve = qMax(0, int(std::round((CARD_W + 60) * sceneScale))) + dp(16);
+    return QRect(0, y, qMax(dp(560), mPlayPage->width() - deckReserve), qMax(0, mPlayPage->height() - y));
 }
 
 QRect MainWindow::shopOverlayRect() const

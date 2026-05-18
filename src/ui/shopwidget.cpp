@@ -23,12 +23,9 @@ static double shopUiScale()
     if (!screen) screen = QGuiApplication::primaryScreen();
     if (!screen) return 1.0;
 
+    // 同 mainwindow.cpp / blindselectwidget.cpp：只用逻辑像素，避免高 DPR 屏被双倍缩放。
     const QSize logical = screen->availableGeometry().size();
-    const qreal dpr = qMax<qreal>(1.0, screen->devicePixelRatio());
-    const double logicalScale = qMin(logical.width() / 1920.0, logical.height() / 1080.0);
-    const double physicalScale = qMin((logical.width() * dpr) / 1920.0,
-                                      (logical.height() * dpr) / 1080.0);
-    double scale = qMax(logicalScale, physicalScale);
+    double scale = qMin(logical.width() / 1920.0, logical.height() / 1080.0);
 
     bool ok = false;
     const double overrideScale = QString::fromLocal8Bit(qgetenv("QT_BALATRO_UI_SCALE")).toDouble(&ok);

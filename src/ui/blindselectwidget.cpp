@@ -22,12 +22,10 @@ static double blindUiScale()
     if (!screen) screen = QGuiApplication::primaryScreen();
     if (!screen) return 1.0;
 
+    // 只使用逻辑像素 —— 与 mainwindow.cpp 的 calcUiScale 一致，避免高 DPR 屏把
+    // 盲注卡撑大溢出。
     const QSize logical = screen->availableGeometry().size();
-    const qreal dpr = qMax<qreal>(1.0, screen->devicePixelRatio());
-    const double logicalScale = qMin(logical.width() / 1920.0, logical.height() / 1080.0);
-    const double physicalScale = qMin((logical.width() * dpr) / 1920.0,
-                                      (logical.height() * dpr) / 1080.0);
-    double scale = qMax(logicalScale, physicalScale);
+    double scale = qMin(logical.width() / 1920.0, logical.height() / 1080.0);
 
     bool ok = false;
     const double overrideScale = QString::fromLocal8Bit(qgetenv("QT_BALATRO_UI_SCALE")).toDouble(&ok);
@@ -588,7 +586,16 @@ void BlindSelectWidget::refresh()
 
 QPoint BlindSelectWidget::cardTargetPos(int idx) const
 {
-    int x = dp(LEFT_MARGIN) + idx * (dp(CARD_W) + dp(GAP));
+    // 三张卡总宽度。当容器够宽时整体居中，确保右侧 Boss 卡不被裁切；
+    // 当容器较窄时退化为 LEFT_MARGIN 起步，让最右侧只裁很少。
+    const int cardsTotalW = 3 * dp(CARD_W) + 2 * dp(GAP);
+    const int sideMargin  = dp(LEFT_MARGIN);
+    int startX;
+    if (width() >= cardsTotalW + 2 * sideMargin)
+        startX = (width() - cardsTotalW) / 2;
+    else
+        startX = qMax(sideMargin, (width() - cardsTotalW) / 2);
+    int x = startX + idx * (dp(CARD_W) + dp(GAP));
     int y = height() - dp(CARD_H) + dp(BOTTOM_OVERFLOW);
     if (mGS->blindState(idx) == BlindState::Current)
         y -= dp(CURRENT_LIFT);

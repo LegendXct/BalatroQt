@@ -159,8 +159,8 @@ void drawBalatroHoverTag(QPainter *painter, const CardData &d)
 }
 
 // 手牌排序拖拽的启动距离。原来 8px 太敏感，点击时横向轻微抖动就会被判为拖动；
-// 提高阈值后，小幅移动仍会作为点击选牌处理。
-constexpr qreal kCardDragStartDistance = 22.0;
+// 阈值与卡牌高度成比例（约 11.5% × HEIGHT），卡牌放大后阈值同步增大才不会"点一下就以为在拖"。
+constexpr qreal kCardDragStartDistance = 26.0;
 }
 
 
