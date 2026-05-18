@@ -129,7 +129,8 @@ QPixmap ConsumableItem::renderPixmap(ConsumableType type, bool negative)
     QPixmap pix = cache.value(key);
     if (!pix.isNull()) return pix;
 
-    pix = QPixmap(WIDTH, HEIGHT);
+    // 缓存按图集原始 142×190 渲染，paint() / 调用方再缩放到目标尺寸。
+    pix = QPixmap(SRC_W, SRC_H);
     pix.fill(Qt::transparent);
 
     QPainter p(&pix);
@@ -138,8 +139,8 @@ QPixmap ConsumableItem::renderPixmap(ConsumableType type, bool negative)
 
     if (sSheet && !sSheet->isNull()) {
         QPoint c = spritePos(type);
-        QRect src(c.x() * WIDTH, c.y() * HEIGHT, WIDTH, HEIGHT);
-        p.drawPixmap(QRect(0, 0, WIDTH, HEIGHT), *sSheet, src);
+        QRect src(c.x() * SRC_W, c.y() * SRC_H, SRC_W, SRC_H);
+        p.drawPixmap(QRect(0, 0, SRC_W, SRC_H), *sSheet, src);
     }
 
     p.end();
@@ -148,14 +149,12 @@ QPixmap ConsumableItem::renderPixmap(ConsumableType type, bool negative)
         pix = BalatroShaders::renderEditionPixmap(pix, Edition::Negative);
     }
 
-    // 原版 The Soul 不是单张平面图：背景牌面之外，额外绘制 G.shared_soul。
-    // 这里放在 negative 之后，保证你要的白水晶不会被反相污染。
     if (type == ConsumableType::Spectral_Soul) {
         QPainter soulPainter(&pix);
         soulPainter.setRenderHint(QPainter::SmoothPixmapTransform, false);
         soulPainter.setRenderHint(QPainter::Antialiasing, true);
         static QPixmap enhSheet(QStringLiteral(":/textures/images/Enhancers.png"));
-        BalatroShaders::paintSoulCrystal(&soulPainter, QRectF(0, 0, WIDTH, HEIGHT), enhSheet);
+        BalatroShaders::paintSoulCrystal(&soulPainter, QRectF(0, 0, SRC_W, SRC_H), enhSheet);
     }
 
     cache.insert(key, pix);
@@ -180,9 +179,10 @@ ConsumableItem::ConsumableItem(const Consumable &c, QGraphicsItem *parent)
 }
 
 void ConsumableItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) {
-    p->setRenderHint(QPainter::SmoothPixmapTransform, false);
-    p->drawPixmap(QRect(0, 0, WIDTH, HEIGHT), renderPixmap(mC.type, mC.negative));
-
+    // 缓存渲染在 SRC_W×SRC_H，在场景里平滑放大到 WIDTH×HEIGHT。
+    p->setRenderHint(QPainter::SmoothPixmapTransform, true);
+    p->drawPixmap(QRectF(0, 0, WIDTH, HEIGHT), renderPixmap(mC.type, mC.negative),
+                  QRectF(0, 0, SRC_W, SRC_H));
 }
 
 void ConsumableItem::mousePressEvent(QGraphicsSceneMouseEvent *e)

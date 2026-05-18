@@ -99,9 +99,10 @@ private:
 
     static constexpr int JOKER_Y = 8;
     static constexpr int JOKER_H = CARD_H + 20;
-    static constexpr int PLAY_Y = JOKER_H + 150;   // ← 原 +16, 改成 +150
-    static constexpr int PLAY_H = 240;
-    static constexpr int HAND_RIGHT_RESERVE = 230;
+    static constexpr int PLAY_Y = JOKER_H + 130;   // 卡牌高度增大后稍微靠上一些
+    static constexpr int PLAY_H = CARD_H + 50;
+    // 右下角牌组宽度 = CARD_W + 边距，需要随卡牌尺寸放大同步增加。
+    static constexpr int HAND_RIGHT_RESERVE = CARD_W + 90;
     int mBtnY = 0;
     int mHandY = 0;
     int mHandYNormal  = 0;   // 选牌期间的 hand y
@@ -239,7 +240,10 @@ private:
     void onBlindSelectEntered();
     void onBlindStarted();
     QRect lowerOverlayRect() const;
+    // 商店覆盖层使用更大的可用区域（不为右侧牌组留宽度），避免商品边缘被裁。
+    QRect shopOverlayRect() const;
     void showShopOverlay();
+    void animateShopEntrance();
     void animateCollectRoundCardsThen(std::function<void()> after);
     void onSelectBlindClicked();
 
@@ -296,6 +300,9 @@ private:
     void hidePlayControlsForScoring();
     void showPlayControlsAfterScoring();
     void fitSceneToView();
+    // 当窗口大小或纵横比变化时调整场景宽度，并重排所有依赖 mSceneW/mSceneH 的元素。
+    void updateSceneSize();
+    void layoutSceneButtons();
 
 protected:
     void resizeEvent(QResizeEvent *event) override;

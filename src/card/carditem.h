@@ -12,8 +12,12 @@ class CardItem : public QGraphicsObject
     Q_PROPERTY(QPointF pos READ pos WRITE setPos)
     Q_PROPERTY(qreal opacity READ opacity WRITE setOpacity)
 public:
-    static constexpr int WIDTH = 142;
-    static constexpr int HEIGHT = 190;
+    // 图集采样单元：8BitDeck.png/Enhancers.png 每格固定 142×190，不能改。
+    static constexpr int SRC_W = 142;
+    static constexpr int SRC_H = 190;
+    // 场景显示尺寸：原版 1920×1080 下卡牌约 150×201，这里再放大约 20% 让小窗口下也清晰可见。
+    static constexpr int WIDTH = 170;
+    static constexpr int HEIGHT = 228;
 
     // ── 素材布局说明 ──────────────────────────────────
     // 8BitDeck.png：1846x760，13列x4行，每格 142x190

@@ -462,7 +462,8 @@ QString DeckViewWidget::cardExtraText(const CardData &c) const
 
 QPixmap DeckViewWidget::renderCard(const CardData &c, const QSize &size) const
 {
-    constexpr int W = ConsumableItem::WIDTH, H = ConsumableItem::HEIGHT;
+    // 这里只是按图集每格 142×190 切取原始纹理；最后通过 scaled() 输出 size。
+    constexpr int W = ConsumableItem::SRC_W, H = ConsumableItem::SRC_H;
     QPixmap deckSheet(":/textures/images/8BitDeck.png");
     QPixmap enhSheet (":/textures/images/Enhancers.png");
     QPixmap pix(W, H); pix.fill(Qt::transparent);

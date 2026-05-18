@@ -566,7 +566,8 @@ QPixmap PackOpenWidget::renderConsumable(ConsumableType type, const QSize &size)
 
 QPixmap PackOpenWidget::renderPlayingCard(const CardData &c, const QSize &size) const
 {
-    constexpr int W = ConsumableItem::WIDTH, H = ConsumableItem::HEIGHT;
+    // 按图集原始 142×190 切取，最后 scaled() 输出实际显示尺寸。
+    constexpr int W = ConsumableItem::SRC_W, H = ConsumableItem::SRC_H;
     QPixmap deckSheet(":/textures/images/8BitDeck.png");
     QPixmap enhSheet (":/textures/images/Enhancers.png");
     QPixmap pix(W, H); pix.fill(Qt::transparent);

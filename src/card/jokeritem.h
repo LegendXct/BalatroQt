@@ -10,8 +10,12 @@ class JokerItem : public QGraphicsObject
 {
     Q_OBJECT
 public:
-    static constexpr int WIDTH = 142;
-    static constexpr int HEIGHT = 190;
+    // 图集采样单元（Jokers.png 每格固定 142×190）。
+    static constexpr int SRC_W = 142;
+    static constexpr int SRC_H = 190;
+    // 场景显示尺寸：与 CardItem 同步放大约 20%，让小窗口下也能看清。
+    static constexpr int WIDTH = 170;
+    static constexpr int HEIGHT = 228;
 
     static void loadResources();                  // main.cpp 里调一次
     static QPoint spritePos(JokerType type);      // 在 Jokers.png 里的(列,行)

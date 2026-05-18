@@ -17,6 +17,7 @@
 #include <QStringList>
 #include "shopsignwidget.h"
 #include <QParallelAnimationGroup>
+#include <QGraphicsOpacityEffect>
 #include <QPointer>
 #include <QVariantAnimation>
 #include <QGraphicsDropShadowEffect>
@@ -1062,7 +1063,7 @@ void MainWindow::setupLeftPanel() {
                 QLabel *img = new QLabel(card); img->setFixedSize(54,72); img->setAlignment(Qt::AlignCenter);
                 if (!voucherSheet.isNull()) {
                     QPoint c = vd.spritePos;
-                    QPixmap pm = voucherSheet.copy(c.x()*ConsumableItem::WIDTH, c.y()*ConsumableItem::HEIGHT, ConsumableItem::WIDTH, ConsumableItem::HEIGHT);
+                    QPixmap pm = voucherSheet.copy(c.x()*ConsumableItem::SRC_W, c.y()*ConsumableItem::SRC_H, ConsumableItem::SRC_W, ConsumableItem::SRC_H);
                     img->setPixmap(pm.scaled(img->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
                 }
                 h->addWidget(img);
@@ -1349,7 +1350,7 @@ void MainWindow::setupScene() {
 
     mScene->setSceneRect(0, 0, mSceneW, mSceneH);
     mScene->setBackgroundBrush(QBrush(Qt::NoBrush));
-    QTimer::singleShot(0, this, &MainWindow::fitSceneToView);
+    QTimer::singleShot(0, this, [this]() { updateSceneSize(); });
 
     mJokerCountLabel = mScene->addText("0/5");
     mJokerCountLabel->setDefaultTextColor(QColor("#d7e7d2"));
@@ -1401,15 +1402,10 @@ void MainWindow::setupScene() {
 void MainWindow::setupSceneButtons() {
     int btnW = 176;
     int btnH = 78;
-    int gap = 16;
-    int totalW = btnW * 3 + gap * 2;
-    int startX = (mSceneW - HAND_RIGHT_RESERVE - totalW) / 2;
-    int y = mBtnY;
 
     mBtnPlay = makeBtn("出牌", "#009dff", "#33b0ff", mCNFont, nullptr, btnH);
     mBtnPlay->setFixedWidth(btnW);
     mPlayProxy = mScene->addWidget(mBtnPlay);
-    mPlayProxy->setPos(startX, y);
     mPlayProxy->setZValue(50);
 
     auto *sortContainer = new QWidget;
@@ -1444,19 +1440,78 @@ void MainWindow::setupSceneButtons() {
     scbl->addWidget(subRow);
 
     mSortProxy = mScene->addWidget(sortContainer);
-    mSortProxy->setPos(startX + btnW + gap, y);
     mSortProxy->setZValue(50);
 
     mBtnDiscard = makeBtn("弃牌", "#fe5f55", "#ff7066", mCNFont, nullptr, btnH);
     mBtnDiscard->setFixedWidth(btnW);
     mDiscardProxy = mScene->addWidget(mBtnDiscard);
-    mDiscardProxy->setPos(startX + (btnW + gap) * 2, y);
     mDiscardProxy->setZValue(50);
+
+    layoutSceneButtons();
+}
+
+void MainWindow::layoutSceneButtons() {
+    if (!mPlayProxy || !mSortProxy || !mDiscardProxy) return;
+    const int btnW = 176;
+    const int gap = 16;
+    const int totalW = btnW * 3 + gap * 2;
+    const int startX = (mSceneW - HAND_RIGHT_RESERVE - totalW) / 2;
+    const int y = mBtnY;
+
+    mPlayProxy->setPos(startX, y);
+    mSortProxy->setPos(startX + btnW + gap, y);
+    mDiscardProxy->setPos(startX + (btnW + gap) * 2, y);
 
     // 记录三个按钮的原位,出牌时滑出屏幕,计分完成后滑回。
     mPlayBtnHome    = mPlayProxy->pos();
     mSortBtnHome    = mSortProxy->pos();
     mDiscardBtnHome = mDiscardProxy->pos();
+}
+
+void MainWindow::updateSceneSize() {
+    if (!mPlayPage || !mScene) return;
+    const int playW = qMax(1, mPlayPage->width());
+    const int playH = qMax(1, mPlayPage->height());
+
+    // 场景高度固定为设计基准 1080；宽度跟随窗口实际纵横比，避免 fitInView 留黑边。
+    // 极端超宽 / 超窄屏限制在 [0.85x, 1.7x] 设计宽度之间，否则按钮和手牌会被撑得太散或挤压。
+    const double aspect = double(playW) / double(playH);
+    const int designH = DESIGN_SCENE_H;
+    const int designW = DESIGN_SCENE_W;
+    const int minW = int(designW * 0.85);
+    const int maxW = int(designW * 1.70);
+    int newSceneW = qBound(minW, int(std::round(designH * aspect)), maxW);
+    int newSceneH = designH;
+    if (newSceneW == mSceneW && newSceneH == mSceneH) {
+        fitSceneToView();
+        return;
+    }
+    mSceneW = newSceneW;
+    mSceneH = newSceneH;
+    mScene->setSceneRect(0, 0, mSceneW, mSceneH);
+
+    // 同步所有依赖 mSceneW/mSceneH 的元素位置。
+    mHandYNormal  = mSceneH - CARD_H - 150;
+    mHandYScoring = mSceneH - CARD_H - 90;
+    mHandY = mHandYNormal;
+    mBtnY  = mSceneH - 118;
+    if (mDeckBackCard) mDeckBackCard->setPos(mSceneW - CARD_W - 60, mHandYNormal);
+    if (mDeckLabel) {
+        QRectF br = mDeckLabel->boundingRect();
+        mDeckLabel->setPos(mSceneW - CARD_W - 60 + (CARD_W - br.width()) / 2.0,
+                           mHandYNormal + CARD_H + 6);
+    }
+
+    layoutSceneButtons();
+    // 重排小丑 / 消耗品 / 手牌（依赖 mSceneW 居中）。
+    // 小丑因为没有独立的 layout 函数，仍走 refresh 重建；其它项目只重排位置。
+    refreshJokerSlotFrames();
+    refreshConsumableSlotFrames();
+    if (!mJokerItems.isEmpty()) refreshJokerSlots();
+    layoutConsumableItems(false);
+    layoutHandCards();
+    layoutPlayedCards();
+    fitSceneToView();
 }
 
 void MainWindow::setupConnections() {
@@ -2165,7 +2220,7 @@ void MainWindow::fitSceneToView()
 void MainWindow::resizeEvent(QResizeEvent *event)
 {
     QMainWindow::resizeEvent(event);
-    fitSceneToView();
+    updateSceneSize();
 
     if (mPlayPage) {
         QRect r = mPlayPage->rect();
@@ -2177,7 +2232,7 @@ void MainWindow::resizeEvent(QResizeEvent *event)
         fitSceneToView();
         if (mBlindSelectWidget) { mBlindSelectWidget->setGeometry(lowerOverlayRect()); if (mBlindSelectWidget->isVisible()) mBlindSelectWidget->raise(); }
         if (mRoundEndOverlay)   { mRoundEndOverlay  ->setGeometry(r);                 if (mRoundEndOverlay->isVisible())   mRoundEndOverlay->raise(); }
-        if (mShopWidget)        { mShopWidget       ->setGeometry(lowerOverlayRect()); if (mShopWidget->isVisible())        mShopWidget->raise(); }
+        if (mShopWidget)        { mShopWidget       ->setGeometry(shopOverlayRect()); if (mShopWidget->isVisible())        mShopWidget->raise(); }
         if (mPackOpenWidget)    { mPackOpenWidget   ->setGeometry(lowerOverlayRect()); if (mPackOpenWidget->isVisible())    mPackOpenWidget->raise(); }
         if (mSplashOverlay)     { mSplashOverlay    ->setGeometry(r);                 if (mSplashOverlay->isVisible())     mSplashOverlay->raise(); }
         if (mDeckViewWidget)    { mDeckViewWidget   ->setGeometry(r);                 if (mDeckViewWidget->isVisible())    mDeckViewWidget->raise(); }
@@ -2973,19 +3028,7 @@ void MainWindow::onPackFinished()
     }
 
     if (mShopWidget) {
-        if (mDynamicBg) mDynamicBg->setMood(DynamicBackgroundItem::Mood::Shop);
-        mShopWidget->refresh();
-        mShopWidget->setGeometry(lowerOverlayRect());
-        QPoint end = mShopWidget->pos();
-        mShopWidget->move(end.x(), mPlayPage ? mPlayPage->height() + 20 : end.y() + 500);
-        mShopWidget->show();
-        mShopWidget->raise();
-        auto *anim = new QPropertyAnimation(mShopWidget, "pos", this);
-        anim->setDuration(260);
-        anim->setStartValue(mShopWidget->pos());
-        anim->setEndValue(end);
-        anim->setEasingCurve(QEasingCurve::OutCubic);
-        anim->start(QAbstractAnimation::DeleteWhenStopped);
+        showShopOverlay();
     }
 }
 
@@ -3009,14 +3052,72 @@ QRect MainWindow::lowerOverlayRect() const
     return QRect(0, y, qMax(dp(600), mPlayPage->width() - rightDeckReserve), qMax(0, mPlayPage->height() - y));
 }
 
+QRect MainWindow::shopOverlayRect() const
+{
+    if (!mPlayPage) return QRect();
+    // 商店阶段牌组不参与交互，把右侧空间也让给商店，避免 panel min size > 容器宽度时被裁。
+    // 顶端紧贴小丑区下方，底部贴到 playPage 边缘。
+    const int y = dp(JOKER_Y + JOKER_H + 10);
+    const int sideMargin = dp(12);
+    int w = qMax(dp(640), mPlayPage->width() - sideMargin * 2);
+    int h = qMax(0, mPlayPage->height() - y - dp(8));
+    return QRect(sideMargin, y, w, h);
+}
+
 void MainWindow::showShopOverlay()
 {
     if (mDynamicBg) mDynamicBg->setMood(DynamicBackgroundItem::Mood::Shop);
     if (!mShopWidget || !mPlayPage) return;
     mShopWidget->refresh();
-    mShopWidget->setGeometry(lowerOverlayRect());
+    mShopWidget->setGeometry(shopOverlayRect());
     mShopWidget->raise();
     mShopWidget->show();
+    animateShopEntrance();
+}
+
+void MainWindow::animateShopEntrance()
+{
+    if (!mShopWidget || !mPlayPage) return;
+
+    // 取消可能正在执行的旧动画，避免位置/透明度抖动。
+    if (auto *oldGroup = mShopWidget->findChild<QParallelAnimationGroup*>("ShopEntranceAnim"))
+        oldGroup->stop();
+    if (auto *oldEffect = qobject_cast<QGraphicsOpacityEffect*>(mShopWidget->graphicsEffect()))
+        oldEffect->deleteLater();
+
+    const QRect end = shopOverlayRect();
+    mShopWidget->setGeometry(end);
+    const QPoint endPos = end.topLeft();
+    const QPoint startPos(endPos.x(), mPlayPage->height() + 20);
+    mShopWidget->move(startPos);
+
+    auto *posAnim = new QPropertyAnimation(mShopWidget, "pos");
+    posAnim->setDuration(320);
+    posAnim->setStartValue(startPos);
+    posAnim->setEndValue(endPos);
+    posAnim->setEasingCurve(QEasingCurve::OutCubic);
+
+    auto *fade = new QGraphicsOpacityEffect(mShopWidget);
+    fade->setOpacity(0.0);
+    mShopWidget->setGraphicsEffect(fade);
+    auto *fadeAnim = new QPropertyAnimation(fade, "opacity");
+    fadeAnim->setDuration(260);
+    fadeAnim->setStartValue(0.0);
+    fadeAnim->setEndValue(1.0);
+    fadeAnim->setEasingCurve(QEasingCurve::OutCubic);
+
+    auto *group = new QParallelAnimationGroup(mShopWidget);
+    group->setObjectName("ShopEntranceAnim");
+    group->addAnimation(posAnim);
+    group->addAnimation(fadeAnim);
+    QPointer<ShopWidget> guard(mShopWidget);
+    connect(group, &QParallelAnimationGroup::finished, this, [guard]() {
+        if (!guard) return;
+        // 移除 opacity effect，避免之后绘制时一直走 graphics effect 管线（会让阴影/字号偏色）。
+        if (auto *eff = qobject_cast<QGraphicsOpacityEffect*>(guard->graphicsEffect()))
+            eff->deleteLater();
+    });
+    group->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
 bool MainWindow::eventFilter(QObject *obj, QEvent *ev)
@@ -3041,10 +3142,10 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev)
             mDynamicBg->setSceneSize(r.width(), r.height());
             mDynamicBg->lower();
         }
-        fitSceneToView();
+        updateSceneSize();
         if (mBlindSelectWidget) { mBlindSelectWidget->setGeometry(lowerOverlayRect()); if (mBlindSelectWidget->isVisible()) mBlindSelectWidget->raise(); }
         if (mRoundEndOverlay)   { mRoundEndOverlay  ->setGeometry(r);                 if (mRoundEndOverlay->isVisible())   mRoundEndOverlay->raise(); }
-        if (mShopWidget)        { mShopWidget       ->setGeometry(lowerOverlayRect()); if (mShopWidget->isVisible())        mShopWidget->raise(); }
+        if (mShopWidget)        { mShopWidget       ->setGeometry(shopOverlayRect()); if (mShopWidget->isVisible())        mShopWidget->raise(); }
         if (mPackOpenWidget)    { mPackOpenWidget   ->setGeometry(lowerOverlayRect()); if (mPackOpenWidget->isVisible())    mPackOpenWidget->raise(); }
         if (mDeckViewWidget)    { mDeckViewWidget   ->setGeometry(r);                 if (mDeckViewWidget->isVisible())    mDeckViewWidget->raise(); }
         if (mOptionsOverlay && centralWidget()) {

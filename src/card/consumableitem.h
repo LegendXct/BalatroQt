@@ -14,8 +14,12 @@ class ConsumableItem : public QGraphicsObject
 {
     Q_OBJECT
 public:
-    static constexpr int WIDTH  = 142;
-    static constexpr int HEIGHT = 190;
+    // 图集原始单元（Tarots.png / Planets.png / Spectrals.png / boosters.png 每格 142×190）。
+    static constexpr int SRC_W  = 142;
+    static constexpr int SRC_H  = 190;
+    // 场景显示尺寸：与 CardItem / JokerItem 同步放大 ~20%。
+    static constexpr int WIDTH  = 170;
+    static constexpr int HEIGHT = 228;
 
     static void loadResources();                            // ← 新增
     static QPoint spritePos(ConsumableType t);              // ← 新增

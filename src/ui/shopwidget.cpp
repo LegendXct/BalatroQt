@@ -189,8 +189,8 @@ void ShopWidget::buildUi()
     mPanel = new QWidget(this);
     mPanel->setObjectName("shopPanel");
     // 原版商店比例：上方商品区横向更宽，下方左 Voucher、右 Booster。
-    // 不再固定 900×520，避免超级/巨型包贴图被面板裁掉。
-    mPanel->setMinimumSize(dp(980), dp(720));
+    // 最小宽度保持紧凑，layoutPanel 会按容器宽度等比放大，避免商品边缘被裁。
+    mPanel->setMinimumSize(dp(720), dp(560));
     mPanel->setAttribute(Qt::WA_StyledBackground, true);
     mPanel->setStyleSheet(
         "QWidget#shopPanel {"
@@ -566,8 +566,8 @@ QPixmap ShopWidget::offerPixmap(const ShopOffer &o) const
         QPixmap sheet(":/textures/images/Jokers.png");
         if (sheet.isNull()) return QPixmap();
         QPoint c = JokerItem::spritePos(o.joker);
-        QPixmap pix = sheet.copy(c.x() * JokerItem::WIDTH, c.y() * JokerItem::HEIGHT,
-                                 JokerItem::WIDTH, JokerItem::HEIGHT);
+        QPixmap pix = sheet.copy(c.x() * JokerItem::SRC_W, c.y() * JokerItem::SRC_H,
+                                 JokerItem::SRC_W, JokerItem::SRC_H);
         // 全息投影 / 五张传奇牌：原版 card.lua:4512-4523 走 floating_sprite 浮动层。
         // 商店里如果只画 pos 主体，Hologram 看上去就是个空相框，传奇牌也少了肖像。
         {
@@ -590,9 +590,9 @@ QPixmap ShopWidget::offerPixmap(const ShopOffer &o) const
         QPixmap sheet(":/textures/images/boosters.png");
         if (sheet.isNull()) return QPixmap();
         QPoint c = packSpritePos(o.pack, o.packSize);
-        QPixmap base = sheet.copy(c.x() * ConsumableItem::WIDTH,
-                                  c.y() * ConsumableItem::HEIGHT,
-                                  ConsumableItem::WIDTH, ConsumableItem::HEIGHT);
+        QPixmap base = sheet.copy(c.x() * ConsumableItem::SRC_W,
+                                  c.y() * ConsumableItem::SRC_H,
+                                  ConsumableItem::SRC_W, ConsumableItem::SRC_H);
 
         // 原版 booster.fs：卡包有动态蓝紫/金色波纹。这里统一走 shader 转写层，
         // 同时修正透明边距，避免 QIcon 把卡包压小。
@@ -608,14 +608,14 @@ QPixmap ShopWidget::offerPixmap(const ShopOffer &o) const
         QPixmap voucherSheet(":/textures/images/Vouchers.png");
         if (!voucherSheet.isNull()) {
             QPoint c = voucherData(o.voucher).spritePos;
-            QPixmap pix = voucherSheet.copy(c.x() * ConsumableItem::WIDTH,
-                                           c.y() * ConsumableItem::HEIGHT,
-                                           ConsumableItem::WIDTH,
-                                           ConsumableItem::HEIGHT);
+            QPixmap pix = voucherSheet.copy(c.x() * ConsumableItem::SRC_W,
+                                           c.y() * ConsumableItem::SRC_H,
+                                           ConsumableItem::SRC_W,
+                                           ConsumableItem::SRC_H);
             return BalatroShaders::renderVoucherPixmap(pix, 1.0);
         }
 
-        QPixmap pix(ConsumableItem::WIDTH, ConsumableItem::HEIGHT);
+        QPixmap pix(ConsumableItem::SRC_W, ConsumableItem::SRC_H);
         pix.fill(Qt::transparent);
         QPainter p(&pix);
         p.setRenderHint(QPainter::Antialiasing);
@@ -637,7 +637,8 @@ QPixmap ShopWidget::offerPixmap(const ShopOffer &o) const
 
 QPixmap ShopWidget::playingCardPixmap(const CardData &c) const
 {
-    constexpr int W = ConsumableItem::WIDTH, H = ConsumableItem::HEIGHT;
+    // 在图集原始 142×190 上合成；显示尺寸由 ShopCardButton 的绘制流程缩放。
+    constexpr int W = ConsumableItem::SRC_W, H = ConsumableItem::SRC_H;
     QPixmap deckSheet(":/textures/images/8BitDeck.png");
     QPixmap enhSheet (":/textures/images/Enhancers.png");
     QPixmap pix(W, H); pix.fill(Qt::transparent);
@@ -727,9 +728,16 @@ void ShopWidget::resizeEvent(QResizeEvent *e)
 void ShopWidget::layoutPanel()
 {
     if (!mPanel) return;
-    // 右下角牌组要一直露出来，因此商店面板不能无限向右撑。
-    int panelW = qBound(dp(980), int(width() * 0.86), qMax(dp(980), width() - dp(28)));
-    int panelH = qBound(dp(720), int(height() * 0.86), dp(840));
+    // 优先适应容器宽度：宽度不够时让面板缩小，避免按钮/价格/booster 贴图被裁出屏外。
+    const int minW = dp(720);
+    const int minH = dp(560);
+    const int maxW = dp(1280);
+    const int maxH = dp(880);
+    int panelW = qBound(minW, int(width()  - dp(20)), maxW);
+    int panelH = qBound(minH, int(height() - dp(20)), maxH);
+    // 高度跟着宽度的纵横比同步缩放，保持上下两栏比例自然。
+    const double targetAspect = 980.0 / 720.0; // 设计稿宽高比
+    panelH = qMin(panelH, int(panelW / targetAspect) + dp(16));
     mPanel->resize(panelW, panelH);
     int x = (width()  - mPanel->width())  / 2;
     int y = (height() - mPanel->height()) / 2;

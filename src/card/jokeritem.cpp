@@ -86,20 +86,20 @@ void JokerItem::drawFloatingSprite(QPainter *p, const QRectF &dst, JokerType typ
 
     const qreal t = animated ? (QDateTime::currentMSecsSinceEpoch() / 1000.0) : 0.0;
 
-    QRect src(soul.x() * JokerItem::WIDTH, soul.y() * JokerItem::HEIGHT,
-              JokerItem::WIDTH, JokerItem::HEIGHT);
+    QRect src(soul.x() * JokerItem::SRC_W, soul.y() * JokerItem::SRC_H,
+              JokerItem::SRC_W, JokerItem::SRC_H);
 
     if (isHologram) {
         const qreal scaleMod = 1.0 + 0.07 + 0.02 * std::sin(1.8 * t);
         const qreal rotateDeg = 0.05 * std::sin(1.219 * t) * 180.0 / 3.14159265358979323846;
         const qreal yBob = animated ? std::sin(t * 1.7) * 2.0 : 0.0;
 
-        QPixmap sprite(JokerItem::WIDTH, JokerItem::HEIGHT);
+        QPixmap sprite(JokerItem::SRC_W, JokerItem::SRC_H);
         sprite.fill(Qt::transparent);
         {
             QPainter sp(&sprite);
             sp.setRenderHint(QPainter::SmoothPixmapTransform, true);
-            sp.drawPixmap(QRect(0, 0, JokerItem::WIDTH, JokerItem::HEIGHT), *sSheet, src);
+            sp.drawPixmap(QRect(0, 0, JokerItem::SRC_W, JokerItem::SRC_H), *sSheet, src);
         }
         sprite = BalatroShaders::renderHologramPixmap(sprite, 1.2);
 
@@ -140,13 +140,14 @@ void JokerItem::drawFloatingSprite(QPainter *p, const QRectF &dst, JokerType typ
 static void paintHologramFloatingSprite(QPainter *p, QPixmap *sheet, JokerType type)
 {
     Q_UNUSED(sheet);
-    JokerItem::drawFloatingSprite(p, QRectF(0, 0, JokerItem::WIDTH, JokerItem::HEIGHT), type, true);
+    // 缓存绘制阶段使用原始图集尺寸；display 缩放在调用方完成。
+    JokerItem::drawFloatingSprite(p, QRectF(0, 0, JokerItem::SRC_W, JokerItem::SRC_H), type, true);
 }
 
 static void paintLegendaryFloatingSprite(QPainter *p, QPixmap *sheet, JokerType type)
 {
     Q_UNUSED(sheet);
-    JokerItem::drawFloatingSprite(p, QRectF(0, 0, JokerItem::WIDTH, JokerItem::HEIGHT), type, true);
+    JokerItem::drawFloatingSprite(p, QRectF(0, 0, JokerItem::SRC_W, JokerItem::SRC_H), type, true);
 }
 
 void JokerItem::loadResources() {
@@ -264,24 +265,26 @@ void JokerItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) 
 
     QPixmap pix = cache.value(key);
     if (pix.isNull()) {
-        pix = QPixmap(WIDTH, HEIGHT);
+        // 缓存按图集原始 142×190 渲染，paint() 时再缩放到场景显示尺寸。
+        pix = QPixmap(SRC_W, SRC_H);
         pix.fill(Qt::transparent);
         QPainter cp(&pix);
         cp.setRenderHint(QPainter::SmoothPixmapTransform, false);
         cp.setRenderHint(QPainter::Antialiasing, true);
         QPoint c = spritePos(mJoker.type);
-        QRect src(c.x() * WIDTH, c.y() * HEIGHT, WIDTH, HEIGHT);
+        QRect src(c.x() * SRC_W, c.y() * SRC_H, SRC_W, SRC_H);
         QPixmap body = sSheet->copy(src);
         if (mJoker.edition != Edition::None)
             body = BalatroShaders::renderEditionPixmap(body, mJoker.edition);
-        cp.drawPixmap(QRect(0, 0, WIDTH, HEIGHT), body);
+        cp.drawPixmap(QRect(0, 0, SRC_W, SRC_H), body);
         paintLegendaryFloatingSprite(&cp, sSheet, mJoker.type);
         paintHologramFloatingSprite(&cp, sSheet, mJoker.type);
         cache.insert(key, pix);
         order.append(key);
         while (order.size() > 160) cache.remove(order.takeFirst());
     }
-    p->drawPixmap(QRect(0, 0, WIDTH, HEIGHT), pix);
+    p->setRenderHint(QPainter::SmoothPixmapTransform, true);
+    p->drawPixmap(QRectF(0, 0, WIDTH, HEIGHT), pix, QRectF(0, 0, SRC_W, SRC_H));
 
     if (mHovered) {
         p->setPen(QPen(QColor(255, 240, 96, 200), 4));

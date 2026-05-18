@@ -227,7 +227,7 @@ void CardItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidge
 }
 
 QRect CardItem::whiteBaseSrcRect() const {
-    return QRect(1 * WIDTH, 0 * HEIGHT, WIDTH, HEIGHT);
+    return QRect(1 * SRC_W, 0 * SRC_H, SRC_W, SRC_H);
 }
 
 QRect CardItem::deckSrcRect() const {
@@ -239,36 +239,39 @@ QRect CardItem::deckSrcRect() const {
     case Suit::Diamonds: row = 2; break;
     case Suit::Spades: row = 3; break;
     }
-    return QRect(col * WIDTH, row * HEIGHT, WIDTH, HEIGHT);
+    return QRect(col * SRC_W, row * SRC_H, SRC_W, SRC_H);
 }
 
 QRect CardItem::enhanceSrcRect() const {
     switch (mData.enhancement) {
-    case Enhancement::Bonus: return QRect(1 * WIDTH, 1 * HEIGHT, WIDTH, HEIGHT);
-    case Enhancement::Mult: return QRect(2 * WIDTH, 1 * HEIGHT, WIDTH, HEIGHT);
-    case Enhancement::Wild: return QRect(3 * WIDTH, 1 * HEIGHT, WIDTH, HEIGHT);
-    case Enhancement::Lucky: return QRect(4 * WIDTH, 1 * HEIGHT, WIDTH, HEIGHT);
-    case Enhancement::Glass: return QRect(5 * WIDTH, 1 * HEIGHT, WIDTH, HEIGHT);
-    case Enhancement::Steel: return QRect(6 * WIDTH, 1 * HEIGHT, WIDTH, HEIGHT);
-    case Enhancement::Stone: return QRect(5 * WIDTH, 0 * HEIGHT, WIDTH, HEIGHT);
-    case Enhancement::Gold: return QRect(6 * WIDTH, 0 * HEIGHT, WIDTH, HEIGHT);
+    case Enhancement::Bonus: return QRect(1 * SRC_W, 1 * SRC_H, SRC_W, SRC_H);
+    case Enhancement::Mult: return QRect(2 * SRC_W, 1 * SRC_H, SRC_W, SRC_H);
+    case Enhancement::Wild: return QRect(3 * SRC_W, 1 * SRC_H, SRC_W, SRC_H);
+    case Enhancement::Lucky: return QRect(4 * SRC_W, 1 * SRC_H, SRC_W, SRC_H);
+    case Enhancement::Glass: return QRect(5 * SRC_W, 1 * SRC_H, SRC_W, SRC_H);
+    case Enhancement::Steel: return QRect(6 * SRC_W, 1 * SRC_H, SRC_W, SRC_H);
+    case Enhancement::Stone: return QRect(5 * SRC_W, 0 * SRC_H, SRC_W, SRC_H);
+    case Enhancement::Gold: return QRect(6 * SRC_W, 0 * SRC_H, SRC_W, SRC_H);
     default: return whiteBaseSrcRect();
     }
 }
 
 QRect CardItem::sealSrcRect() const {
     switch (mData.seal) {
-    case Seal::Gold: return QRect(2 * WIDTH, 0 * HEIGHT, WIDTH, HEIGHT);
-    case Seal::Purple: return QRect(4 * WIDTH, 4 * HEIGHT, WIDTH, HEIGHT);
-    case Seal::Red: return QRect(5 * WIDTH, 4 * HEIGHT, WIDTH, HEIGHT);
-    case Seal::Blue: return QRect(6 * WIDTH, 4 * HEIGHT, WIDTH, HEIGHT);
+    case Seal::Gold: return QRect(2 * SRC_W, 0 * SRC_H, SRC_W, SRC_H);
+    case Seal::Purple: return QRect(4 * SRC_W, 4 * SRC_H, SRC_W, SRC_H);
+    case Seal::Red: return QRect(5 * SRC_W, 4 * SRC_H, SRC_W, SRC_H);
+    case Seal::Blue: return QRect(6 * SRC_W, 4 * SRC_H, SRC_W, SRC_H);
     default: return QRect();
     }
 }
 
 void CardItem::paintFront(QPainter *painter)
 {
-    QRect dst(0, 0, WIDTH, HEIGHT);
+    // 缓存按图集原始 142×190 渲染，绘制时再放大到场景显示尺寸 WIDTH×HEIGHT。
+    // 这样切换显示尺寸只改 WIDTH/HEIGHT，不会让缓存全部失效或采样越界。
+    QRect cacheRect(0, 0, SRC_W, SRC_H);
+    QRectF dst(0, 0, WIDTH, HEIGHT);
 
     const bool animated = cardNeedsShaderTick(mData);
     const int frame = animated ? cardShaderCacheFrame() : -1;
@@ -284,18 +287,18 @@ void CardItem::paintFront(QPainter *painter)
     static QStringList order;
     QPixmap finalPix = cache.value(key);
     if (finalPix.isNull()) {
-        finalPix = QPixmap(WIDTH, HEIGHT);
+        finalPix = QPixmap(SRC_W, SRC_H);
         finalPix.fill(Qt::transparent);
 
-        QPixmap body(WIDTH, HEIGHT);
+        QPixmap body(SRC_W, SRC_H);
         body.fill(Qt::transparent);
         {
             QPainter bp(&body);
             bp.setRenderHint(QPainter::SmoothPixmapTransform, false);
             QRect enh = enhanceSrcRect();
-            if (!enh.isNull()) bp.drawPixmap(dst, *sEnhSheet, enh);
+            if (!enh.isNull()) bp.drawPixmap(cacheRect, *sEnhSheet, enh);
             if (mData.enhancement != Enhancement::Stone)
-                bp.drawPixmap(dst, *sDeckSheet, deckSrcRect());
+                bp.drawPixmap(cacheRect, *sDeckSheet, deckSrcRect());
         }
 
         if (mData.edition != Edition::None)
@@ -306,20 +309,20 @@ void CardItem::paintFront(QPainter *painter)
         {
             QPainter fp(&finalPix);
             fp.setRenderHint(QPainter::SmoothPixmapTransform, false);
-            fp.drawPixmap(dst, body);
+            fp.drawPixmap(cacheRect, body);
 
             QRect seal = sealSrcRect();
             if (!seal.isNull()) {
-                QPixmap sealPix(WIDTH, HEIGHT);
+                QPixmap sealPix(SRC_W, SRC_H);
                 sealPix.fill(Qt::transparent);
                 {
                     QPainter sp(&sealPix);
                     sp.setRenderHint(QPainter::SmoothPixmapTransform, false);
-                    sp.drawPixmap(dst, *sEnhSheet, seal);
+                    sp.drawPixmap(cacheRect, *sEnhSheet, seal);
                 }
                 if (mData.seal == Seal::Gold)
                     sealPix = BalatroShaders::renderGoldSealPixmap(sealPix, 0.95);
-                fp.drawPixmap(dst, sealPix);
+                fp.drawPixmap(cacheRect, sealPix);
             }
         }
 
@@ -328,13 +331,14 @@ void CardItem::paintFront(QPainter *painter)
         while (order.size() > 256) cache.remove(order.takeFirst());
     }
 
-    painter->drawPixmap(dst, finalPix);
+    painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
+    painter->drawPixmap(dst, finalPix, QRectF(cacheRect));
 }
 
 void CardItem::paintBack(QPainter *painter) {
-    QRect dst(0, 0, WIDTH, HEIGHT);
-
-    QRect backSrc(0 * WIDTH, 0 * HEIGHT, WIDTH, HEIGHT);
+    QRectF dst(0, 0, WIDTH, HEIGHT);
+    QRect backSrc(0 * SRC_W, 0 * SRC_H, SRC_W, SRC_H);
+    painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
     painter->drawPixmap(dst, *sEnhSheet, backSrc);
 }
 
