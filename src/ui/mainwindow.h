@@ -89,7 +89,7 @@ private:
     RoundEndOverlay *mRoundEndOverlay = nullptr;
 
     // 布局常量
-    int mLeftW = 500;
+    int mLeftW = 380;
     int mWinW = 1920;
     int mWinH = 1080;
     int mSceneW = 1620;

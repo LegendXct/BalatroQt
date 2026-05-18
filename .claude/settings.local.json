@@ -1,0 +1,10 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(cmake --build /d/QtProjects/BalatroQt/build/Desktop_Qt_6_10_0_MinGW_64_bit-Debug)",
+      "PowerShell(Get-Command *)",
+      "PowerShell(Test-Path *)",
+      "PowerShell($env:Path = \"D:\\\\Qt\\\\Tools\\\\mingw1310_64\\\\bin;D:\\\\Qt\\\\Tools\\\\Ninja;D:\\\\Qt\\\\Tools\\\\CMake_64\\\\bin;\" + $env:Path; & \"D:\\\\Qt\\\\Tools\\\\CMake_64\\\\bin\\\\cmake.exe\" --build \"D:\\\\QtProjects\\\\BalatroQt\\\\build\\\\Desktop_Qt_6_10_0_MinGW_64_bit-Debug\" 2>&1 | Select-Object -Last 30)"
+    ]
+  }
+}

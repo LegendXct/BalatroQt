@@ -44,7 +44,8 @@
 namespace {
 constexpr int DESIGN_WINDOW_W = 1920;
 constexpr int DESIGN_WINDOW_H = 1080;
-constexpr int DESIGN_LEFT_W   = 500;
+// 原版 Balatro 的 HUD 约占窗口宽度的 20%（≈ 4.5 / 22 tiles），1920 设计稿对应 ~380 px。
+constexpr int DESIGN_LEFT_W   = 380;
 constexpr int DESIGN_SCENE_W  = DESIGN_WINDOW_W - DESIGN_LEFT_W;
 constexpr int DESIGN_SCENE_H  = DESIGN_WINDOW_H;
 
