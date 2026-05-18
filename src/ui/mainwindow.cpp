@@ -1608,14 +1608,11 @@ void MainWindow::refreshHand() {
                     this, &MainWindow::onHandCardDragReleased);
             connect(match, &CardItem::hoverChanged,
                     this, [this](CardItem *c, bool hovered) {
-                        if (hovered) {
-                            c->setZValue(720);
-                            // 扑克牌悬停提示现在由 CardItem 自绘，避免 QGraphicsProxyWidget 在 OpenGL 视口下偶发不显示。
-                            hideCardInfo();
-                        } else {
-                            hideCardInfo();
-                            layoutHandCards();
-                        }
+                        Q_UNUSED(c);
+                        // 不再把悬停卡牌 z 抬到 720——原版手牌 z 顺序固定从左到右递增，
+                        // 临时置顶会让左侧手牌的扇形叠压关系突变，看起来"跳一下"。
+                        // CardItem 自绘的浮动提示已经显示在更高 z 的层级上，不需要整张卡牌抬高。
+                        hideCardInfo();
                     });
         } else {
             match->setCardData(hc);
@@ -1665,7 +1662,8 @@ void MainWindow::layoutHandCards() {
         int y = mHandY + (sel ? -CARD_H * 26 / 100 : 0);
         mHandCards[i]->setBaseRotation(angleDeg);
         mHandCards[i]->setZValue(i);
-        mHandCards[i]->moveTo(QPointF(x, y), 220);
+        // 140ms 选中弹起 / 折回，配合原版 OutCubic：足够快可见，不会卡。
+        mHandCards[i]->moveTo(QPointF(x, y), 140);
     }
 }
 

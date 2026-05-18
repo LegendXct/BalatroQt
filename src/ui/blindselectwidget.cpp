@@ -192,9 +192,9 @@ void BlindSelectWidget::buildUi()
             );
         uvbl->addWidget(b.banner, 0, Qt::AlignHCenter);
 
-        // 芯片图
+        // 芯片图：稍微缩小给整体卡片留出底部空间，保持上下排版不超出 CARD_H。
         b.chipImg = new QLabel(b.upperBox);
-        b.chipImg->setFixedSize(dp(95), dp(95));
+        b.chipImg->setFixedSize(dp(82), dp(82));
         b.chipImg->setAlignment(Qt::AlignCenter);
         b.chipImg->setStyleSheet("background:transparent; border:none;");
         uvbl->addWidget(b.chipImg, 0, Qt::AlignHCenter);
@@ -526,7 +526,7 @@ void BlindSelectWidget::refresh()
         // ===== 芯片图、目标、奖励 =====
         QPixmap pix = chipPixmap(i);
         if (!pix.isNull())
-            b.chipImg->setPixmap(pix.scaled(dp(95), dp(95), Qt::KeepAspectRatio,
+            b.chipImg->setPixmap(pix.scaled(dp(82), dp(82), Qt::KeepAspectRatio,
                                             Qt::SmoothTransformation));
         else
             b.chipImg->clear();

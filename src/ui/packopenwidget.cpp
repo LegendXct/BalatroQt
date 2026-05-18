@@ -14,8 +14,14 @@
 #include <QStringList>
 #include <QTimer>
 #include <QPropertyAnimation>
+#include <QParallelAnimationGroup>
+#include <QSequentialAnimationGroup>
+#include <QVariantAnimation>
+#include <QGraphicsPixmapItem>
+#include <QGraphicsOpacityEffect>
 #include <QEasingCurve>
 #include <QSizePolicy>
+#include <QPointer>
 #include <algorithm>
 #include <cmath>
 
@@ -275,7 +281,8 @@ void PackOpenWidget::open(const PackContent &content,
     refreshAll();
     QTimer::singleShot(0, this, [this]() {
         layoutPackHand(-1, /*instant=*/true);
-        animateCardsIn();
+        // 先把选项/手牌 hide() 等开包动画开壳后再炸出来。
+        startPackReveal();
     });
 }
 
@@ -548,8 +555,10 @@ QPixmap PackOpenWidget::renderOption(int i) const
         QPixmap sheet(":/textures/images/Jokers.png");
         if (sheet.isNull()) return QPixmap();
         QPoint xy = JokerItem::spritePos(mContent.jokers[i]);
-        QPixmap raw = sheet.copy(xy.x() * JokerItem::WIDTH, xy.y() * JokerItem::HEIGHT,
-                                 JokerItem::WIDTH, JokerItem::HEIGHT);
+        // Jokers.png 每格固定 142×190——必须使用 SRC_W / SRC_H 采样；之前用 WIDTH/HEIGHT
+        // (170×228 显示尺寸) 会按错误的步长切图，导致每张小丑里粘上隔壁单元的边缘。
+        QPixmap raw = sheet.copy(xy.x() * JokerItem::SRC_W, xy.y() * JokerItem::SRC_H,
+                                 JokerItem::SRC_W, JokerItem::SRC_H);
         return raw.scaled(size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     }
     if (mContent.kind == PackKind::Arcana || mContent.kind == PackKind::Celestial
@@ -796,48 +805,309 @@ void PackOpenWidget::finishAndClose()
 
 void PackOpenWidget::animateCardsIn()
 {
+    // 让 widget 同时滑入 + 渐入（如果它有 OpacityEffect 就一起淡入）。
     auto animateWidget = [this](QWidget *w, const QPoint &offset, int delay) {
-        if (!w || !w->isVisible()) return;
+        if (!w) return;
         QPoint end = w->pos();
         w->move(end + offset);
-        QTimer::singleShot(delay, this, [w, end]() {
-            if (!w) return;
+        QPointer<QWidget> guard(w);
+        QTimer::singleShot(delay, this, [guard, end]() {
+            if (!guard) return;
+            QWidget *w = guard.data();
             auto *anim = new QPropertyAnimation(w, "pos", w);
-            anim->setDuration(320);
+            anim->setDuration(360);
             anim->setStartValue(w->pos());
             anim->setEndValue(end);
-            anim->setEasingCurve(QEasingCurve::OutCubic);
+            anim->setEasingCurve(QEasingCurve::OutBack);
             anim->start(QAbstractAnimation::DeleteWhenStopped);
+
+            if (auto *eff = qobject_cast<QGraphicsOpacityEffect*>(w->graphicsEffect())) {
+                auto *fade = new QPropertyAnimation(eff, "opacity", w);
+                fade->setDuration(280);
+                fade->setStartValue(eff->opacity());
+                fade->setEndValue(1.0);
+                fade->setEasingCurve(QEasingCurve::OutCubic);
+                fade->start(QAbstractAnimation::DeleteWhenStopped);
+            }
         });
     };
 
-    // 选项区滑入(包内 5 张选项)
-    int d = 60;
-    for (const OptUi &ou : mOptUi) {
-        if (ou.card && ou.card->isVisible()) {
-            animateWidget(ou.card, QPoint(0, 120), d);
-            d += 45;
+    // 选项区：从中央向各自位置“喷射”——给每张卡一个朝向面板中心的反向位移。
+    if (mPanel) {
+        const QPoint panelCenter(mPanel->width() / 2, mPanel->height() / 2);
+        int d = 30;
+        for (const OptUi &ou : mOptUi) {
+            if (!ou.card) continue;
+            // ou.card 的父级未必是 mPanel；用全局坐标桥接以便算出中心方向。
+            QWidget *parent = ou.card->parentWidget();
+            const QPoint cardCenterInParent = ou.card->pos() + QPoint(ou.card->width()/2, ou.card->height()/2);
+            const QPoint panelCenterInParent = parent ? parent->mapFrom(this, mPanel->pos() + panelCenter)
+                                                       : panelCenter;
+            QPoint dir = panelCenterInParent - cardCenterInParent;
+            // 控制偏移强度：太大跳出可视区，太小看不到喷射。
+            const double len = std::hypot(dir.x(), dir.y());
+            if (len > 1.0) {
+                const double k = qBound(0.45, 220.0 / len, 0.95);
+                dir = QPoint(int(dir.x() * k), int(dir.y() * k));
+            } else {
+                dir = QPoint(0, 120);
+            }
+            animateWidget(ou.card, dir, d);
+            d += 55;
         }
     }
 
-    // 手牌区:让 CardItem 从右下飞入起始位置
-    int areaW = mHandView ? mHandView->viewport()->width() : 800;
+    // 库存 / 跳过按钮：只渐入，不位移；位置已经由 layout 决定。
+    auto fadeOnly = [this](QWidget *w, int delay) {
+        if (!w) return;
+        auto *eff = qobject_cast<QGraphicsOpacityEffect*>(w->graphicsEffect());
+        if (!eff) return;
+        QPointer<QGraphicsOpacityEffect> guard(eff);
+        QTimer::singleShot(delay, this, [guard]() {
+            if (!guard) return;
+            auto *fade = new QPropertyAnimation(guard.data(), "opacity", guard.data());
+            fade->setDuration(280);
+            fade->setStartValue(guard->opacity());
+            fade->setEndValue(1.0);
+            fade->setEasingCurve(QEasingCurve::OutCubic);
+            fade->start(QAbstractAnimation::DeleteWhenStopped);
+        });
+    };
+    fadeOnly(mInventoryBox, 180);
+    fadeOnly(mBtnSkip, 240);
+
+    // 手牌区：CardItem 从 mPanel 中心位置朝各自目标飞，并伴随 opacity 渐入。
+    int areaW = mHandView ? mHandView->viewport()->width()  : 800;
     int areaH = mHandView ? mHandView->viewport()->height() : 240;
-    QPointF deckPos(areaW + 100, areaH + 100);
+    QPointF burstFrom(areaW / 2.0, areaH * 0.5 - 200.0);
     for (int i = 0; i < mPackHandItems.size(); ++i) {
         CardItem *c = mPackHandItems[i];
+        if (!c) continue;
         QPointF target = c->pos();
-        c->setPos(deckPos);
-        QTimer::singleShot(80 + i * 35, this, [c, target]() {
-            if (c) c->moveTo(target, 320);
+        c->setPos(burstFrom);
+        c->setOpacity(0.0);
+        QPointer<CardItem> guard(c);
+        QTimer::singleShot(60 + i * 40, this, [guard, target]() {
+            if (!guard) return;
+            CardItem *c = guard.data();
+            c->setOpacity(1.0);
+            c->moveTo(target, 360);
         });
     }
+}
+
+void PackOpenWidget::buildRevealOverlay()
+{
+    if (mRevealView) return;
+    mRevealScene = new QGraphicsScene(this);
+    mRevealView  = new QGraphicsView(mRevealScene, this);
+    mRevealView->setRenderHints(QPainter::Antialiasing | QPainter::SmoothPixmapTransform);
+    mRevealView->setFrameShape(QFrame::NoFrame);
+    mRevealView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    mRevealView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    mRevealView->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    mRevealView->setAttribute(Qt::WA_TranslucentBackground, true);
+    mRevealView->setStyleSheet("background: transparent; border: none;");
+    mRevealView->setBackgroundBrush(Qt::NoBrush);
+    mRevealView->viewport()->setAttribute(Qt::WA_TranslucentBackground, true);
+    mRevealView->hide();
+
+    mRevealDissolveTimer = new QTimer(this);
+    mRevealDissolveTimer->setInterval(33); // ~30 fps
+}
+
+QPixmap PackOpenWidget::renderPackBigPixmap() const
+{
+    // 与 ShopWidget::offerPixmap(Pack) 同一份 booster.png 切片 + booster.fs 立体贴图。
+    // 关键差异是这里要更大一些（≈ 280×376），并保留 alpha 以便后续 dissolve 平滑透。
+    QPixmap sheet(":/textures/images/boosters.png");
+    if (sheet.isNull()) return QPixmap();
+    QPoint c = packSpritePos(mContent.kind, mContent.size);
+    QPixmap base = sheet.copy(c.x() * ConsumableItem::SRC_W,
+                              c.y() * ConsumableItem::SRC_H,
+                              ConsumableItem::SRC_W, ConsumableItem::SRC_H);
+    return BalatroShaders::makeBooster3DPixmap(base);
+}
+
+void PackOpenWidget::startPackReveal()
+{
+    buildRevealOverlay();
+
+    // 让选项 / 临时手牌 / 库存 / 跳过按钮在 reveal 期间不可见，但不 hide()
+    // 避免触发布局回流——只用 QGraphicsOpacityEffect 调透明度，动画结束再去除。
+    auto attachFade = [](QWidget *w) {
+        if (!w) return;
+        auto *eff = qobject_cast<QGraphicsOpacityEffect*>(w->graphicsEffect());
+        if (!eff) {
+            eff = new QGraphicsOpacityEffect(w);
+            w->setGraphicsEffect(eff);
+        }
+        eff->setOpacity(0.0);
+    };
+    for (auto &ou : mOptUi) attachFade(ou.card);
+    attachFade(mInventoryBox);
+    attachFade(mBtnSkip);
+    for (CardItem *c : mPackHandItems) if (c) c->setOpacity(0.0);
+
+    mRevealActive = true;
+    mRevealPackBase = renderPackBigPixmap();
+    if (mRevealPackBase.isNull()) {
+        // 资源缺失，跳过动画直接进入正常状态。
+        endPackReveal();
+        return;
+    }
+
+    // 把 reveal view 覆盖在 mPanel 之上。
+    const QRect panelRect = mPanel ? mPanel->geometry() : rect();
+    mRevealView->setGeometry(panelRect);
+    mRevealView->show();
+    mRevealView->raise();
+    mRevealScene->setSceneRect(0, 0, panelRect.width(), panelRect.height());
+
+    // 清掉旧的 item / 动画。
+    mRevealScene->clear();
+    mRevealPackItem = mRevealScene->addPixmap(mRevealPackBase);
+
+    // 设计目标尺寸：高度约占 panel 高 0.55。
+    const double targetH = panelRect.height() * 0.55;
+    const double srcH = qMax(1.0, double(mRevealPackBase.height()));
+    const double targetScale = targetH / srcH;
+    mRevealPackItem->setTransformationMode(Qt::SmoothTransformation);
+    mRevealPackItem->setTransformOriginPoint(mRevealPackBase.width() / 2.0,
+                                             mRevealPackBase.height() / 2.0);
+    const QPointF center(panelRect.width() / 2.0 - mRevealPackBase.width() / 2.0,
+                         panelRect.height() / 2.0 - mRevealPackBase.height() / 2.0);
+
+    // 起始状态。
+    mRevealPackItem->setScale(targetScale * 0.55);
+    mRevealPackItem->setOpacity(0.0);
+    mRevealPackItem->setRotation(0.0);
+    mRevealPackItem->setPos(center + QPointF(0, panelRect.height() * 0.10));
+
+    // 单根时间线：用一个 0→1 的 QVariantAnimation 推动整段开包序列。
+    // QGraphicsPixmapItem 不是 QObject，没法直接 QPropertyAnimation；这里通过 valueChanged
+    // 在回调里手动调 setScale/setRotation/setOpacity/setPos。
+    //
+    // 关键时间点（占总时长 1100ms 的比例）：
+    //   0.00 – 0.30：浮现（位置 + scale + opacity）
+    //   0.30 – 0.52：晃动（rotation 振幅约 ±7°）
+    //   0.52 – 1.00：溶解 + 继续放大 + 渐出；同步把选项 / 手牌 / 库存渐入
+    constexpr int kRevealMs = 1100;
+    constexpr double kPhaseAppearEnd = 0.30;
+    constexpr double kPhaseShakeEnd  = 0.52;
+    bool *crackFired = new bool(false);
+    QPointer<PackOpenWidget> guard(this);
+    // QGraphicsPixmapItem 不是 QObject，没法直接用 QPointer 防悬空。
+    // 我们靠 guard + endPackReveal() 把 mRevealPackItem 置 nullptr 来防止 use-after-free。
+    auto *timeline = new QVariantAnimation(this);
+    timeline->setDuration(kRevealMs);
+    timeline->setStartValue(0.0);
+    timeline->setEndValue(1.0);
+    timeline->setEasingCurve(QEasingCurve::Linear);
+
+    auto easeOutBack = [](double t) {
+        const double s = 1.4;
+        const double u = t - 1.0;
+        return u * u * ((s + 1.0) * u + s) + 1.0;
+    };
+    auto easeOutCubic = [](double t) {
+        const double u = 1.0 - t;
+        return 1.0 - u * u * u;
+    };
+    auto easeInCubic  = [](double t) { return t * t * t; };
+
+    mRevealDissolveT = 0.0;
+    connect(timeline, &QVariantAnimation::valueChanged, this,
+            [this, guard, crackFired, targetScale, center, panelRect,
+             easeOutBack, easeOutCubic, easeInCubic, kPhaseAppearEnd, kPhaseShakeEnd]
+            (const QVariant &v) {
+        if (!guard || !mRevealPackItem) return;
+        const double phase = v.toDouble();
+
+        if (phase < kPhaseAppearEnd) {
+            const double t = phase / kPhaseAppearEnd;
+            const double tEase = easeOutBack(qBound(0.0, t, 1.0));
+            mRevealPackItem->setScale(targetScale * (0.55 + 0.45 * tEase));
+            mRevealPackItem->setOpacity(easeOutCubic(qMin(1.0, t * 1.2)));
+            mRevealPackItem->setPos(center + QPointF(0, panelRect.height() * 0.10 * (1.0 - tEase)));
+            mRevealPackItem->setRotation(0.0);
+        } else if (phase < kPhaseShakeEnd) {
+            const double t = (phase - kPhaseAppearEnd) / (kPhaseShakeEnd - kPhaseAppearEnd);
+            mRevealPackItem->setScale(targetScale);
+            mRevealPackItem->setOpacity(1.0);
+            mRevealPackItem->setPos(center);
+            // 两次正弦摆动（≈ ±7°），结束回到 0。
+            mRevealPackItem->setRotation(std::sin(t * 6.28318530718) * 7.0);
+        } else {
+            const double t = (phase - kPhaseShakeEnd) / (1.0 - kPhaseShakeEnd);
+            const double tEase = easeOutCubic(t);
+            mRevealPackItem->setScale(targetScale * (1.0 + 0.22 * tEase));
+            mRevealPackItem->setOpacity(1.0 - easeInCubic(t));
+            mRevealPackItem->setRotation(0.0);
+
+            // 进入阶段 C 的第一帧：启动 dissolve shader 定时器，触发选项喷射。
+            if (!*crackFired) {
+                *crackFired = true;
+                if (mRevealDissolveTimer && !mRevealDissolveTimer->isActive()) {
+                    mRevealDissolveT = 0.0;
+                    mRevealDissolveTimer->start();
+                }
+                animateCardsIn();
+            }
+        }
+    });
+
+    // dissolve shader 定时器：每 ~33ms 把 mRevealPackBase 按当前 t 重新渲染。
+    QObject::disconnect(mRevealDissolveTimer, nullptr, this, nullptr);
+    connect(mRevealDissolveTimer, &QTimer::timeout, this, [this, guard]() {
+        if (!guard || !mRevealPackItem || mRevealPackBase.isNull()) return;
+        const double step = 33.0 / 460.0;   // dissolve 整段约 460ms
+        mRevealDissolveT = qMin(1.0, mRevealDissolveT + step);
+        QPixmap dp = BalatroShaders::renderDissolvePixmap(mRevealPackBase, mRevealDissolveT,
+                                                          QColor(255, 222, 130, 200),
+                                                          QColor(255, 110, 70, 160), 1.0);
+        if (!dp.isNull()) mRevealPackItem->setPixmap(dp);
+        if (mRevealDissolveT >= 1.0) mRevealDissolveTimer->stop();
+    });
+
+    connect(timeline, &QVariantAnimation::finished, this, [this, crackFired]() {
+        delete crackFired;
+        endPackReveal();
+    });
+    timeline->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+void PackOpenWidget::endPackReveal()
+{
+    mRevealActive = false;
+    if (mRevealDissolveTimer && mRevealDissolveTimer->isActive())
+        mRevealDissolveTimer->stop();
+    if (mRevealView) {
+        mRevealView->hide();
+        if (mRevealScene) mRevealScene->clear();
+        mRevealPackItem = nullptr;
+    }
+    // animateCardsIn 已经把 opacity 渐入到 1.0，这里把残留的 graphics effect 清掉，
+    // 避免之后每次 paint 都走 effect 管线影响性能。
+    auto detachFade = [](QWidget *w) {
+        if (!w) return;
+        if (auto *eff = qobject_cast<QGraphicsOpacityEffect*>(w->graphicsEffect())) {
+            eff->setOpacity(1.0);
+            w->setGraphicsEffect(nullptr);
+        }
+    };
+    for (auto &ou : mOptUi) detachFade(ou.card);
+    detachFade(mInventoryBox);
+    detachFade(mBtnSkip);
+    for (CardItem *c : mPackHandItems) if (c) c->setOpacity(1.0);
 }
 
 void PackOpenWidget::resizeEvent(QResizeEvent *e)
 {
     QWidget::resizeEvent(e);
     layoutPanel();
+    if (mRevealView && mRevealActive && mPanel)
+        mRevealView->setGeometry(mPanel->geometry());
 }
 
 void PackOpenWidget::layoutPanel()

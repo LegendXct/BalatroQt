@@ -10,7 +10,16 @@ The Lua source of the original game lives in `balatro_original_code/` and is **r
 
 ## Build
 
-Qt 6.5+ is required (`Core Widgets OpenGL OpenGLWidgets`). The active build tree is `build/Desktop_Qt_6_10_0_MinGW_64_bit-Debug/` (Ninja, MinGW). Configure/build from PowerShell:
+Qt 6.5+ is required (`Core Widgets OpenGL OpenGLWidgets`). The active build tree is `build/Desktop_Qt_6_10_0_MinGW_64_bit-Debug/` (Ninja, MinGW).
+
+**Qt 安装位置**：`D:\Qt`（注意不是 `C:\Qt`）。命令行构建时需要先把以下目录加到 `PATH`：
+
+```powershell
+$env:PATH = 'D:\Qt\6.10.0\mingw_64\bin;D:\Qt\Tools\mingw1310_64\bin;D:\Qt\Tools\Ninja;D:\Qt\Tools\CMake_64\bin;' + $env:PATH
+cmake --build D:\QtProjects\BalatroQt\build\Desktop_Qt_6_10_0_MinGW_64_bit-Debug
+```
+
+首次配置（已有 build 目录可跳过）：
 
 ```powershell
 cmake -S . -B build/Desktop_Qt_6_10_0_MinGW_64_bit-Debug -G Ninja

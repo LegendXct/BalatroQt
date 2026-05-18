@@ -11,6 +11,7 @@ class QPushButton;
 class QTimer;
 class QGraphicsScene;
 class QGraphicsView;
+class QGraphicsPixmapItem;
 class CardItem;
 
 class PackOpenWidget : public QWidget
@@ -66,6 +67,15 @@ private:
     QGraphicsScene *mHandScene = nullptr;
     QGraphicsView  *mHandView  = nullptr;
     QVector<CardItem*> mPackHandItems;
+
+    // 开包动画覆盖层：盖在 mPanel 上方 raise()，播完后 hide()，让原本的选项和手牌"从包里炸出来"。
+    QGraphicsScene *mRevealScene = nullptr;
+    QGraphicsView  *mRevealView  = nullptr;
+    QGraphicsPixmapItem *mRevealPackItem = nullptr;
+    QTimer *mRevealDissolveTimer = nullptr;
+    double mRevealDissolveT = 0.0;
+    QPixmap mRevealPackBase;
+    bool mRevealActive = false;
     QWidget *mInventoryBox = nullptr;
     QLabel *mLblTitle = nullptr;
     QLabel *mLblChoose = nullptr;
@@ -98,6 +108,12 @@ private:
     void finishAndClose();
     void animateCardsIn();
     void applyPackHandOrderMove(int from, int to);
+
+    // 整套开包序列：浮现 → 晃动 → 溶解 → 喷射选项卡。
+    void buildRevealOverlay();
+    QPixmap renderPackBigPixmap() const;
+    void startPackReveal();
+    void endPackReveal();
 
     int optionCount() const;
     QPixmap renderOption(int i) const;

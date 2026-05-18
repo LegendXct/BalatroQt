@@ -361,12 +361,38 @@ void CardItem::setCardSelected(bool selected) {
 }
 
 void CardItem::moveTo(const QPointF &target, int durationMs) {
-    auto *anim = new QPropertyAnimation(this, "pos", this);
+    // 复用一只 QPropertyAnimation（之前每次 new 一只造成多动画在同一 property 上互相覆盖，
+    // 表现为选牌、弃牌时卡牌"卡一下/抖一下"）。
+    QPropertyAnimation *anim = findChild<QPropertyAnimation*>(QStringLiteral("CardMoveAnim"),
+                                                              Qt::FindDirectChildrenOnly);
+    const QPointF current = pos();
+    const bool atTarget = qFuzzyCompare(current.x() + 1.0, target.x() + 1.0)
+                       && qFuzzyCompare(current.y() + 1.0, target.y() + 1.0);
+
+    // 关键修正：即使 pos == target，也要看正在运行的旧动画终点是不是同一个；
+    // 不是就必须 stop()，否则在 layoutHandCards 一回合内被先后调用两次时，
+    // "看着已经在位"的牌会被前一只未完的动画拽走，产生弃牌时的间距错乱。
+    if (anim && anim->state() == QAbstractAnimation::Running) {
+        const QVariant ev = anim->endValue();
+        QPointF endP = ev.canConvert<QPointF>() ? ev.toPointF() : QPointF(NAN, NAN);
+        const bool sameTargetAsRunning =
+            qFuzzyCompare(endP.x() + 1.0, target.x() + 1.0)
+         && qFuzzyCompare(endP.y() + 1.0, target.y() + 1.0);
+        if (sameTargetAsRunning) return;     // 已经在朝同一个目标飞，无需打断
+        anim->stop();
+    } else if (atTarget) {
+        return; // 没有运行中的动画且已经在位，直接什么都不做
+    }
+
+    if (!anim) {
+        anim = new QPropertyAnimation(this, "pos", this);
+        anim->setObjectName(QStringLiteral("CardMoveAnim"));
+        anim->setEasingCurve(QEasingCurve::OutCubic);
+    }
     anim->setDuration(durationMs);
-    anim->setStartValue(pos());
+    anim->setStartValue(current);
     anim->setEndValue(target);
-    anim->setEasingCurve(QEasingCurve::OutCubic);
-    anim->start(QAbstractAnimation::DeleteWhenStopped);
+    anim->start();
 }
 
 void CardItem::flip() {
