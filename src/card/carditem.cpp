@@ -527,7 +527,7 @@ void CardItem::applyTransform()
 
 void CardItem::hoverEnterEvent(QGraphicsSceneHoverEvent *event) {
     mHovered = true;
-    setScale(1.02);
+    setScale(1.04);
     update();
     emit hoverChanged(this, true);
     QGraphicsObject::hoverEnterEvent(event);
@@ -540,9 +540,10 @@ void CardItem::hoverMoveEvent(QGraphicsSceneHoverEvent *event) {
     qreal ly = qBound<qreal>(0.0, event->pos().y(), qreal(HEIGHT));
     qreal nx = (lx / WIDTH)  - 0.5;     // [-0.5, 0.5]
     qreal ny = (ly / HEIGHT) - 0.5;
-    // 只保留很轻的预选透视，不再出现明显“360°翻转感”。
-    mHoverTiltY = nx * 1.6;             // 最大约 ±0.8°，只给一点点预选反馈
-    mHoverTiltX = ny * 1.6;
+    // 对齐原版 card.lua 的 tilt：鼠标在哪个角，牌面就朝那个角倾斜；
+    // JokerItem / ConsumableItem 都是 ±10°，CardItem 也用同一节奏。
+    mHoverTiltY = qBound(-10.0, nx * 20.0, 10.0);
+    mHoverTiltX = qBound(-10.0, ny * 20.0, 10.0);
     applyTransform();
     QGraphicsObject::hoverMoveEvent(event);
 }

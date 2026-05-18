@@ -29,15 +29,16 @@ private:
     GameState *mGS;
     QFont mCNFont, mPixelFont;
 
-    // 对齐原版 blind_select 比例：原版盲注卡约 2.9 tile × 7 tile ≈ 1:2.4。
-    // 上一版 300×620 (1:2.07) 把高度压得太短；改回更接近原版的 280×680 (1:2.43)，
-    // 保持横向能塞下三张 + 间距，又让卡看上去依旧"高瘦"。
-    static constexpr int CARD_W          = 280;
-    static constexpr int CARD_H          = 680;
+    // 对齐原版 blind_select：原版三张盲注卡始终插在屏幕下沿，下半截看不到，整体高大。
+    // 这里把 CARD_H 推到 820 让卡看上去"很壮"，BOTTOM_OVERFLOW > CURRENT_LIFT 让当前
+    // 卡升起时仍然看不到自己的下边缘（也看不到旁边卡的下边缘）。
+    static constexpr int CARD_W          = 290;
+    static constexpr int CARD_H          = 820;
     static constexpr int GAP             = 28;
     static constexpr int LEFT_MARGIN     = 24;    // 距左面板右沿
-    static constexpr int CURRENT_LIFT    = 38;    // 当前可选卡上提
-    static constexpr int BOTTOM_OVERFLOW = 28;    // 卡片底部超出屏幕
+    static constexpr int CURRENT_LIFT    = 56;    // 当前可选卡上提
+    // 下方至少超出 CURRENT_LIFT + 16 dp，使升起后底边仍在屏幕下方。
+    static constexpr int BOTTOM_OVERFLOW = 84;
 
     QPoint cardTargetPos(int idx) const;
 

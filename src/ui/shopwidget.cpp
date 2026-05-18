@@ -185,9 +185,8 @@ void ShopWidget::buildUi()
 {
     mPanel = new QWidget(this);
     mPanel->setObjectName("shopPanel");
-    // 原版商店比例：上方商品区横向更宽，下方左 Voucher、右 Booster。
-    // 商品被放大到接近原版尺寸后，最小宽 / 高也要相应放大；layoutPanel 仍按容器宽度等比缩放。
-    mPanel->setMinimumSize(dp(820), dp(640));
+    // 商品紧凑后的设计最小尺寸：≈ 820×620 dp。layoutPanel 仍按容器宽度做平滑伸缩。
+    mPanel->setMinimumSize(dp(820), dp(620));
     mPanel->setAttribute(Qt::WA_StyledBackground, true);
     mPanel->setStyleSheet(
         "QWidget#shopPanel {"
@@ -270,8 +269,9 @@ void ShopWidget::buildUi()
         "QWidget#shopBox { background:rgba(57,72,76,230); border:none; border-radius:14px; }"
         );
     auto *shbl = new QHBoxLayout(shopBox);
-    shbl->setContentsMargins(dp(12), dp(12), dp(12), dp(12));
-    shbl->setSpacing(dp(12));
+    // 原版 shop 槽位间几乎贴着排，间距比 booster 行更紧；这里把 padding/spacing 压到 8/6 dp。
+    shbl->setContentsMargins(dp(8), dp(8), dp(8), dp(8));
+    shbl->setSpacing(dp(6));
     shbl->setAlignment(Qt::AlignCenter);
 
     for (int i = 0; i < 4; ++i) {
@@ -317,8 +317,9 @@ void ShopWidget::buildUi()
         "QWidget#boosterBox { background:rgba(57,72,76,230); border:none; border-radius:14px; }"
         );
     auto *bhbl = new QHBoxLayout(boosterBox);
-    bhbl->setContentsMargins(dp(12), dp(8), dp(12), dp(8));
-    bhbl->setSpacing(dp(12));
+    // booster 行间距比 shop 上方略宽，但比之前 12dp 紧，避免显得稀疏。
+    bhbl->setContentsMargins(dp(10), dp(6), dp(10), dp(6));
+    bhbl->setSpacing(dp(8));
     bhbl->setAlignment(Qt::AlignCenter);
 
     for (int i = 0; i < 2; ++i) {
@@ -337,15 +338,16 @@ void ShopWidget::buildUi()
 ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
 {
     OfferUi ou;
-    // 原版 UI_definitions.lua:656 把 booster 卡宽设为 1.27 * G.CARD_W；
-    // 普通商店卡保持 G.CARD_W × G.CARD_H 的原版比例。我们已经把场景卡牌放大到
-    // 170×228（≈ 原版 1920×1080 下 150×201），shop 里再走相同尺寸保持一致；
-    // booster 槽位按 1.27 倍水平放大 → 216×284。
+    // 原版 UI_definitions.lua:656 给 booster 列 (2.4*CARD_W, 1.15*CARD_H, card_w = 1.27*CARD_W)：
+    //   booster slot width  = 1.27 * G.CARD_W
+    //   booster slot height = 1.15 * G.CARD_H
+    // 普通 shop slot 与 G.CARD_W × G.CARD_H 同号（线 641 中 height 系数 1.05 几乎可以忽略）。
+    // 我们的 CardItem 是 170×228，shop slot 与之等高等宽；booster 按 1.27W × 1.15H 放大。
     const int slotW = isBooster ? 216 : 174;
-    const int slotH = isBooster ? 290 : 232;
-    const int containerW = slotW + 6;
-    // 价格标签 36 + 间距 4 + 卡图 slotH + 间距 4 + 名字 58。
-    const int containerH = 36 + 4 + slotH + 4 + 58;
+    const int slotH = isBooster ? 262 : 232;
+    const int containerW = slotW + 4;
+    // 价格标签 32 + 间距 2 + 卡图 slotH + 间距 2 + 名字 50（整体压得更紧凑）。
+    const int containerH = 32 + 2 + slotH + 2 + 50;
 
     ou.card = new QWidget(parent);
     ou.card->setFixedSize(dp(containerW), dp(containerH));
@@ -353,13 +355,13 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
 
     auto *vbl = new QVBoxLayout(ou.card);
     vbl->setContentsMargins(0, 0, 0, 0);
-    vbl->setSpacing(dp(4));
+    vbl->setSpacing(dp(2));
     vbl->setAlignment(Qt::AlignCenter);
 
     // 顶部 $X 价格标签(深底圆角)
     ou.priceLbl = new QLabel("$0", ou.card);
-    ou.priceLbl->setFixedSize(dp(82), dp(36));
-    QFont pf = mCNFont; pf.setPixelSize(fontPx(21)); pf.setBold(true);
+    ou.priceLbl->setFixedSize(dp(72), dp(32));
+    QFont pf = mCNFont; pf.setPixelSize(fontPx(19)); pf.setBold(true);
     ou.priceLbl->setFont(pf);
     ou.priceLbl->setAlignment(Qt::AlignCenter);
     ou.priceLbl->setStyleSheet(
@@ -383,12 +385,12 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
     ou.imageLbl = nullptr;
 
     ou.nameLbl = new QLabel("", ou.card);
-    QFont nf = mCNFont; nf.setPixelSize(fontPx(19));
+    QFont nf = mCNFont; nf.setPixelSize(fontPx(16));
     ou.nameLbl->setFont(nf);
     ou.nameLbl->setStyleSheet("color:white; background:transparent;");
     ou.nameLbl->setAlignment(Qt::AlignCenter);
     ou.nameLbl->setWordWrap(true);
-    ou.nameLbl->setFixedHeight(dp(58));
+    ou.nameLbl->setFixedHeight(dp(50));
     vbl->addWidget(ou.nameLbl);
 
     return ou;
@@ -732,16 +734,17 @@ void ShopWidget::resizeEvent(QResizeEvent *e)
 void ShopWidget::layoutPanel()
 {
     if (!mPanel) return;
-    // 优先适应容器宽度：宽度不够时让面板缩小，避免按钮/价格/booster 贴图被裁出屏外。
-    // 放大商品后最小尺寸也要相应放大。
+    // 商店设计宽：160 (btn col) + 12 spacing + 4 slot * 178 + 3 * 6 spacing + shopBox padding 16 = 922 dp
+    //                                    + root padding 36 ≈ 960 dp
+    // 把 maxW 收到接近这个值，避免在大屏上把内容稀疏地撑开。
     const int minW = dp(820);
-    const int minH = dp(640);
-    const int maxW = dp(1320);
-    const int maxH = dp(920);
-    int panelW = qBound(minW, int(width()  - dp(20)), maxW);
-    int panelH = qBound(minH, int(height() - dp(20)), maxH);
-    // 设计稿宽高比 1100 / 820（更接近原版宽扁的商店框），保持上下两栏比例自然。
-    const double targetAspect = 1100.0 / 820.0;
+    const int minH = dp(620);
+    const int maxW = dp(1040);
+    const int maxH = dp(880);
+    int panelW = qBound(minW, int(width()  * 0.74), maxW);
+    int panelH = qBound(minH, int(height() * 0.82), maxH);
+    // 宽高比 ≈ 1.18 (940 / 800)：上方 shop 行 + 下方 voucher/booster 行的合理纵向。
+    const double targetAspect = 940.0 / 800.0;
     panelH = qMin(panelH, int(panelW / targetAspect) + dp(20));
     mPanel->resize(panelW, panelH);
     int x = (width()  - mPanel->width())  / 2;
