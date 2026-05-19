@@ -46,6 +46,14 @@ void GameState::levelUpHand(HandType t, int times) {
     emit handLevelsChanged();
 }
 
+
+static bool consumableNeedsFreeJokerSlot(ConsumableType type)
+{
+    return type == ConsumableType::Tarot_Judgement
+        || type == ConsumableType::Spectral_Wraith
+        || type == ConsumableType::Spectral_Soul;
+}
+
 static auto rankComp = [](const CardData &a, const CardData &b) {
     const bool aStone = a.enhancement == Enhancement::Stone;
     const bool bStone = b.enhancement == Enhancement::Stone;
@@ -886,6 +894,7 @@ bool GameState::useConsumable(int idx, const QVector<int> &selectedHandIdx) {
 
     if (c.type == ConsumableType::Tarot_Fool && !mHasLastUsedConsumable) return false;
     if (c.type == ConsumableType::Tarot_Fool && !canRecordForFool(mLastUsedConsumable)) return false;
+    if (consumableNeedsFreeJokerSlot(c.type) && !canAddJoker()) return false;
 
     // 先把被使用的消耗牌移出槽位，再执行效果。否则皇帝/女祭司在 2 槽已占 1 槽时只会生成 1 张。
     mConsumables.removeAt(idx);
@@ -1022,6 +1031,7 @@ bool GameState::canBuyAndUseShopConsumable(int idx) const
     // 需要选牌的消耗品（如 Magician/Empress/Sun/Moon 等）在商店没有手牌可选，禁用直接使用。
     if (c.needsSelection > 0) return false;
     if (c.type == ConsumableType::Tarot_Fool && !canUseFool()) return false;
+    if (consumableNeedsFreeJokerSlot(c.type) && !canAddJoker()) return false;
     return true;
 }
 
@@ -1395,6 +1405,7 @@ static bool applyConsumableTypeToPackHand(GameState &state,
     QVector<int> sel = normalizedSelection(selectedPackHandIdx, packHand.size(), c.maxSelection);
     if (sel.size() < c.needsSelection) return false;
     if (c.maxSelection > 0 && sel.size() > c.maxSelection) return false;
+    if (consumableNeedsFreeJokerSlot(type) && !state.canAddJoker()) return false;
 
     auto enhance = [&](Enhancement e, int maxN) {
         QVector<int> use = normalizedSelection(sel, packHand.size(), maxN);
@@ -1664,6 +1675,7 @@ bool GameState::useConsumableOnPackHand(int consumableIdx,
 
     if (c.type == ConsumableType::Tarot_Fool && !mHasLastUsedConsumable) return false;
     if (c.type == ConsumableType::Tarot_Fool && !canRecordForFool(mLastUsedConsumable)) return false;
+    if (consumableNeedsFreeJokerSlot(c.type) && !canAddJoker()) return false;
 
     // 先腾出槽位，皇帝/女祭司才能在原有消耗牌槽位里补满两张。
     mConsumables.removeAt(consumableIdx);

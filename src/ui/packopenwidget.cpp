@@ -29,6 +29,14 @@
 #define M_PI 3.14159265358979323846
 #endif
 
+static bool consumableNeedsFreeJokerSlot(ConsumableType type)
+{
+    // 这些牌的唯一效果是生成小丑；满槽时原版不会允许使用。
+    return type == ConsumableType::Tarot_Judgement
+        || type == ConsumableType::Spectral_Wraith
+        || type == ConsumableType::Spectral_Soul;
+}
+
 PackOpenWidget::PackOpenWidget(const QFont &cnFont, const QFont &pixelFont,
                                QWidget *parent)
     : QWidget(parent), mCNFont(cnFont), mPixelFont(pixelFont)
@@ -60,21 +68,22 @@ PackOpenWidget::PackOpenWidget(const QFont &cnFont, const QFont &pixelFont,
 void PackOpenWidget::buildUi()
 {
     mPanel = new QWidget(this);
-    mPanel->setMinimumSize(900, 720);
+    // 开包界面必须能在当前 playPage 内完整显示，不能再强制 880px 高。
+    mPanel->setMinimumSize(760, 560);
     mPanel->setStyleSheet("background: transparent; border: none;");
 
     auto *root = new QVBoxLayout(mPanel);
-    root->setContentsMargins(22, 16, 22, 16);
-    root->setSpacing(10);
+    root->setContentsMargins(18, 12, 18, 12);
+    root->setSpacing(8);
 
     mLblTitle = new QLabel("打开包", mPanel);
-    QFont tf = mCNFont; tf.setPixelSize(30); tf.setBold(true);
+    QFont tf = mCNFont; tf.setPixelSize(24); tf.setBold(true);
     mLblTitle->setFont(tf);
     mLblTitle->setStyleSheet("color:#f0c040; background:transparent;");
     mLblTitle->setAlignment(Qt::AlignCenter);
 
     mLblChoose = new QLabel("", mPanel);
-    QFont cf = mCNFont; cf.setPixelSize(18);
+    QFont cf = mCNFont; cf.setPixelSize(15);
     mLblChoose->setFont(cf);
     mLblChoose->setStyleSheet("color:white; background:transparent;");
     mLblChoose->setAlignment(Qt::AlignCenter);
@@ -90,8 +99,8 @@ void PackOpenWidget::buildUi()
     mHandView->setAttribute(Qt::WA_TranslucentBackground);
     mHandView->viewport()->setAttribute(Qt::WA_TranslucentBackground);
     mHandView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    // 280：略缩一点给下方选项卡 + bottomBar 留更多余地，避免包信息被压到看不到。
-    mHandView->setMinimumHeight(280);
+    // 230：给下方选项卡 + 包名/跳过行留足空间，避免底部被裁。
+    mHandView->setMinimumHeight(230);
     mHandView->setMouseTracking(true);
     root->addWidget(mHandView);
 
@@ -99,15 +108,15 @@ void PackOpenWidget::buildUi()
     auto *midRow = new QWidget(mPanel);
     auto *midLayout = new QHBoxLayout(midRow);
     midLayout->setContentsMargins(0, 0, 0, 0);
-    midLayout->setSpacing(12);
+    midLayout->setSpacing(10);
 
     auto *optionsBox = new QWidget(midRow);
     optionsBox->setObjectName("packOptionsBox");
     optionsBox->setAttribute(Qt::WA_StyledBackground, true);
     optionsBox->setStyleSheet("QWidget#packOptionsBox { background:transparent; border:none; }");
     auto *optionsLayout = new QHBoxLayout(optionsBox);
-    optionsLayout->setContentsMargins(12, 10, 12, 10);
-    optionsLayout->setSpacing(10);
+    optionsLayout->setContentsMargins(8, 6, 8, 6);
+    optionsLayout->setSpacing(8);
     optionsLayout->setAlignment(Qt::AlignCenter);
 
     for (int i = 0; i < 5; ++i) {
@@ -116,40 +125,40 @@ void PackOpenWidget::buildUi()
         // 卡片图采样比例 142×190 ≈ 1:1.34；imageLbl 必须高度 ≥ 168 才能完整展示，
         // 否则像之前那样把 126×168 缩放成的 pixmap 塞进 126×148 的 QLabel，
         // 上下各被裁掉约 10px——表现就是塔罗 / 幻灵牌顶部和底部"少了一截"。
-        ou.card->setFixedSize(154, 300);
+        ou.card->setFixedSize(138, 260);
         ou.card->setStyleSheet("background:transparent; border:none;");
 
         auto *vbl = new QVBoxLayout(ou.card);
-        vbl->setContentsMargins(6, 6, 6, 6);
-        vbl->setSpacing(4);
+        vbl->setContentsMargins(4, 4, 4, 4);
+        vbl->setSpacing(3);
 
         ou.imageLbl = new QLabel(ou.card);
-        ou.imageLbl->setFixedSize(126, 168);
+        ou.imageLbl->setFixedSize(112, 150);
         ou.imageLbl->setAlignment(Qt::AlignCenter);
         ou.imageLbl->setStyleSheet("background:transparent;");
         vbl->addWidget(ou.imageLbl, 0, Qt::AlignCenter);
 
         ou.nameLbl = new QLabel("", ou.card);
-        QFont nf = mCNFont; nf.setPixelSize(12); nf.setBold(true);
+        QFont nf = mCNFont; nf.setPixelSize(11); nf.setBold(true);
         ou.nameLbl->setFont(nf);
         ou.nameLbl->setStyleSheet("color:white; background:transparent;");
         ou.nameLbl->setAlignment(Qt::AlignCenter);
         ou.nameLbl->setWordWrap(true);
-        ou.nameLbl->setFixedHeight(34);
+        ou.nameLbl->setFixedHeight(30);
         vbl->addWidget(ou.nameLbl);
 
         ou.descLbl = new QLabel("", ou.card);
-        QFont df = mCNFont; df.setPixelSize(9);
+        QFont df = mCNFont; df.setPixelSize(8);
         ou.descLbl->setFont(df);
         ou.descLbl->setStyleSheet("color:#aab2ba; background:transparent;");
         ou.descLbl->setAlignment(Qt::AlignCenter);
         ou.descLbl->setWordWrap(true);
-        ou.descLbl->setFixedHeight(44);
+        ou.descLbl->setFixedHeight(38);
         vbl->addWidget(ou.descLbl);
 
         ou.takeBtn = new QPushButton("选择", ou.card);
-        ou.takeBtn->setFixedHeight(30);
-        QFont bf = mCNFont; bf.setPixelSize(12);
+        ou.takeBtn->setFixedHeight(28);
+        QFont bf = mCNFont; bf.setPixelSize(11);
         ou.takeBtn->setFont(bf);
         ou.takeBtn->setCursor(Qt::PointingHandCursor);
         ou.takeBtn->setStyleSheet(
@@ -168,12 +177,12 @@ void PackOpenWidget::buildUi()
     auto *invBox = new QWidget(midRow);
     mInventoryBox = invBox;
     invBox->setObjectName("inventoryConsumableBox");
-    invBox->setFixedWidth(210);
+    invBox->setFixedWidth(190);
     invBox->setAttribute(Qt::WA_StyledBackground, true);
     invBox->setStyleSheet("QWidget#inventoryConsumableBox { background:#151b21; border-radius:10px; }");
     auto *ivbl = new QVBoxLayout(invBox);
-    ivbl->setContentsMargins(10, 10, 10, 10);
-    ivbl->setSpacing(6);
+    ivbl->setContentsMargins(8, 8, 8, 8);
+    ivbl->setSpacing(5);
 
     auto *invTitle = new QLabel("仓库特殊牌", invBox);
     QFont itf = mCNFont; itf.setPixelSize(14); itf.setBold(true);
@@ -185,14 +194,14 @@ void PackOpenWidget::buildUi()
     for (int i = 0; i < 4; ++i) {
         InvUi iu;
         iu.card = new QWidget(invBox);
-        iu.card->setFixedHeight(74);
+        iu.card->setFixedHeight(64);
         iu.card->setStyleSheet("background:#222b33; border-radius:8px;");
         auto *hbl = new QHBoxLayout(iu.card);
-        hbl->setContentsMargins(6, 6, 6, 6);
-        hbl->setSpacing(6);
+        hbl->setContentsMargins(5, 5, 5, 5);
+        hbl->setSpacing(5);
 
         iu.imageLbl = new QLabel(iu.card);
-        iu.imageLbl->setFixedSize(42, 56);
+        iu.imageLbl->setFixedSize(36, 48);
         iu.imageLbl->setStyleSheet("background:transparent;");
         iu.imageLbl->setAlignment(Qt::AlignCenter);
         hbl->addWidget(iu.imageLbl);
@@ -210,7 +219,7 @@ void PackOpenWidget::buildUi()
         tc->addWidget(iu.nameLbl);
 
         iu.useBtn = new QPushButton("使用", textCol);
-        iu.useBtn->setFixedHeight(24);
+        iu.useBtn->setFixedHeight(22);
         QFont ubf = mCNFont; ubf.setPixelSize(10);
         iu.useBtn->setFont(ubf);
         iu.useBtn->setCursor(Qt::PointingHandCursor);
@@ -236,17 +245,17 @@ void PackOpenWidget::buildUi()
     // 用左右等长的 stretch 把"包名 + 剩余次数"夹在水平正中；跳过按钮挂在右侧但不影响中心对齐。
     auto *bottomBar = new QWidget(mPanel);
     bottomBar->setStyleSheet("background:transparent;");
-    bottomBar->setFixedHeight(78);
+    bottomBar->setFixedHeight(64);
     auto *bottomLayout = new QHBoxLayout(bottomBar);
     bottomLayout->setContentsMargins(0, 0, 0, 0);
-    bottomLayout->setSpacing(12);
+    bottomLayout->setSpacing(10);
 
     bottomLayout->addStretch(1);
 
     auto *titleCol = new QWidget(bottomBar);
     titleCol->setStyleSheet("background:rgba(20,25,30,120); border-radius:12px;");
     auto *titleLayout = new QVBoxLayout(titleCol);
-    titleLayout->setContentsMargins(18, 8, 18, 8);
+    titleLayout->setContentsMargins(14, 5, 14, 5);
     titleLayout->setSpacing(2);
     titleLayout->addWidget(mLblTitle);
     titleLayout->addWidget(mLblChoose);
@@ -255,8 +264,8 @@ void PackOpenWidget::buildUi()
     bottomLayout->addStretch(1);
 
     mBtnSkip = new QPushButton("跳过", bottomBar);
-    mBtnSkip->setFixedSize(110, 56);
-    QFont sf = mCNFont; sf.setPixelSize(20); sf.setBold(true);
+    mBtnSkip->setFixedSize(96, 48);
+    QFont sf = mCNFont; sf.setPixelSize(18); sf.setBold(true);
     mBtnSkip->setFont(sf);
     mBtnSkip->setCursor(Qt::PointingHandCursor);
     mBtnSkip->setStyleSheet(
@@ -573,7 +582,7 @@ void PackOpenWidget::refreshInventoryUi()
 
 QPixmap PackOpenWidget::renderOption(int i) const
 {
-    const QSize size(126, 168);
+    const QSize size(112, 150);
 
     if (mContent.kind == PackKind::Buffoon) {
         QPixmap sheet(":/textures/images/Jokers.png");
@@ -732,6 +741,7 @@ bool PackOpenWidget::optionAvailableFor(int i) const
     case PackKind::Arcana:
     case PackKind::Spectral: {
         Consumable c = createConsumable(mContent.consumables[i]);
+        if (consumableNeedsFreeJokerSlot(c.type) && mFreeJokerSlots <= 0) return false;
         return selectionValidFor(c);
     }
     }
@@ -741,7 +751,9 @@ bool PackOpenWidget::optionAvailableFor(int i) const
 bool PackOpenWidget::inventoryAvailableFor(int i) const
 {
     if (i < 0 || i >= mInventoryConsumables.size()) return false;
-    return selectionValidFor(mInventoryConsumables[i]);
+    const Consumable &c = mInventoryConsumables[i];
+    if (consumableNeedsFreeJokerSlot(c.type) && mFreeJokerSlots <= 0) return false;
+    return selectionValidFor(c);
 }
 
 int PackOpenWidget::maxCurrentSelectionLimit() const
@@ -1144,15 +1156,15 @@ void PackOpenWidget::resizeEvent(QResizeEvent *e)
 void PackOpenWidget::layoutPanel()
 {
     if (!mPanel) return;
-    const int maxW = qMax(820, width() - 18);
-    const int maxH = qMax(880, height() - 24);
-    // 标题 50 + 选择文本 30 + handView 280 + 选项 300 + bottomBar 78 + 间距/边距 ≈ 800 px。
-    // 最小高度抬到 880 才能完整容纳"包名 / 跳过"行不被裁。
-    int panelW = qBound(820, int(width()  * 0.96), qMin(1200, maxW));
-    int panelH = qBound(880, int(height() * 0.96), qMin(1040, maxH));
+    const int minW = qMin(width(),  760);
+    const int minH = qMin(height(), 560);
+    const int maxW = qMin(width()  - 12, 1180);
+    const int maxH = qMin(height() - 12, 820);
+    int panelW = qBound(minW, int(width()  * 0.96), qMax(minW, maxW));
+    int panelH = qBound(minH, int(height() * 0.96), qMax(minH, maxH));
     mPanel->resize(panelW, panelH);
     int x = (width()  - mPanel->width())  / 2;
-    int y = qMax(8, (height() - mPanel->height()) / 2);
+    int y = qMax(6, (height() - mPanel->height()) / 2);
     mPanel->move(x, y);
     layoutPackHand();
 }

@@ -87,6 +87,15 @@ static int uiPx(int px)
     // 这样 1366×768 会整体缩小，2K/4K 会整体放大。
     return qMax(1, int(std::round(px * 1.55 * gUiScale)));
 }
+
+static int overlappedCardStep(int totalW, int cardW, int count, int maxStep)
+{
+    if (count <= 1) return maxStep;
+    const int tightStep = (totalW - cardW) / qMax(1, count - 1);
+    // 对齐原版 CardArea：数量超过槽位时压缩步距形成重叠，而不是把整排撑出槽位。
+    // 下限留到 18，避免负片/额外槽位叠很多张时仍被最小步距撑出槽位。
+    return qBound(18, tightStep, maxStep);
+}
 }
 
 void MainWindow::loadFonts() {
@@ -2764,7 +2773,7 @@ void MainWindow::refreshJokerSlots()
     if (visualW < available) rowStartX = 18 + (available - visualW) / 2;
     // 用固定步距摆放，n < MAX 时整组小丑在 visualW 范围内水平居中（不再左对齐 / 也不再被
     // (visualW - CARD_W)/(n-1) 拉宽到撑满全行）。
-    int step = visualStep;
+    int step = overlappedCardStep(visualW, CARD_W, n, visualStep);
     int usedW = (n > 0) ? (CARD_W + qMax(0, n - 1) * step) : 0;
     int startX = rowStartX + (visualW - usedW) / 2;
     // 垂直方向：将卡牌相对 slot 框 (高 CARD_H + 18) 居中，避免顶到上边。
@@ -3027,7 +3036,7 @@ void MainWindow::onJokerDragMoved(JokerItem *item, QPointF scenePos)
     int available = qMin(mSceneW - 470, 840);
     int rowStartX = 18;
     if (visualW < available) rowStartX = 18 + (available - visualW) / 2;
-    int step = visualStep;
+    int step = overlappedCardStep(visualW, CARD_W, n, visualStep);
     int usedW = CARD_W + qMax(0, n - 1) * step;
     int startX = rowStartX + (visualW - usedW) / 2;
     const int slotFrameTopY = JOKER_Y + 12;
@@ -3074,7 +3083,7 @@ void MainWindow::onJokerDragReleased(JokerItem *item, QPointF scenePos)
     int available = qMin(mSceneW - 470, 840);
     int rowStartX = 18;
     if (visualW < available) rowStartX = 18 + (available - visualW) / 2;
-    int step = visualStep;
+    int step = overlappedCardStep(visualW, CARD_W, n, visualStep);
     int usedW = CARD_W + qMax(0, n - 1) * step;
     int startX = rowStartX + (visualW - usedW) / 2;
 
@@ -3294,8 +3303,7 @@ void MainWindow::refreshConsumableSlots()
     int visualSlots = Constants::MAX_CONSUMABLE_SLOTS;
     int totalW = CARD_W + qMax(0, visualSlots - 1) * (CARD_W + 14);
     int startX = mSceneW - 22 - totalW;
-    int step = (cs.size() > 1) ? (totalW - CARD_W) / qMax(1, cs.size() - 1) : (CARD_W + 14);
-    step = qBound(42, step, CARD_W + 14);
+    int step = overlappedCardStep(totalW, CARD_W, cs.size(), CARD_W + 14);
     for (int i = 0; i < cs.size(); ++i) {
         int x = startX + i * step;
         int y = JOKER_Y + 18;
@@ -3323,8 +3331,7 @@ void MainWindow::layoutConsumableItems(bool animate)
     int visualSlots = Constants::MAX_CONSUMABLE_SLOTS;
     int totalW = CARD_W + qMax(0, visualSlots - 1) * (CARD_W + 14);
     int startX = mSceneW - 22 - totalW;
-    int step = (n > 1) ? (totalW - CARD_W) / qMax(1, n - 1) : (CARD_W + 14);
-    step = qBound(42, step, CARD_W + 14);
+    int step = overlappedCardStep(totalW, CARD_W, n, CARD_W + 14);
 
     for (int i = 0; i < n; ++i) {
         ConsumableItem *ci = mConsumableItems[i];
@@ -3457,8 +3464,7 @@ void MainWindow::onConsumableDragMoved(ConsumableItem *item, QPointF scenePos)
     int visualSlots = Constants::MAX_CONSUMABLE_SLOTS;
     int totalW = CARD_W + qMax(0, visualSlots - 1) * (CARD_W + 14);
     int startX = mSceneW - 22 - totalW;
-    int step = (n > 1) ? (totalW - CARD_W) / qMax(1, n - 1) : (CARD_W + 14);
-    step = qBound(42, step, CARD_W + 14);
+    int step = overlappedCardStep(totalW, CARD_W, n, CARD_W + 14);
 
     int to = 0;
     for (int i = 0; i < n; ++i) {
@@ -3498,8 +3504,7 @@ void MainWindow::onConsumableDragReleased(ConsumableItem *item, QPointF scenePos
     int visualSlots = Constants::MAX_CONSUMABLE_SLOTS;
     int totalW = CARD_W + qMax(0, visualSlots - 1) * (CARD_W + 14);
     int startX = mSceneW - 22 - totalW;
-    int step = (n > 1) ? (totalW - CARD_W) / qMax(1, n - 1) : (CARD_W + 14);
-    step = qBound(42, step, CARD_W + 14);
+    int step = overlappedCardStep(totalW, CARD_W, n, CARD_W + 14);
 
     int to = 0;
     for (int i = 0; i < n; ++i) {
@@ -3599,19 +3604,20 @@ QRect MainWindow::lowerOverlayRect() const
 QRect MainWindow::shopOverlayRect() const
 {
     if (!mPlayPage) return QRect();
-    // 把商店"水平居中"在小丑区下方的可用区域：
-    // 左侧给一点点呼吸 (12dp)，右侧避开牌堆按钮 (≈ scene 坐标里的 CARD_W+60 → 换算到 widget)。
-    // 下方完全贴到 playPage 底，让用户看不到底部的圆角描边，制造"接到屏幕底"的效果。
-    const int y = dp(JOKER_Y + JOKER_H + 10);
+
+    // 商店只能占用“小丑槽位下方”的区域。上一版为了防止商店底部被裁，
+    // 把 overlay 顶到了屏幕上方 8% 的位置；但 QWidget 的透明区域也会吃掉鼠标事件，
+    // 于是商店打开时小丑牌 hover / 拖动都会失效。这里重新以 lowerOverlayRect()
+    // 为基准，让小丑区域仍然归 QGraphicsView 接收鼠标。商店显示不全的问题交给
+    // ShopWidget 内部紧凑布局处理，而不是用透明 overlay 盖住小丑牌。
+    const QRect base = lowerOverlayRect();
     const int leftMargin = dp(12);
-    // mScene 是 fitInView 进 mPlayPage 的，缩放比 ≈ playPage.h / scene.h，宽度按比例换算。
-    const double scaleW = (mSceneW > 0)
-                              ? double(mPlayPage->width()) / double(mSceneW)
-                              : 1.0;
-    const int rightReservePx = int(std::round((CARD_W + 80) * scaleW));
-    int w = qMax(dp(640), mPlayPage->width() - leftMargin - rightReservePx);
-    int h = qMax(0, mPlayPage->height() - y);    // 不留底边距 → 与屏幕底接在一起
-    return QRect(leftMargin, y, w, h);
+    const int rightMargin = dp(8);
+    const int x = leftMargin;
+    const int y = base.y();
+    const int w = qMax(dp(640), base.width() - leftMargin - rightMargin);
+    const int h = qMax(0, base.height());
+    return QRect(x, y, w, h);
 }
 
 void MainWindow::showShopOverlay()

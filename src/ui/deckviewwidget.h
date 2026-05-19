@@ -42,6 +42,7 @@ private:
     QWidget *mPanel = nullptr;
     QLabel *mTitle = nullptr;
     QLabel *mSubtitle = nullptr;
+    QLabel *mTabArrow = nullptr;
     QPushButton *mBtnRemaining = nullptr;
     QPushButton *mBtnFull = nullptr;
     QPushButton *mBtnClose = nullptr;
