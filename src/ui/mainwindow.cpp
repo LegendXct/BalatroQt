@@ -1285,6 +1285,7 @@ void MainWindow::setupLeftPanel() {
     // 中段 stretch 必须和顶部 stretch 同权重，否则空白被一边吃掉，整组组件就不在垂直正中。
     layout->addStretch(1);
     layout->addWidget(bottomRow);
+    layout->addStretch(1);
 }
 
 
