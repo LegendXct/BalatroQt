@@ -117,8 +117,8 @@ protected:
             // 原版顶点倾斜感响应，不再使用 QWidget shear 的反向近似。
             const qreal nx = event->position().x() / qMax(1, width()) - 0.5;
             const qreal ny = event->position().y() / qMax(1, height()) - 0.5;
-            mTiltY = qBound(-10.0, nx * 20.0, 10.0);
-            mTiltX = qBound(-10.0, ny * 20.0, 10.0);
+            mTiltY = 0.0;
+            mTiltX = 0.0;
         }
         QPushButton::mouseMoveEvent(event);
         update();
@@ -196,15 +196,8 @@ void ShopWidget::buildUi()
     mPanel->setStyleSheet(
         "QWidget#shopPanel {"
         "  background:rgba(35,48,51,235);"
-        // 三边描边 + 顶部圆角；下边缘无 border、底部圆角为 0，让面板贴到屏幕底部时看不到下边线。
-        "  border-top: 3px solid #fe5f55;"
-        "  border-left: 3px solid #fe5f55;"
-        "  border-right: 3px solid #fe5f55;"
-        "  border-bottom: 0px;"
-        "  border-top-left-radius: 18px;"
-        "  border-top-right-radius: 18px;"
-        "  border-bottom-left-radius: 0px;"
-        "  border-bottom-right-radius: 0px;"
+        "  border: 3px solid #fe5f55;"
+        "  border-radius: 18px;"
         "}"
         );
 
@@ -682,7 +675,7 @@ void ShopWidget::refresh()
                 QVariant base = btn->property("baseY");
                 int baseY = base.isValid() ? base.toInt() : btn->y();
                 btn->setProperty("baseY", baseY);
-                const int targetY = selectedHere ? baseY - dp(18) : baseY;
+                const int targetY = baseY;
                 if (btn->y() == targetY) return;
                 auto *anim = new QPropertyAnimation(btn, "pos", btn);
                 anim->setDuration(160);
@@ -921,9 +914,9 @@ void ShopWidget::positionSlotActionButtons(OfferUi &ou, bool hasUseBtn)
         QPoint p = cardGuard->mapTo(containerGuard.data(), QPoint(0, 0));
         // cardBtn 在选中后向上抬起 dp(18)；按钮要跟着抬起后的卡片走，否则会和卡片之间出现"空挡"。
         if (buyGuard && buyGuard->isVisible()) {
-            // 紧贴卡片下边沿（卡片底下方 +dp(2) 处）。
+            // 叠放在卡片底部，不遮挡名称标签。
             int x = p.x() + (cardGuard->width() - buyGuard->width()) / 2;
-            int y = p.y() + cardGuard->height() + dp(2);
+            int y = p.y() + cardGuard->height() - buyGuard->height();
             buyGuard->move(x, y);
             buyGuard->raise();
         }
@@ -981,15 +974,15 @@ void ShopWidget::layoutPanel()
     // 原版商店面板几乎吃满下半屏宽度，且高度优先保证两行商品完整显示。
     // 这里按当前 overlay 的实际尺寸取比例，而不是只按物理屏幕 dp，避免窗口/截图较小时
     // 固定控件仍按大屏尺寸排布，导致下排卡包名和按钮被裁掉。
-    const int minW = qMin(width(),  dp(900));
-    const int minH = qMin(height(), dp(620));
-    const int maxW = qMin(width(),  dp(1240));
-    const int maxH = qMin(height(), dp(780));
-    int panelW = qBound(minW, int(width()  * 0.96), maxW);
-    int panelH = qBound(minH, int(height() * 0.96), maxH);
-    // 让面板底部贴到 widget 底沿——下方圆角已置 0，看上去就和屏幕底部融为一体。
+    // 顶部留 dp(12) 与小丑槽位框隔开；面板向下延伸到 overlay 底边，不截断底部内容。
+    // setMinimumHeight(0) 必须先于 resize()，否则 buildUi() 设置的 dp(620) 下限会阻止缩小。
+    const int topGap = dp(70);
+    const int minW = qMin(width(), dp(900));
+    const int maxW = qMin(width(), dp(1240));
+    int panelW = qBound(minW, int(width() * 0.96), maxW)-15;
+    int panelH = qMax(dp(200), height() - topGap-80);
+    mPanel->setMinimumHeight(0);
     mPanel->resize(panelW, panelH);
     int x = (width() - mPanel->width()) / 2;
-    int y = qMax(0, height() - mPanel->height());
-    mPanel->move(x, y);
+    mPanel->move(x, topGap);
 }

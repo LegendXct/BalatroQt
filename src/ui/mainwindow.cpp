@@ -204,6 +204,22 @@ static QPushButton *makeBtn(const QString &text, const QString &bg, const QStrin
 }
 
 
+static void setLabelScaledText(QLabel *lbl, const QString &text, int nomPx)
+{
+    QFont f = lbl->font();
+    f.setPixelSize(nomPx);
+    const int w = lbl->width();
+    if (w > 20) {
+        QFontMetrics fm(f);
+        while (f.pixelSize() > nomPx / 2 && fm.horizontalAdvance(text) > w - 20) {
+            f.setPixelSize(f.pixelSize() - 1);
+            fm = QFontMetrics(f);
+        }
+    }
+    lbl->setFont(f);
+    lbl->setText(text);
+}
+
 static QString formatScoreNumber(double num)
 {
     if (std::isnan(num)) return QStringLiteral("NaNeInf");
@@ -1480,8 +1496,8 @@ void MainWindow::setupScene() {
 
     CardData backData;
     backData.faceUp = false;
-    mHandYNormal  = mSceneH - CARD_H - 150;
-    mHandYScoring = mSceneH - CARD_H - 90;
+    mHandYNormal  = mSceneH - CARD_H - 190;
+    mHandYScoring = mSceneH - CARD_H - 130;
     mHandY = mHandYNormal;
     mBtnY  = mSceneH - 118;
 
@@ -1629,8 +1645,8 @@ void MainWindow::updateSceneSize() {
     mScene->setSceneRect(0, 0, mSceneW, mSceneH);
 
     // 同步所有依赖 mSceneW/mSceneH 的元素位置。
-    mHandYNormal  = mSceneH - CARD_H - 150;
-    mHandYScoring = mSceneH - CARD_H - 90;
+    mHandYNormal  = mSceneH - CARD_H - 190;
+    mHandYScoring = mSceneH - CARD_H - 130;
     mHandY = mHandYNormal;
     mBtnY  = mSceneH - 118;
     if (mDeckBackCard) mDeckBackCard->setPos(mSceneW - CARD_W - 60, mHandYScoring);
@@ -1873,7 +1889,7 @@ void MainWindow::layoutPlayedCards() {
 
 void MainWindow::refreshScore() {
     const double score = mGameState->score();
-    mLblScore->setText(formatScoreNumber(score));
+    setLabelScaledText(mLblScore, formatScoreNumber(score), uiPx(38));
     mLblTarget->setText(formatScoreNumber(mGameState->targetScore()));
     updateScoreProgressBar(score, true);
 }
@@ -1939,7 +1955,7 @@ void MainWindow::refreshCounters() {
     mLblAnte->setText(QString("%1<font color='white'>/8</font>")
                           .arg(mGameState->ante()));
     mLblRound->setText(QString::number(
-        static_cast<int>(mGameState->blindType()) + 1));
+        (mGameState->ante() - 1) * 3 + mGameState->blindIdx() + 1));
 
     auto applyBlindStyle = [this](const QString &color) {
         mLblBlind->setStyleSheet(QString("color:white; background:%1; border-radius:6px; padding:3px;")
@@ -2599,11 +2615,12 @@ void MainWindow::onHandPlayed()
 
     mDisplayedChips = r.baseChips;
     mDisplayedMult  = r.baseMult;
-    mLblChips->setText(formatScoreNumber(mDisplayedChips));
-    mLblMult ->setText(formatScoreNumber(mDisplayedMult));
+    setLabelScaledText(mLblChips, formatScoreNumber(mDisplayedChips), uiPx(42));
+    setLabelScaledText(mLblMult,  formatScoreNumber(mDisplayedMult),  uiPx(42));
     updateFlameIntensity();
 
-    int gained = static_cast<int>(r.chips * r.mult * r.xmult);
+    double gained = r.chips * r.mult * r.xmult;
+    if (!std::isfinite(gained)) gained = std::numeric_limits<double>::max();
 
     // ── 提取参与计分的 played 区卡片下标(去重,按 x 排序,对应原版 table.sort by T.x) ──
     QVector<int> scoringIndices;
@@ -2648,7 +2665,7 @@ void MainWindow::onHandPlayed()
                           + qMax(0, scoringIndices.size() - 1) * staggerStepMs
                           + upDurationMs;
     int delayBase = highlightDoneMs + 180;   // 180ms 缓冲,对应原版 delay(0.2) + 余量
-    int delayStep = 230;
+    int delayStep = 180;
 
     for (int ei = 0; ei < r.events.size(); ++ei) {
         const ScoreEvent ev = r.events[ei];
@@ -2661,9 +2678,9 @@ void MainWindow::onHandPlayed()
     int finalDelay = delayBase + r.events.size() * delayStep + 260;
     QTimer::singleShot(finalDelay, this, [this, r, gained, finalDelay]() {
         mDisplayedChips = r.chips;
-        mDisplayedMult  = qRound(r.mult * r.xmult);
-        mLblChips->setText(formatScoreNumber(r.chips));
-        mLblMult ->setText(formatScoreNumber(mDisplayedMult));
+        mDisplayedMult  = r.mult * r.xmult;
+        setLabelScaledText(mLblChips, formatScoreNumber(r.chips),          uiPx(42));
+        setLabelScaledText(mLblMult,  formatScoreNumber(mDisplayedMult),   uiPx(42));
         updateFlameIntensity();
         animateScoreTotalThenFinalize(gained, finalDelay);
     });
@@ -4321,14 +4338,11 @@ void MainWindow::animateScoreTotalThenFinalize(double gained, int /*delayAfterEv
     anim->setEasingCurve(QEasingCurve::OutCubic);
     connect(anim, &QVariantAnimation::valueChanged, this, [this](const QVariant &v) {
         const double shown = v.toDouble();
-        mLblScore->setText(formatScoreNumber(shown));
+        setLabelScaledText(mLblScore, formatScoreNumber(shown), uiPx(38));
         updateScoreProgressBar(shown, true);
-        QFont f = mLblScore->font();
-        f.setPixelSize(uiPx(30) + (int(std::llround(std::fmod(std::abs(shown), 2.0)))));
-        mLblScore->setFont(f);
     });
     connect(anim, &QVariantAnimation::finished, this, [this, after]() {
-        mLblScore->setText(formatScoreNumber(after));
+        setLabelScaledText(mLblScore, formatScoreNumber(after), uiPx(38));
         updateScoreProgressBar(after, true);
         // 火焰目标在 900ms 后归零(spring ease 自然熄灭)
         QTimer::singleShot(900, this, [this]() { resetScoreFlame(); });
@@ -4492,8 +4506,8 @@ void MainWindow::updateHandPreview()
     mLblHandName ->setText(r.name);
     mLblHandLevel->setText(QString("等级%1").arg(r.level));
     mLblHandLevel->setStyleSheet(QString("color:%1; background:transparent;").arg(handLevelColor(r.level)));
-    mLblChips->setText(formatScoreNumber(r.chips));
-    mLblMult ->setText(formatScoreNumber(r.mult));
+    setLabelScaledText(mLblChips, formatScoreNumber(r.chips), uiPx(42));
+    setLabelScaledText(mLblMult,  formatScoreNumber(r.mult),  uiPx(42));
 }
 
 void MainWindow::playScoreEvent(const ScoreEvent &ev)
@@ -4526,7 +4540,7 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev)
         color = QColor("#009dff");
         text = QString("+%1").arg(formatScoreNumber(ev.intValue));
         mDisplayedChips += ev.intValue;
-        mLblChips->setText(formatScoreNumber(mDisplayedChips));
+        setLabelScaledText(mLblChips, formatScoreNumber(mDisplayedChips), uiPx(42));
         break;
 
     case ScoreEventKind::EnhancementMult:
@@ -4535,7 +4549,7 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev)
         color = QColor("#fe5f55");
         text = QString("+%1").arg(formatScoreNumber(ev.intValue));
         mDisplayedMult += ev.intValue;
-        mLblMult->setText(formatScoreNumber(mDisplayedMult));
+        setLabelScaledText(mLblMult, formatScoreNumber(mDisplayedMult), uiPx(42));
         break;
 
     case ScoreEventKind::EnhancementXMult:
@@ -4547,7 +4561,7 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev)
         isXMult = true;
         mDisplayedMult = std::max(1.0, mDisplayedMult * ev.xmultValue);
         if (!std::isfinite(mDisplayedMult)) mDisplayedMult = std::numeric_limits<double>::infinity();
-        mLblMult->setText(formatScoreNumber(mDisplayedMult));
+        setLabelScaledText(mLblMult, formatScoreNumber(mDisplayedMult), uiPx(42));
         break;
 
     case ScoreEventKind::DollarGain:

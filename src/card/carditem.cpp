@@ -619,8 +619,8 @@ void CardItem::hoverMoveEvent(QGraphicsSceneHoverEvent *event) {
     qreal ny = (ly / HEIGHT) - 0.5;
     // 原版 card.lua 的 tilt_factor = 0.3，相比起以前 ±10° 视觉效果上要轻得多；
     // 这里收敛到 ±5°（边缘）并保留中心几乎无倾斜的手感。
-    mHoverTiltY = qBound(-5.0, nx * 10.0, 5.0);
-    mHoverTiltX = qBound(-5.0, ny * 10.0, 5.0);
+    mHoverTiltY = qBound(-3.0, nx * 6.0, 3.0);
+    mHoverTiltX = qBound(-3.0, ny * 6.0, 3.0);
     applyTransform();
     QGraphicsObject::hoverMoveEvent(event);
 }

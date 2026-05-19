@@ -69,7 +69,7 @@ void PackOpenWidget::buildUi()
 {
     mPanel = new QWidget(this);
     // 开包界面必须能在当前 playPage 内完整显示，不能再强制 880px 高。
-    mPanel->setMinimumSize(760, 560);
+    mPanel->setMinimumSize(820, 600);
     mPanel->setStyleSheet("background: transparent; border: none;");
 
     auto *root = new QVBoxLayout(mPanel);
@@ -99,8 +99,8 @@ void PackOpenWidget::buildUi()
     mHandView->setAttribute(Qt::WA_TranslucentBackground);
     mHandView->viewport()->setAttribute(Qt::WA_TranslucentBackground);
     mHandView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    // 230：给下方选项卡 + 包名/跳过行留足空间，避免底部被裁。
-    mHandView->setMinimumHeight(230);
+    // 270：给下方选项卡 + 包名/跳过行留足空间，避免底部被裁。
+    mHandView->setMinimumHeight(270);
     mHandView->setMouseTracking(true);
     root->addWidget(mHandView);
 
@@ -125,40 +125,40 @@ void PackOpenWidget::buildUi()
         // 卡片图采样比例 142×190 ≈ 1:1.34；imageLbl 必须高度 ≥ 168 才能完整展示，
         // 否则像之前那样把 126×168 缩放成的 pixmap 塞进 126×148 的 QLabel，
         // 上下各被裁掉约 10px——表现就是塔罗 / 幻灵牌顶部和底部"少了一截"。
-        ou.card->setFixedSize(138, 260);
+        ou.card->setFixedSize(160, 320);
         ou.card->setStyleSheet("background:transparent; border:none;");
 
         auto *vbl = new QVBoxLayout(ou.card);
         vbl->setContentsMargins(4, 4, 4, 4);
-        vbl->setSpacing(3);
+        vbl->setSpacing(4);
 
         ou.imageLbl = new QLabel(ou.card);
-        ou.imageLbl->setFixedSize(112, 150);
+        ou.imageLbl->setFixedSize(140, 188);
         ou.imageLbl->setAlignment(Qt::AlignCenter);
         ou.imageLbl->setStyleSheet("background:transparent;");
         vbl->addWidget(ou.imageLbl, 0, Qt::AlignCenter);
 
         ou.nameLbl = new QLabel("", ou.card);
-        QFont nf = mCNFont; nf.setPixelSize(11); nf.setBold(true);
+        QFont nf = mCNFont; nf.setPixelSize(13); nf.setBold(true);
         ou.nameLbl->setFont(nf);
         ou.nameLbl->setStyleSheet("color:white; background:transparent;");
         ou.nameLbl->setAlignment(Qt::AlignCenter);
         ou.nameLbl->setWordWrap(true);
-        ou.nameLbl->setFixedHeight(30);
+        ou.nameLbl->setFixedHeight(36);
         vbl->addWidget(ou.nameLbl);
 
         ou.descLbl = new QLabel("", ou.card);
-        QFont df = mCNFont; df.setPixelSize(8);
+        QFont df = mCNFont; df.setPixelSize(10);
         ou.descLbl->setFont(df);
         ou.descLbl->setStyleSheet("color:#aab2ba; background:transparent;");
         ou.descLbl->setAlignment(Qt::AlignCenter);
         ou.descLbl->setWordWrap(true);
-        ou.descLbl->setFixedHeight(38);
+        ou.descLbl->setFixedHeight(44);
         vbl->addWidget(ou.descLbl);
 
         ou.takeBtn = new QPushButton("选择", ou.card);
-        ou.takeBtn->setFixedHeight(28);
-        QFont bf = mCNFont; bf.setPixelSize(11);
+        ou.takeBtn->setFixedHeight(34);
+        QFont bf = mCNFont; bf.setPixelSize(13);
         ou.takeBtn->setFont(bf);
         ou.takeBtn->setCursor(Qt::PointingHandCursor);
         ou.takeBtn->setStyleSheet(
@@ -250,6 +250,7 @@ void PackOpenWidget::buildUi()
     bottomLayout->setContentsMargins(0, 0, 0, 0);
     bottomLayout->setSpacing(10);
 
+    bottomLayout->addSpacing(96 + 10);
     bottomLayout->addStretch(1);
 
     auto *titleCol = new QWidget(bottomBar);
@@ -273,7 +274,7 @@ void PackOpenWidget::buildUi()
         "QPushButton:hover { background:#777; }"
         );
     connect(mBtnSkip, &QPushButton::clicked, this, &PackOpenWidget::onSkip);
-    bottomLayout->addWidget(mBtnSkip, 0, Qt::AlignRight | Qt::AlignVCenter);
+    bottomLayout->addWidget(mBtnSkip, 0, Qt::AlignVCenter);
 
     root->addWidget(bottomBar);
 }
@@ -1156,8 +1157,8 @@ void PackOpenWidget::resizeEvent(QResizeEvent *e)
 void PackOpenWidget::layoutPanel()
 {
     if (!mPanel) return;
-    const int minW = qMin(width(),  760);
-    const int minH = qMin(height(), 560);
+    const int minW = qMin(width(),  820);
+    const int minH = qMin(height(), 600);
     const int maxW = qMin(width()  - 12, 1180);
     const int maxH = qMin(height() - 12, 820);
     int panelW = qBound(minW, int(width()  * 0.96), qMax(minW, maxW));

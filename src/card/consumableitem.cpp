@@ -281,11 +281,6 @@ void ConsumableItem::hoverMoveEvent(QGraphicsSceneHoverEvent *e)
         QGraphicsObject::hoverMoveEvent(e);
         return;
     }
-    const qreal nx = e->pos().x() / WIDTH - 0.5;
-    const qreal ny = e->pos().y() / HEIGHT - 0.5;
-    mHoverTiltY = qBound(-10.0, nx * 20.0, 10.0);
-    mHoverTiltX = qBound(-10.0, ny * 20.0, 10.0);
-    applyHoverTransform();
     QGraphicsObject::hoverMoveEvent(e);
 }
 

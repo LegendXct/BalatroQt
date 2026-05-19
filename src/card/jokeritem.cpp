@@ -284,7 +284,12 @@ void JokerItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) 
         while (order.size() > 160) cache.remove(order.takeFirst());
     }
     p->setRenderHint(QPainter::SmoothPixmapTransform, true);
-    p->drawPixmap(QRectF(0, 0, WIDTH, HEIGHT), pix, QRectF(0, 0, SRC_W, SRC_H));
+    if (mJoker.type == JokerType::HalfJoker) {
+        p->drawPixmap(QRectF(0, HEIGHT / 4.0, WIDTH, HEIGHT / 2.0),
+                      pix, QRectF(0, 0, SRC_W, SRC_H / 2.0));
+    } else {
+        p->drawPixmap(QRectF(0, 0, WIDTH, HEIGHT), pix, QRectF(0, 0, SRC_W, SRC_H));
+    }
 
     if (mHovered) {
         p->setPen(QPen(QColor(255, 240, 96, 200), 4));
@@ -387,12 +392,6 @@ void JokerItem::hoverMoveEvent(QGraphicsSceneHoverEvent *e)
         QGraphicsObject::hoverMoveEvent(e);
         return;
     }
-    const qreal nx = e->pos().x() / WIDTH - 0.5;
-    const qreal ny = e->pos().y() / HEIGHT - 0.5;
-    // 对齐原版 shader 顶点阶段的 hover 透视感：只是改变投影，不重绘像素贴图。
-    mHoverTiltY = qBound(-10.0, nx * 20.0, 10.0);
-    mHoverTiltX = qBound(-10.0, ny * 20.0, 10.0);
-    applyHoverTransform();
     QGraphicsObject::hoverMoveEvent(e);
 }
 
