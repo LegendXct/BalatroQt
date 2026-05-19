@@ -788,10 +788,11 @@ void paintFlame(QPainter *p, const QRectF &rect, double amount,
 {
     if (!p || amount <= 0.05 || rect.width() <= 1 || rect.height() <= 1) return;
 
-    // 移植 flame.fs:小分辨率(60×W^h格)的 fractal noise,每帧重新算
+    // 移植 flame.fs:小分辨率 fractal noise,每帧重新算。
+    // 之前 0.35 倍 sample 太小，放大后非常糊；提到 0.7×、上限 140，火焰边缘更利。
     const double intensity = std::min(10.0, amount);
-    const int W = qBound(24, int(rect.width()  * 0.35), 80);
-    const int H = qBound(24, int(rect.height() * 0.35), 80);
+    const int W = qBound(40, int(rect.width()  * 0.70), 140);
+    const int H = qBound(40, int(rect.height() * 0.70), 140);
 
     QImage img(W, H, QImage::Format_ARGB32_Premultiplied);
     img.fill(0);
@@ -870,17 +871,15 @@ void paintFlame(QPainter *p, const QRectF &rect, double amount,
             int ir = qBound(0, int(r * 255.0), 255);
             int ig = qBound(0, int(g * 255.0), 255);
             int ib = qBound(0, int(b * 255.0), 255);
-            // 顶部边缘 alpha 渐隐让火焰收尾平滑
-            double a = 1.0;
-            if (uy > 0.35) a *= std::max(0.0, 1.0 - (uy - 0.35) * 4.0);
-            int ia = qBound(0, int(a * 255.0), 255);
+            // 对齐 flame.fs：smokeRes <= 1 时 alpha 固定 1.0；不再在顶部人为渐隐。
             // premultiplied
-            row[px] = qRgba(int(ir * a), int(ig * a), int(ib * a), ia);
+            row[px] = qRgba(ir, ig, ib, 255);
         }
     }
 
     p->save();
-    p->setRenderHint(QPainter::SmoothPixmapTransform, true);
+    // 关闭平滑插值——原版火焰是 pixel-art 风格，nearest-neighbor 放大保留锯齿边的"硬"火焰感。
+    p->setRenderHint(QPainter::SmoothPixmapTransform, false);
     p->drawImage(rect, img);
     p->restore();
 }

@@ -36,6 +36,7 @@ public:
     static void loadResources();
     explicit CardItem(const CardData &data, QGraphicsItem *parent = nullptr);
     QRectF boundingRect() const override;
+    QPainterPath shape() const override;
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget) override;
     const CardData &cardData() const {return mData;}
     void setCardData(const CardData &data);
@@ -45,6 +46,18 @@ public:
     void flip();
     void juiceUp(double scaleAmount = 1.2, int durationMs = 240);
     void setBaseRotation(double deg) { mBaseRotation = deg; applyTransform(); }
+    // 平滑改变 scale；hover 进入/离开时用它代替 setScale() 的瞬时跳变。
+    void animateScale(qreal target, int durationMs = 110);
+    // 控制是否允许拖拽；牌堆右下角的"查看牌组"卡牌需要 false，禁用拖动行为。
+    void setDraggable(bool d) { mDraggable = d; }
+    bool isDraggable() const { return mDraggable; }
+    // 关闭跟随鼠标的 3D 倾斜——牌堆按钮 / 计分时的 played 卡需要静态展示。
+    void setHoverTiltEnabled(bool enabled) { mHoverTiltEnabled = enabled; }
+    // boundingRect 默认 (-12, -78, W+24, H+92) 比可见牌面更大（给悬浮标签预留位置）。
+    // 牌堆按钮不希望"在牌面上方就触发悬浮"，可调用此函数让 hit-test 只覆盖真正的牌面矩形。
+    void setStrictHoverShape(bool s) { mStrictHoverShape = s; }
+    // 触发对齐 card.lua Card:hover() 的极小抖动（旋转 +/-0.7°，scale ~2% 弹动）。
+    void triggerHoverJitter();
 signals:
     void clicked(CardItem *card);
     void dragMoved(CardItem *card, QPointF scenePos);
@@ -63,11 +76,15 @@ private:
     bool mHovered = false;
     bool mPressed = false;
     bool mDragging = false;
+    bool mDraggable = true;
+    bool mHoverTiltEnabled = true;
+    bool mStrictHoverShape = false;
     QPointF mPressScenePos;
 
     double mBaseRotation = 0.0;       // Z 轴旋转(扇形)
     double mHoverTiltX  = 0.0;        // 绕 X 轴倾斜(度,-25 ~ +25)
     double mHoverTiltY  = 0.0;        // 绕 Y 轴倾斜
+    double mJitterRot = 0.0;          // 悬浮抖动当前叠加的 Z 旋转(度)，仅短暂存在
     void applyTransform();
 
     QRect whiteBaseSrcRect() const; // 白色底片

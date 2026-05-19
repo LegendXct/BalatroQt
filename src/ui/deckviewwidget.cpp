@@ -308,6 +308,7 @@ void DeckViewWidget::showFull()
 void DeckViewWidget::closeView()
 {
     hide();
+    emit closed();
 }
 
 void DeckViewWidget::refreshTabs()

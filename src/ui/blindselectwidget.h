@@ -6,6 +6,7 @@
 
 class QLabel;
 class QPushButton;
+class AnimatedBlindChip;
 
 class BlindSelectWidget : public QWidget
 {
@@ -32,9 +33,9 @@ private:
     // 对齐原版 blind_select：原版三张盲注卡始终插在屏幕下沿，下半截看不到，整体高大。
     // 这里把 CARD_H 推到 820 让卡看上去"很壮"，BOTTOM_OVERFLOW > CURRENT_LIFT 让当前
     // 卡升起时仍然看不到自己的下边缘（也看不到旁边卡的下边缘）。
-    static constexpr int CARD_W          = 290;
+    static constexpr int CARD_W          = 320;   // 介于早期 290 与一度尝试的 360 之间，避免视觉过粗
     static constexpr int CARD_H          = 820;
-    static constexpr int GAP             = 28;
+    static constexpr int GAP             = 56;   // 28→56 让三张盲注卡更舒展，不再挤成一堆
     static constexpr int LEFT_MARGIN     = 24;    // 距左面板右沿
     static constexpr int CURRENT_LIFT    = 56;    // 当前可选卡上提
     // 下方至少超出 CURRENT_LIFT + 16 dp，使升起后底边仍在屏幕下方。
@@ -47,7 +48,7 @@ private:
         QPushButton *actionBtn;     // 顶部状态按钮
         QWidget     *upperBox;
         QLabel      *banner;        // 名字横幅
-        QLabel      *chipImg;
+        AnimatedBlindChip *chipImg = nullptr;
         QLabel      *bossDescLbl;
         QLabel      *targetLbl;
         QLabel      *rewardTextLbl = nullptr;    // 中文"奖励"

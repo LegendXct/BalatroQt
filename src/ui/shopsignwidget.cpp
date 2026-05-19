@@ -25,10 +25,10 @@ ShopSignWidget::~ShopSignWidget() = default;
 
 QSize ShopSignWidget::sizeHint() const
 {
-    // 显示尺寸:原图是 @2x 226×114,缩到 226×114(直接 1:1)或更大都行
-    // 为侧边栏适配,目标宽度 200(留 padding)→ 高度按比例
-    if (mFrameW == 0) return QSize(200, 100);
-    int targetW = 200;
+    // 显示尺寸:原图是 @2x 226×114。原本压到 200 让侧边栏 SHOP 招牌略显小气，
+    // 拉大到 280 让它撑满更多侧边栏宽度，跟其它组件视觉权重一致。
+    if (mFrameW == 0) return QSize(280, 140);
+    int targetW = 280;
     int targetH = targetW * mFrameH / mFrameW;
     return QSize(targetW, targetH);
 }

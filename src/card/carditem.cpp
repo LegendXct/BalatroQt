@@ -16,6 +16,8 @@
 #include <QFontMetrics>
 #include <QtGlobal>
 #include <QApplication>
+#include <QRandomGenerator>
+#include <QVariantAnimation>
 #include <cmath>
 #include "../utils/shadereffects.h"
 
@@ -197,6 +199,18 @@ QRectF CardItem::boundingRect() const {
     return QRectF(-12, -78, WIDTH + 24, HEIGHT + 92);
 }
 
+QPainterPath CardItem::shape() const {
+    QPainterPath p;
+    if (mStrictHoverShape) {
+        // 严格命中：只命中真正的牌面矩形，不把上方悬浮标签 / 外发光区域算进 hit-test。
+        // 这样鼠标在牌堆按钮"上方那条空白带"里时不会触发 hoverEnter。
+        p.addRect(QRectF(0, 0, WIDTH, HEIGHT));
+    } else {
+        p.addRect(boundingRect());
+    }
+    return p;
+}
+
 void CardItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) {
     painter->setRenderHint(QPainter::SmoothPixmapTransform, false);
     if (mData.faceUp) paintFront(painter);
@@ -344,7 +358,11 @@ void CardItem::paintBack(QPainter *painter) {
 
 void CardItem::setCardData(const CardData &data) {
     const bool wasAnimated = cardNeedsShaderTick(mData);
+    // 保留当前的翻面状态——塔罗 / 幻灵牌应用增强期间，UI 会先把目标牌 flip() 翻成背面，
+    // 这时若 setCardData 把 faceUp 重置成 true（CardData 默认值），翻牌动画就被破坏了。
+    const bool keepFaceUp = mData.faceUp;
     mData = data;
+    mData.faceUp = keepFaceUp;
     const bool nowAnimated = cardNeedsShaderTick(mData);
     if (nowAnimated && !wasAnimated) {
         ensureCardShaderTimer();
@@ -432,7 +450,8 @@ void CardItem::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
         QGraphicsObject::mouseMoveEvent(event);
         return;
     }
-    if (!mDragging && QLineF(event->scenePos(), mPressScenePos).length() > kCardDragStartDistance) {
+    if (mDraggable && !mDragging
+        && QLineF(event->scenePos(), mPressScenePos).length() > kCardDragStartDistance) {
         mDragging = true;
         setZValue(600);
     }
@@ -518,16 +537,70 @@ void CardItem::applyTransform()
         );
     t = persp * t;
 
-    // 应用 Z 轴扇形旋转
-    t.rotateRadians(zRot);
+    // 应用 Z 轴扇形旋转 + 悬浮抖动叠加
+    t.rotateRadians(zRot + qDegreesToRadians(mJitterRot));
 
     t.translate(-cx, -cy);
     setTransform(t);
 }
 
+void CardItem::triggerHoverJitter()
+{
+    // 对齐 card.lua: Card:hover() -> juice_up(0.05, 0.03) -> Moveable.juice_up(scale=0.02, rot=±0.012rad ≈ ±0.7°)
+    // 这里用两段短旋转动画：先转到 +/-0.8°，再回 0；并叠加一个 scale 微脉冲。
+    const double dir = (QRandomGenerator::global()->bounded(2) == 0) ? -1.0 : 1.0;
+    const double peakRot = 0.8 * dir;
+
+    auto *rotOut = new QVariantAnimation(this);
+    rotOut->setDuration(70);
+    rotOut->setStartValue(0.0);
+    rotOut->setEndValue(peakRot);
+    rotOut->setEasingCurve(QEasingCurve::OutQuad);
+    connect(rotOut, &QVariantAnimation::valueChanged, this, [this](const QVariant &v) {
+        mJitterRot = v.toDouble();
+        applyTransform();
+    });
+
+    auto *rotBack = new QVariantAnimation(this);
+    rotBack->setDuration(140);
+    rotBack->setStartValue(peakRot);
+    rotBack->setEndValue(0.0);
+    rotBack->setEasingCurve(QEasingCurve::OutQuad);
+    connect(rotBack, &QVariantAnimation::valueChanged, this, [this](const QVariant &v) {
+        mJitterRot = v.toDouble();
+        applyTransform();
+    });
+
+    auto *seq = new QSequentialAnimationGroup(this);
+    seq->addAnimation(rotOut);
+    seq->addAnimation(rotBack);
+    seq->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+void CardItem::animateScale(qreal target, int durationMs) {
+    // 单只复用的 "CardScaleAnim"，hover 反复进出时不会堆叠多只动画。
+    QPropertyAnimation *anim = findChild<QPropertyAnimation*>(QStringLiteral("CardScaleAnim"),
+                                                              Qt::FindDirectChildrenOnly);
+    if (!anim) {
+        anim = new QPropertyAnimation(this, "scale", this);
+        anim->setObjectName(QStringLiteral("CardScaleAnim"));
+        anim->setEasingCurve(QEasingCurve::OutCubic);
+    } else {
+        anim->stop();
+    }
+    anim->setDuration(durationMs);
+    anim->setStartValue(scale());
+    anim->setEndValue(target);
+    anim->start();
+}
+
 void CardItem::hoverEnterEvent(QGraphicsSceneHoverEvent *event) {
     mHovered = true;
-    setScale(1.04);
+    // 不再直接 setScale 让放大瞬切——平滑过渡 90ms，避免选中升起动画同时遇上瞬间缩放产生顿挫感。
+    animateScale(1.04, 90);
+    // 对齐 card.lua 中 Card:hover() 的 self:juice_up(0.05, 0.03)：进入悬浮时
+    // 给一个非常细微的"抖一下"，让卡牌像被指尖触碰一样轻微弹动。
+    triggerHoverJitter();
     update();
     emit hoverChanged(this, true);
     QGraphicsObject::hoverEnterEvent(event);
@@ -535,15 +608,19 @@ void CardItem::hoverEnterEvent(QGraphicsSceneHoverEvent *event) {
 
 void CardItem::hoverMoveEvent(QGraphicsSceneHoverEvent *event) {
     if (!mHovered) return;
+    if (!mHoverTiltEnabled) {
+        QGraphicsObject::hoverMoveEvent(event);
+        return;
+    }
     // 标签区域也属于 boundingRect，所以这里把鼠标位置限制在牌面内部，避免移到标签上方时产生夸张倾斜。
     qreal lx = qBound<qreal>(0.0, event->pos().x(), qreal(WIDTH));
     qreal ly = qBound<qreal>(0.0, event->pos().y(), qreal(HEIGHT));
     qreal nx = (lx / WIDTH)  - 0.5;     // [-0.5, 0.5]
     qreal ny = (ly / HEIGHT) - 0.5;
-    // 对齐原版 card.lua 的 tilt：鼠标在哪个角，牌面就朝那个角倾斜；
-    // JokerItem / ConsumableItem 都是 ±10°，CardItem 也用同一节奏。
-    mHoverTiltY = qBound(-10.0, nx * 20.0, 10.0);
-    mHoverTiltX = qBound(-10.0, ny * 20.0, 10.0);
+    // 原版 card.lua 的 tilt_factor = 0.3，相比起以前 ±10° 视觉效果上要轻得多；
+    // 这里收敛到 ±5°（边缘）并保留中心几乎无倾斜的手感。
+    mHoverTiltY = qBound(-5.0, nx * 10.0, 5.0);
+    mHoverTiltX = qBound(-5.0, ny * 10.0, 5.0);
     applyTransform();
     QGraphicsObject::hoverMoveEvent(event);
 }
@@ -553,7 +630,8 @@ void CardItem::hoverLeaveEvent(QGraphicsSceneHoverEvent *event) {
     emit hoverChanged(this, false);
     mHoverTiltX = 0;
     mHoverTiltY = 0;
-    setScale(1.0);
+    // scale 平滑回 1.0；tilt 用直接 setTransform 重置（应用 applyTransform）。
+    animateScale(1.0, 130);
     applyTransform();
     update();
     QGraphicsObject::hoverLeaveEvent(event);

@@ -237,6 +237,8 @@ QColor DynamicBackgroundItem::baseA() const
     case Mood::Celestial:   return scaleColour(black, 0.90);
     case Mood::Shop:        return rgb(78, 43, 42);
     case Mood::BlindSelect: return scaleColour(rgb(0x50, 0x84, 0x6e), 0.90);
+    // Boss 盲注：底色取自原版 globals.lua:BLIND.Boss = HEX("b44430")。
+    case Mood::Boss:        return scaleColour(rgb(0xb4, 0x44, 0x30), 0.55);
     case Mood::Default:     return scaleColour(rgb(0x50, 0x84, 0x6e), 0.90);
     }
     return scaleColour(rgb(0x50, 0x84, 0x6e), 0.90);
@@ -252,6 +254,7 @@ QColor DynamicBackgroundItem::baseB() const
     case Mood::Celestial:   return scaleColour(rgb(0x37, 0x42, 0x44), 1.30);
     case Mood::Shop:        return rgb(126, 88, 62);
     case Mood::BlindSelect: return scaleColour(rgb(0x50, 0x84, 0x6e), 1.30);
+    case Mood::Boss:        return scaleColour(rgb(0xb4, 0x44, 0x30), 1.20);
     case Mood::Default:     return scaleColour(rgb(0x50, 0x84, 0x6e), 1.30);
     }
     return scaleColour(rgb(0x50, 0x84, 0x6e), 1.30);
@@ -267,6 +270,7 @@ QColor DynamicBackgroundItem::accent() const
     case Mood::Celestial:   return scaleColour(rgb(0x37, 0x42, 0x44), 0.70);
     case Mood::Shop:        return rgb(34, 44, 46);
     case Mood::BlindSelect: return scaleColour(rgb(0x50, 0x84, 0x6e), 0.70);
+    case Mood::Boss:        return scaleColour(rgb(0xb4, 0x44, 0x30), 0.40);
     case Mood::Default:     return scaleColour(rgb(0x50, 0x84, 0x6e), 0.70);
     }
     return scaleColour(rgb(0x50, 0x84, 0x6e), 0.70);
@@ -282,6 +286,7 @@ double DynamicBackgroundItem::targetContrast() const
     case Mood::Celestial:   return 3.0;
     case Mood::Shop:        return 1.35;
     case Mood::BlindSelect: return 1.0;
+    case Mood::Boss:        return 2.4;     // 比正常对战略高的对比度，渲染 boss 紧张感
     case Mood::Default:     return 1.0;
     }
     return 1.0;
@@ -297,6 +302,7 @@ double DynamicBackgroundItem::targetSpin() const
     case Mood::Celestial:   return 0.065;
     case Mood::Shop:        return 0.025;
     case Mood::BlindSelect: return 0.012;
+    case Mood::Boss:        return 0.024;
     case Mood::Default:     return 0.018;
     }
     return 0.018;

@@ -90,7 +90,8 @@ void PackOpenWidget::buildUi()
     mHandView->setAttribute(Qt::WA_TranslucentBackground);
     mHandView->viewport()->setAttribute(Qt::WA_TranslucentBackground);
     mHandView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    mHandView->setMinimumHeight(240);
+    // 280：略缩一点给下方选项卡 + bottomBar 留更多余地，避免包信息被压到看不到。
+    mHandView->setMinimumHeight(280);
     mHandView->setMouseTracking(true);
     root->addWidget(mHandView);
 
@@ -112,7 +113,10 @@ void PackOpenWidget::buildUi()
     for (int i = 0; i < 5; ++i) {
         OptUi ou;
         ou.card = new QWidget(optionsBox);
-        ou.card->setFixedSize(154, 320);
+        // 卡片图采样比例 142×190 ≈ 1:1.34；imageLbl 必须高度 ≥ 168 才能完整展示，
+        // 否则像之前那样把 126×168 缩放成的 pixmap 塞进 126×148 的 QLabel，
+        // 上下各被裁掉约 10px——表现就是塔罗 / 幻灵牌顶部和底部"少了一截"。
+        ou.card->setFixedSize(154, 300);
         ou.card->setStyleSheet("background:transparent; border:none;");
 
         auto *vbl = new QVBoxLayout(ou.card);
@@ -229,11 +233,14 @@ void PackOpenWidget::buildUi()
     root->addWidget(midRow, 1);
 
     // ── 底部:包名 + 跳过 ──
+    // 用左右等长的 stretch 把"包名 + 剩余次数"夹在水平正中；跳过按钮挂在右侧但不影响中心对齐。
     auto *bottomBar = new QWidget(mPanel);
     bottomBar->setStyleSheet("background:transparent;");
+    bottomBar->setFixedHeight(78);
     auto *bottomLayout = new QHBoxLayout(bottomBar);
     bottomLayout->setContentsMargins(0, 0, 0, 0);
     bottomLayout->setSpacing(12);
+
     bottomLayout->addStretch(1);
 
     auto *titleCol = new QWidget(bottomBar);
@@ -244,6 +251,8 @@ void PackOpenWidget::buildUi()
     titleLayout->addWidget(mLblTitle);
     titleLayout->addWidget(mLblChoose);
     bottomLayout->addWidget(titleCol, 0, Qt::AlignCenter);
+
+    bottomLayout->addStretch(1);
 
     mBtnSkip = new QPushButton("跳过", bottomBar);
     mBtnSkip->setFixedSize(110, 56);
@@ -367,8 +376,18 @@ void PackOpenWidget::layoutPackHand(int skipIdx, bool instant)
     int n = mPackHandItems.size();
     if (n == 0) return;
 
-    int areaW = qMax(1, mHandView->viewport()->width());
-    int areaH = qMax(1, mHandView->viewport()->height());
+    int viewportH = qMax(1, mHandView->viewport()->height());
+    // 让卡牌按视口高度自动缩放：留出 hover 抬升（26% 卡高）+ 顶部 hover 标签 (~78px) + 上下边距。
+    // 单卡完整呈现需要：CardItem::HEIGHT * 1.26 + 78 + 16。把 view 整体 zoom 到这个比例。
+    const double neededH = CardItem::HEIGHT * 1.26 + 78.0 + 16.0;
+    const double scale = qBound(0.55, double(viewportH) / neededH, 1.0);
+    mHandView->resetTransform();
+    mHandView->scale(scale, scale);
+
+    // 场景区在缩放下：以 scene 坐标计算，view 自动按 scale 收缩到 viewport 区域。
+    // 用 viewport / scale 反推 scene 中可见区域大小。
+    int areaW = qMax(1, int(mHandView->viewport()->width()  / scale));
+    int areaH = qMax(1, int(mHandView->viewport()->height() / scale));
     mHandScene->setSceneRect(0, 0, areaW, areaH);
 
     int available = areaW - 80;
@@ -377,7 +396,8 @@ void PackOpenWidget::layoutPackHand(int skipIdx, bool instant)
     if (step < 30) step = 30;
     int totalW = (n - 1) * step + CardItem::WIDTH;
     int startX = qMax(8, (areaW - totalW) / 2);
-    int baseY = qMax(48, (areaH - CardItem::HEIGHT) / 2 + 20);
+    // baseY 贴底布局，留出 16px 下边距；上方剩余空间够 hover 抬升 + 悬浮标签。
+    int baseY = qMax(int(CardItem::HEIGHT * 0.30), areaH - CardItem::HEIGHT - 16);
 
     for (int i = 0; i < n; ++i) {
         if (i == skipIdx) continue;
@@ -389,7 +409,8 @@ void PackOpenWidget::layoutPackHand(int skipIdx, bool instant)
         double angleDeg = 0.2 * t * 180.0 / M_PI;
 
         int x = startX + i * step;
-        int y = baseY + (sel ? -40 : 0);
+        // 与主场景手牌一致：选中卡上提 26% 卡高（≈59px），动画感更接近原版。
+        int y = baseY + (sel ? -CardItem::HEIGHT * 26 / 100 : 0);
 
         c->setBaseRotation(angleDeg);
         c->setZValue(i);   // ← 见下面问题 2
@@ -430,7 +451,9 @@ void PackOpenWidget::onPackCardDragMoved(CardItem *card, QPointF scenePos)
     int n = mPackHandItems.size();
     if (n <= 1) return;
 
-    int areaW = qMax(1, mHandView->viewport()->width());
+    // 拖拽时 view 的缩放已由 layoutPackHand 设置好；这里直接用同样的 scale 反算。
+    const double dragScale = mHandView->transform().m11() != 0.0 ? mHandView->transform().m11() : 1.0;
+    int areaW = qMax(1, int(mHandView->viewport()->width() / dragScale));
     int available = areaW - 80;
     int step = (n > 1) ? (available - CardItem::WIDTH) / (n - 1) : 0;
     step = qMin(step, CardItem::WIDTH - 30);
@@ -456,8 +479,8 @@ void PackOpenWidget::onPackCardDragMoved(CardItem *card, QPointF scenePos)
     visual.removeAt(from);
     visual.insert(to, card);
 
-    int areaH = qMax(1, mHandView->viewport()->height());
-    int baseY = qMax(48, (areaH - CardItem::HEIGHT) / 2 + 20);
+    int areaH = qMax(1, int(mHandView->viewport()->height() / dragScale));
+    int baseY = qMax(int(CardItem::HEIGHT * 0.30), areaH - CardItem::HEIGHT - 16);
 
     for (int vi = 0; vi < visual.size(); ++vi) {
         CardItem *ci = visual[vi];
@@ -467,7 +490,7 @@ void PackOpenWidget::onPackCardDragMoved(CardItem *card, QPointF scenePos)
         double t = (-n / 2.0 - 0.5 + (vi + 1)) / n;
         double angleDeg = 0.2 * t * 180.0 / M_PI;
         int x = startX + vi * step;
-        int y = baseY + (sel ? -40 : 0);
+        int y = baseY + (sel ? -CardItem::HEIGHT * 26 / 100 : 0);
         ci->setBaseRotation(angleDeg);
         ci->setZValue(vi);   // 10 + vi → vi
         ci->moveTo(QPointF(x, y), 80);
@@ -484,7 +507,8 @@ void PackOpenWidget::onPackCardDragReleased(CardItem *card, QPointF scenePos)
     int n = mPackHandItems.size();
     if (n <= 1) { layoutPackHand(); return; }
 
-    int areaW = qMax(1, mHandView->viewport()->width());
+    const double dragScale = mHandView->transform().m11() != 0.0 ? mHandView->transform().m11() : 1.0;
+    int areaW = qMax(1, int(mHandView->viewport()->width() / dragScale));
     int available = areaW - 80;
     int step = (n > 1) ? (available - CardItem::WIDTH) / (n - 1) : 0;
     step = qMin(step, CardItem::WIDTH - 30);
@@ -968,8 +992,9 @@ void PackOpenWidget::startPackReveal()
     mRevealScene->clear();
     mRevealPackItem = mRevealScene->addPixmap(mRevealPackBase);
 
-    // 设计目标尺寸：高度约占 panel 高 0.55。
-    const double targetH = panelRect.height() * 0.55;
+    // 设计目标尺寸：高度约占 panel 高 0.32 —— 原版 booster 包不会占满中心，
+    // 之前 0.55 倍数把开包图标撑得太大，会跟选项卡 / 临时手牌位置打架。
+    const double targetH = panelRect.height() * 0.32;
     const double srcH = qMax(1.0, double(mRevealPackBase.height()));
     const double targetScale = targetH / srcH;
     mRevealPackItem->setTransformationMode(Qt::SmoothTransformation);
@@ -1045,14 +1070,20 @@ void PackOpenWidget::startPackReveal()
             mRevealPackItem->setOpacity(1.0 - easeInCubic(t));
             mRevealPackItem->setRotation(0.0);
 
-            // 进入阶段 C 的第一帧：启动 dissolve shader 定时器，触发选项喷射。
+            // 进入阶段 C 的第一帧：启动 dissolve shader 定时器；
+            // animateCardsIn() 推迟到 dissolve 接近完成时再触发，避免选项卡
+            // 在包还没彻底散开就提前出现，跟用户反馈"开包动画没结束后面内容就出现了"对齐。
             if (!*crackFired) {
                 *crackFired = true;
                 if (mRevealDissolveTimer && !mRevealDissolveTimer->isActive()) {
                     mRevealDissolveT = 0.0;
                     mRevealDissolveTimer->start();
                 }
-                animateCardsIn();
+                // dissolve 大概持续 460ms（见下方定时器），这里留 380ms 让包基本散完。
+                QPointer<PackOpenWidget> g(this);
+                QTimer::singleShot(380, this, [g]() {
+                    if (g) g->animateCardsIn();
+                });
             }
         }
     });
@@ -1113,10 +1144,12 @@ void PackOpenWidget::resizeEvent(QResizeEvent *e)
 void PackOpenWidget::layoutPanel()
 {
     if (!mPanel) return;
-    const int maxW = qMax(900, width() - 18);
-    const int maxH = qMax(720, height() - 24);
-    int panelW = qBound(900, int(width()  * 0.88), qMin(1200, maxW));
-    int panelH = qBound(720, int(height() * 0.85), qMin(960,  maxH));
+    const int maxW = qMax(820, width() - 18);
+    const int maxH = qMax(880, height() - 24);
+    // 标题 50 + 选择文本 30 + handView 280 + 选项 300 + bottomBar 78 + 间距/边距 ≈ 800 px。
+    // 最小高度抬到 880 才能完整容纳"包名 / 跳过"行不被裁。
+    int panelW = qBound(820, int(width()  * 0.96), qMin(1200, maxW));
+    int panelH = qBound(880, int(height() * 0.96), qMin(1040, maxH));
     mPanel->resize(panelW, panelH);
     int x = (width()  - mPanel->width())  / 2;
     int y = qMax(8, (height() - mPanel->height()) / 2);

@@ -1009,6 +1009,53 @@ bool GameState::buyShopOffer(int idx) {
     return true;
 }
 
+bool GameState::canBuyAndUseShopConsumable(int idx) const
+{
+    if (mPhase != GamePhase::Shop) return false;
+    if (idx < 0 || idx >= mShop.shopOffers().size()) return false;
+    const ShopOffer &o = mShop.shopOffers()[idx];
+    if (o.sold) return false;
+    if (o.kind != OfferKind::Tarot && o.kind != OfferKind::Planet && o.kind != OfferKind::Spectral)
+        return false;
+    if (mGold < o.cost) return false;
+    Consumable c = createConsumable(o.consumable);
+    // 需要选牌的消耗品（如 Magician/Empress/Sun/Moon 等）在商店没有手牌可选，禁用直接使用。
+    if (c.needsSelection > 0) return false;
+    if (c.type == ConsumableType::Tarot_Fool && !canUseFool()) return false;
+    return true;
+}
+
+bool GameState::buyAndUseShopConsumable(int idx, const QVector<int> &selectedHandIdx)
+{
+    if (mPhase != GamePhase::Shop) return false;
+    if (idx < 0 || idx >= mShop.shopOffers().size()) return false;
+    const ShopOffer &o = mShop.shopOffers()[idx];
+    if (o.sold) return false;
+    if (o.kind != OfferKind::Tarot && o.kind != OfferKind::Planet && o.kind != OfferKind::Spectral)
+        return false;
+    if (mGold < o.cost) return false;
+
+    // 先临时把消耗牌"塞进"消耗槽（即使槽满也能买并立即使用，原版 BUY AND USE 行为）。
+    ShopOffer t = mShop.takeShopOffer(idx);
+    mGold -= t.cost;
+    mConsumables.append(createConsumable(t.consumable));
+    int useIdx = mConsumables.size() - 1;
+
+    emit goldChanged();
+    emit shopChanged();
+
+    if (!useConsumable(useIdx, selectedHandIdx)) {
+        // 失败回滚：把刚加进去的牌移除、金币退回。
+        if (useIdx >= 0 && useIdx < mConsumables.size())
+            mConsumables.removeAt(useIdx);
+        mGold += t.cost;
+        emit consumablesChanged();
+        emit goldChanged();
+        return false;
+    }
+    return true;
+}
+
 bool GameState::buyVoucherOffer(int idx) {
     if (mPhase != GamePhase::Shop) return false;
     if (!mShop.canBuyVoucher(idx, mGold)) return false;

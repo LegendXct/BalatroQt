@@ -22,6 +22,7 @@ public:
         Buffoon,
         Standard,
         BlindSelect,
+        Boss,           // Boss 盲注期间用 G.C.BLIND.Boss (#b44430) 调底色
     };
 
     explicit DynamicBackgroundItem(QWidget *parent = nullptr);

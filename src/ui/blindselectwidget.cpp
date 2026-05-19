@@ -1,4 +1,5 @@
 #include "blindselectwidget.h"
+#include "animatedblindchip.h"
 #include "../game/bossblind.h"
 #include "../utils/constants.h"
 #include <QVBoxLayout>
@@ -166,7 +167,7 @@ void BlindSelectWidget::buildUi()
 
         // actionBtn 现在放在 upperBox 顶部
         b.actionBtn = new QPushButton("", b.upperBox);
-        b.actionBtn->setFixedSize(dp(170), dp(44));
+        b.actionBtn->setFixedSize(dp(200), dp(46));
         QFont aabf = mCNFont; aabf.setPixelSize(fontPx(20)); aabf.setBold(true);
         b.actionBtn->setFont(aabf);
         b.actionBtn->setCursor(Qt::PointingHandCursor);
@@ -178,7 +179,7 @@ void BlindSelectWidget::buildUi()
 
         // 名字横幅(parent 改成 upperBox)
         b.banner = new QLabel(labels[i], b.upperBox);
-        b.banner->setFixedSize(dp(190), dp(40));
+        b.banner->setFixedSize(dp(220), dp(42));
         QFont bf = mCNFont; bf.setPixelSize(fontPx(20)); bf.setBold(true);
         b.banner->setFont(bf);
         b.banner->setAlignment(Qt::AlignCenter);
@@ -193,10 +194,8 @@ void BlindSelectWidget::buildUi()
         uvbl->addWidget(b.banner, 0, Qt::AlignHCenter);
 
         // 芯片图：稍微缩小给整体卡片留出底部空间，保持上下排版不超出 CARD_H。
-        b.chipImg = new QLabel(b.upperBox);
-        b.chipImg->setFixedSize(dp(82), dp(82));
-        b.chipImg->setAlignment(Qt::AlignCenter);
-        b.chipImg->setStyleSheet("background:transparent; border:none;");
+        b.chipImg = new AnimatedBlindChip(b.upperBox);
+        b.chipImg->setDisplaySize(dp(82));
         uvbl->addWidget(b.chipImg, 0, Qt::AlignHCenter);
 
         // Boss 描述
@@ -361,7 +360,7 @@ void BlindSelectWidget::buildUi()
         b.tagName->hide(); // 名称不占用按钮行空间，改为悬停浮窗显示。
 
         b.skipBtn = new QPushButton("跳过", b.skipBox);
-        b.skipBtn->setFixedSize(dp(96), dp(48));
+        b.skipBtn->setFixedSize(dp(108), dp(50));
         b.skipBtn->setProperty("blindTagIdx", i);
         b.skipBtn->installEventFilter(this);
         QFont skf = mCNFont; skf.setPixelSize(fontPx(16)); skf.setBold(true);
@@ -524,12 +523,12 @@ void BlindSelectWidget::refresh()
                                     ).arg(darkenHex(mainCol, 0.3), mainCol));
 
         // ===== 芯片图、目标、奖励 =====
-        QPixmap pix = chipPixmap(i);
-        if (!pix.isNull())
-            b.chipImg->setPixmap(pix.scaled(dp(82), dp(82), Qt::KeepAspectRatio,
-                                            Qt::SmoothTransformation));
-        else
-            b.chipImg->clear();
+        // BlindChips.png 行号：0=小盲, 1=大盲, 其它=boss 行（bossChipRow）。
+        int chipRow = (i == 0) ? 0 : (i == 1 ? 1 : bossChipRow(mGS->pendingBossEffect()));
+        if (b.chipImg) {
+            b.chipImg->setBlindRow(chipRow);
+            b.chipImg->setDisplaySize(dp(82));
+        }
 
         b.targetLbl->setText(QString::number(targetFor(i)));
         QString dollars(rewardFor(i), '$');

@@ -13,6 +13,7 @@
 #include <QVBoxLayout>
 #include <QVector>
 #include <QSet>
+#include <QPointer>
 #include "../game/gamestate.h"
 #include "../card/carditem.h"
 #include "roundendoverlay.h"
@@ -28,6 +29,7 @@
 #include "deckviewwidget.h"
 #include "dynamicbackgrounditem.h"
 #include "splashshaderoverlay.h"
+#include "animatedblindchip.h"
 
 QT_BEGIN_NAMESPACE
 namespace Ui {
@@ -78,6 +80,7 @@ private:
     QPushButton *mBtnSortSuit = nullptr; // 花色理牌
     QPushButton *mBtnDiscard = nullptr; // 弃牌
     QGraphicsTextItem *mHandCountLabel  = nullptr;  // 8/8
+    QPointer<class QVariantAnimation> mHandCountLabelAnim;  // 手牌行下沉时 8/8 标签的动画
     QGraphicsTextItem *mDeckLabel       = nullptr;  // 52/52
     QGraphicsTextItem *mJokerCountLabel = nullptr;  // 0/5
 
@@ -127,6 +130,15 @@ private:
     QVector<QGraphicsRectItem*> mJokerSlotRects;
     QVector<QGraphicsRectItem*> mConsumableSlotRects;
     CardItem          *mDeckBackCard   = nullptr;
+    QGraphicsRectItem *mDeckStatsItem  = nullptr;  // 牌堆上的"查看牌组"提示
+    QGraphicsRectItem *mDeckPeekPanel  = nullptr;  // 出牌阶段悬停时从屏幕顶部滑入的牌型统计面板
+    QPointer<class QVariantAnimation> mDeckPeekAnim;
+    bool               mDeckPeekDeployed = false;  // 当前是否处于"hover 牌堆 + 统计面板可见"状态
+    bool               mDeckViewOpen     = false;  // "查看牌组"全屏面板是否打开——开启期间屏蔽牌堆 hover
+    void showDeckPeekPanel();
+    void hideDeckPeekPanel();
+    void buildDeckPeekPanel();
+    void layoutHandWithDeckPeek(bool peeking);
 
     QGraphicsProxyWidget *mPlayProxy    = nullptr;
     QGraphicsProxyWidget *mSortProxy    = nullptr;
@@ -136,10 +148,11 @@ private:
 
     // 上下文区(BlindSelect / Blind / Shop 三态)
     QStackedWidget *mContextArea  = nullptr;
+    QPointer<class QAbstractAnimation> mContextTransition;  // 当前正在跑的上下文区滑动动画
     QWidget *mCtxBlindSelect      = nullptr;
     QWidget *mCtxBlind            = nullptr;
     QWidget *mCtxShop             = nullptr;
-    QLabel  *mCtxBlindChipImg     = nullptr;
+    class AnimatedBlindChip *mCtxBlindChipImg = nullptr;
 
     QLabel *mLblHandName  = nullptr;   // 牌型名(高牌/对子/...)
     QLabel *mLblHandLevel = nullptr;   // "lv.X"
@@ -157,6 +170,8 @@ private:
     void setBackgroundMoodForPhase();
     void setBackgroundMoodForPack(PackKind kind);
     void onDeckClicked(CardItem *card);
+    void onDeckHoverChanged(CardItem *card, bool hovered);
+    void updateDeckStatsPopup();
     void onJokerPressed(JokerItem *item, Qt::MouseButton btn);
     void onJokerDragMoved(JokerItem *item, QPointF scenePos);
     void onJokerDragReleased(JokerItem *item, QPointF scenePos);
@@ -202,9 +217,15 @@ private:
     void onRoundWon(int blindReward, int handBonus, int interest);
     void onNextBlindClicked();
     void onGameOver(bool won);
-    QVector<QGraphicsPixmapItem*> mObtainedTagIcons;
-    void addObtainedTag(int tagCol, int tagRow);   // 在右下角加一个 tag 图
+    struct ObtainedTagEntry {
+        TagType type;
+        QGraphicsPixmapItem *item;
+    };
+    QVector<ObtainedTagEntry> mObtainedTagIcons;
+    void addObtainedTag(TagType type, int tagCol, int tagRow); // 在右下角加一个 tag 图标
+    void removeObtainedTag(TagType type);                       // 标签被使用后再移除
     void clearObtainedTags();
+    void relayoutObtainedTags();
 
     ShopWidget *mShopWidget = nullptr;
     QVector<JokerItem*> mJokerItems;     // 主场景上已持有的小丑视图
@@ -293,6 +314,7 @@ private:
     // 选项菜单使用主窗口内覆盖层，避免全屏 + QOpenGLWidget 场景中弹出原生 QDialog
     // 在部分显卡/驱动上触发黑屏重建。
     QWidget *mOptionsOverlay = nullptr;
+    QWidget *mRunInfoOverlay = nullptr;   // 替代旧的 QDialog 形式的"比赛信息"窗口
     void showOptionsOverlay();
     void hideOptionsOverlay();
     void startNewRunFromOptions();

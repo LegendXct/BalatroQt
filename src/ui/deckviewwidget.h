@@ -21,6 +21,9 @@ public:
     void open(const QVector<CardData> &remainingCards,
               const QVector<CardData> &fullDeckCards);
 
+signals:
+    void closed();    // 用户按"关闭"或调用 closeView()，让外部重新评估悬停状态
+
 protected:
     void resizeEvent(QResizeEvent *event) override;
 

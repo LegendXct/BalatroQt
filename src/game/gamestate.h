@@ -127,6 +127,11 @@ public:
 
     // 商店买入：扩展为支持 3 种 offer
     bool buyShopOffer(int offerIdx);     // ← 替代旧的 buyJoker
+    // 商店内消耗牌的"购买并使用"：买下后立即调用 useConsumable()。
+    // 仅当槽位够（或可放进临时槽）且选中牌满足消耗品需求时返回 true。
+    bool buyAndUseShopConsumable(int offerIdx, const QVector<int> &selectedHandIdx);
+    // 判断商店中的某个消耗牌是否可"购买并使用"（即不需要选牌，或可空选）。
+    bool canBuyAndUseShopConsumable(int offerIdx) const;
     bool buyPack(int offerIdx, PackContent &outContent);
     QVector<CardData> drawPackHand();
     void returnPackHand(const QVector<CardData> &packHand);

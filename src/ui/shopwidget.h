@@ -36,6 +36,10 @@ private:
         QLabel      *nameLbl  = nullptr;
         QLabel      *priceLbl = nullptr;
         QPushButton *cardBtn  = nullptr;
+        // 仅塔罗/星球/幻灵牌使用：原版 "BUY"/"BUY AND USE" 双按钮。
+        QWidget     *actionRow = nullptr;
+        QPushButton *buyBtn    = nullptr;
+        QPushButton *useBtn    = nullptr;
     };
 
     void buildUi();
@@ -47,6 +51,7 @@ private:
     QPixmap offerPixmap(const ShopOffer &o) const;
 
     void onBuyShop(int slot);
+    void onBuyAndUseShop(int slot);    // 商店里"购买并使用"塔罗/星球/幻灵牌
     void onBuyBooster(int slot);
     void onBuyVoucher(int slot);
     QPixmap playingCardPixmap(const CardData &c) const;
@@ -67,6 +72,17 @@ private:
     QVector<OfferUi> mShopUi;
     QVector<OfferUi> mVoucherUi;
     QVector<OfferUi> mBoosterUi;
+
+    // 商店里选中的塔罗/星球/幻灵牌槽位（-1 = 未选中）。
+    // 选中后才出现"购买"和"购买&使用"两个按钮，单击同一张牌或别处会取消选中。
+    int mSelectedShopSlot = -1;
+    int mSelectedVoucherSlot = -1;
+    int mSelectedBoosterSlot = -1;
+
+    void onShopCardClicked(int slot);
+    void onVoucherCardClicked(int slot);
+    void onBoosterCardClicked(int slot);
+    void positionSlotActionButtons(OfferUi &ou, bool hasUseBtn);
 };
 
 #endif

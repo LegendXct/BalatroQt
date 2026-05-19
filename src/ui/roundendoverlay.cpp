@@ -8,6 +8,11 @@
 #include <QEasingCurve>
 #include <QGraphicsDropShadowEffect>
 #include <QColor>
+#include <QResizeEvent>
+#include <QPainter>
+#include <QPen>
+#include <QPaintEvent>
+#include "animatedblindchip.h"
 
 
 static QString formatLargeNumber(double num)
@@ -40,43 +45,59 @@ RoundEndOverlay::RoundEndOverlay(const QFont &cnFont, const QFont &pixelFont, QW
     : QWidget(parent), mCNFont(cnFont), mPixelFont(pixelFont)
 {
     setAttribute(Qt::WA_StyledBackground, true);
-    setStyleSheet("background: rgba(0, 0, 0, 115);");
+    // 取消全屏蒙层 —— overlay 自身就只覆盖面板区域，外部的小丑/牌堆区域不再被吃掉 hover。
+    setStyleSheet("background: transparent;");
     buildUi();
 }
 
 void RoundEndOverlay::buildUi()
 {
-    // 主面板：更接近 Balatro 的深色卡片 + 轻微发光边框。
+    // ── 主面板（外层 slate；用原版 G.C.BLACK = HEX("374244")，与 dyn_container 主体一致）──
     auto *panel = new QWidget(this);
     panel->setAttribute(Qt::WA_StyledBackground, true);
     panel->setObjectName("rePanel");
     panel->setStyleSheet(
         "QWidget#rePanel {"
-        " background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #425055, stop:1 #273338);"
-        " border-radius:18px; border: 3px solid #6f8589;"
+        " background:#374244;"          // BLACK
+        " border-top:3px solid #4f6367;"// L_BLACK 描边
+        " border-left:3px solid #4f6367;"
+        " border-right:3px solid #4f6367;"
+        " border-bottom:0px;"
+        " border-top-left-radius:18px;"
+        " border-top-right-radius:18px;"
+        " border-bottom-left-radius:0px;"
+        " border-bottom-right-radius:0px;"
         "}"
         );
-    panel->setFixedSize(580, 492);
-    auto *panelGlow = new QGraphicsDropShadowEffect(panel);
-    panelGlow->setBlurRadius(34);
-    panelGlow->setOffset(0, 0);
-    panelGlow->setColor(QColor(0, 0, 0, 170));
-    panel->setGraphicsEffect(panelGlow);
-
-    // 居中 panel
-    auto *outer = new QVBoxLayout(this);
-    outer->setContentsMargins(0, 0, 0, 0);
-    outer->setAlignment(Qt::AlignCenter);
-    outer->addWidget(panel);
+    // 之前 820×620 太宽；缩到 560 × 580 让面板比例更接近原版 round_eval。
+    panel->setFixedSize(560, 580);
+    mPanel = panel;
 
     auto *vbl = new QVBoxLayout(panel);
     vbl->setContentsMargins(20, 18, 20, 18);
-    vbl->setSpacing(12);
+    vbl->setSpacing(10);
 
-    // ── 顶部 cash out 按钮 ──
-    mCashOutBtn = new QPushButton("提现: $0", panel);
-    mCashOutBtn->setFixedHeight(60);
-    QFont btnF = mCNFont; btnF.setPixelSize(28); btnF.setBold(true);
+    // ── 内层更深的圆角框（在 BLACK 基础上再压暗一档；原版视觉上内层比 dyn_container
+    //    主体更"凹"一点，由 emboss/阴影叠出来——这里用 #1f2729 直接还原那种"很黑的 slate"）。
+    //    一框装下所有内容：提现按钮、至少得分、分割点、各项奖励。
+    auto *innerBox = new QWidget(panel);
+    innerBox->setObjectName("reInnerBox");
+    innerBox->setAttribute(Qt::WA_StyledBackground, true);
+    innerBox->setStyleSheet(
+        "QWidget#reInnerBox {"
+        " background:#1f2729;"          // 比 BLACK 更暗的 slate
+        " border:2px solid #141a1c;"
+        " border-radius:14px;"
+        "}"
+        );
+    auto *innerVbl = new QVBoxLayout(innerBox);
+    innerVbl->setContentsMargins(18, 16, 18, 18);
+    innerVbl->setSpacing(12);
+
+    // Cash-out 按钮（撑满内层框宽度）
+    mCashOutBtn = new QPushButton("提现: $0", innerBox);
+    mCashOutBtn->setFixedHeight(64);
+    QFont btnF = mCNFont; btnF.setPixelSize(30); btnF.setBold(true);
     mCashOutBtn->setFont(btnF);
     mCashOutBtn->setCursor(Qt::PointingHandCursor);
     mCashOutBtn->setStyleSheet(
@@ -88,19 +109,98 @@ void RoundEndOverlay::buildUi()
         "QPushButton:pressed { background:#cf7100; }"
         );
     connect(mCashOutBtn, &QPushButton::clicked, this, &RoundEndOverlay::nextClicked);
-    vbl->addWidget(mCashOutBtn);
+    innerVbl->addWidget(mCashOutBtn);
 
-    // 一个生成"明细行"的 lambda
+    // ── 至少得分行（chip + 文字 + 分数；无背景色 / 无右侧 $$$）──
+    {
+        auto *row = new QWidget(innerBox);
+        row->setStyleSheet("background:transparent;");
+        auto *hbl = new QHBoxLayout(row);
+        hbl->setContentsMargins(6, 4, 6, 4);
+        hbl->setSpacing(12);
+
+        mBlindChip = new AnimatedBlindChip(row);
+        mBlindChip->setDisplaySize(64);
+        hbl->addWidget(mBlindChip);
+
+        auto *mid = new QWidget(row);
+        mid->setStyleSheet("background:transparent;");
+        auto *mvbl = new QVBoxLayout(mid);
+        mvbl->setContentsMargins(0, 0, 0, 0);
+        mvbl->setSpacing(2);
+        mvbl->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+
+        QLabel *small = new QLabel("至少得分", mid);
+        QFont sf = mCNFont; sf.setPixelSize(15);
+        small->setFont(sf);
+        small->setStyleSheet("color:white; background:transparent;");
+        mvbl->addWidget(small);
+
+        auto *numRow = new QWidget(mid);
+        numRow->setStyleSheet("background:transparent;");
+        auto *numBl = new QHBoxLayout(numRow);
+        numBl->setContentsMargins(0, 0, 0, 0);
+        numBl->setSpacing(6);
+        numBl->setAlignment(Qt::AlignLeft);
+
+        QLabel *chipIcon = new QLabel(numRow);
+        QPixmap chipsSheet(":/textures/images/chips.png");
+        if (!chipsSheet.isNull()) {
+            QPixmap pix = chipsSheet.copy(0, 0, 58, 58);
+            chipIcon->setPixmap(pix.scaled(28, 28, Qt::KeepAspectRatio,
+                                           Qt::SmoothTransformation));
+        }
+        chipIcon->setFixedSize(28, 28);
+        chipIcon->setStyleSheet("background:transparent;");
+        numBl->addWidget(chipIcon);
+
+        mTargetLbl = new QLabel("0", numRow);
+        QFont nf = mCNFont; nf.setPixelSize(26); nf.setBold(true);
+        mTargetLbl->setFont(nf);
+        mTargetLbl->setStyleSheet("color:#fe5f55; background:transparent;");
+        numBl->addWidget(mTargetLbl);
+        mvbl->addWidget(numRow);
+
+        hbl->addWidget(mid, 1);
+        // 不放右侧 $$$；保留指针避免空指针访问。
+        mBlindRewardSym = new QLabel("", row);
+        mBlindRewardSym->hide();
+        innerVbl->addWidget(row);
+    }
+
+    // ── 分隔点：水平方向上一排离散圆点 ──
+    {
+        class DotDivider : public QWidget {
+        public:
+            using QWidget::QWidget;
+        protected:
+            void paintEvent(QPaintEvent *) override {
+                QPainter p(this);
+                p.setRenderHint(QPainter::Antialiasing, true);
+                p.setPen(Qt::NoPen);
+                p.setBrush(QColor(255, 255, 255, 230));
+                const int y = height() / 2;
+                const int margin = 12;
+                const int spacing = 18;
+                for (int x = margin; x <= width() - margin; x += spacing) {
+                    p.drawEllipse(QPointF(x, y), 2.5, 2.5);
+                }
+            }
+        };
+        auto *div = new DotDivider(innerBox);
+        div->setFixedHeight(10);
+        innerVbl->addWidget(div);
+    }
+
+    // ── 明细行（无背景；左数字 + 描述 + 右 $$$）──
     auto makeRow = [&](QLabel **leftNumOut, const QString &numColor,
                        const QString &desc, QLabel **rightSymOut) {
-        auto *row = new QWidget(panel);
-        row->setAttribute(Qt::WA_StyledBackground, true);
-        row->setStyleSheet("background:rgba(21,30,33,100); border-radius:9px;");
+        auto *row = new QWidget(innerBox);
+        row->setStyleSheet("background:transparent;");
         auto *hbl = new QHBoxLayout(row);
-        hbl->setContentsMargins(10, 2, 10, 2);
-        hbl->setSpacing(8);
+        hbl->setContentsMargins(14, 2, 14, 2);
+        hbl->setSpacing(10);
 
-        // 左侧:大数字
         *leftNumOut = new QLabel("0", row);
         QFont nf = mCNFont; nf.setPixelSize(26); nf.setBold(true);
         (*leftNumOut)->setFont(nf);
@@ -109,15 +209,13 @@ void RoundEndOverlay::buildUi()
         (*leftNumOut)->setAlignment(Qt::AlignCenter);
         hbl->addWidget(*leftNumOut);
 
-        // 描述
         auto *descLbl = new QLabel(desc, row);
-        QFont df = mCNFont; df.setPixelSize(14);
+        QFont df = mCNFont; df.setPixelSize(15);
         descLbl->setFont(df);
         descLbl->setStyleSheet("color:white; background:transparent;");
         descLbl->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
         hbl->addWidget(descLbl, 1);
 
-        // 右侧 $$$$$
         *rightSymOut = new QLabel("", row);
         QFont sf = mCNFont; sf.setPixelSize(20); sf.setBold(true);
         (*rightSymOut)->setFont(sf);
@@ -128,131 +226,90 @@ void RoundEndOverlay::buildUi()
         return row;
     };
 
-    // ── 至少得分行(blind 主行) ──
-    {
-        auto *row = new QWidget(panel);
-        auto *hbl = new QHBoxLayout(row);
-        hbl->setContentsMargins(8, 0, 8, 0);
-        hbl->setSpacing(8);
-
-        // 盲注芯片(setData 时填充)
-        mBlindChip = new QLabel(row);
-        mBlindChip->setFixedSize(50, 50);
-        mBlindChip->setStyleSheet("background:transparent;");
-        hbl->addWidget(mBlindChip);
-
-        // 中间:至少得分(竖排:小字+蓝芯片+红数字)
-        auto *mid = new QWidget(row);
-        auto *mvbl = new QVBoxLayout(mid);
-        mvbl->setContentsMargins(0, 0, 0, 0);
-        mvbl->setSpacing(2);
-        mvbl->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
-
-        QLabel *small = new QLabel("至少得分", mid);
-        QFont sf = mCNFont; sf.setPixelSize(13);
-        small->setFont(sf);
-        small->setStyleSheet("color:white; background:transparent;");
-        mvbl->addWidget(small);
-
-        // 蓝芯片 + 红数字
-        auto *numRow = new QWidget(mid);
-        auto *numBl = new QHBoxLayout(numRow);
-        numBl->setContentsMargins(0, 0, 0, 0);
-        numBl->setSpacing(4);
-        numBl->setAlignment(Qt::AlignLeft);
-
-        QLabel *chipIcon = new QLabel(numRow);
-        QPixmap chipsSheet(":/textures/images/chips.png");
-        if (!chipsSheet.isNull()) {
-            QPixmap pix = chipsSheet.copy(0, 0, 58, 58);
-            chipIcon->setPixmap(pix.scaled(20, 20, Qt::KeepAspectRatio,
-                                           Qt::SmoothTransformation));
-        }
-        chipIcon->setFixedSize(20, 20);
-        chipIcon->setStyleSheet("background:transparent;");
-        numBl->addWidget(chipIcon);
-
-        mTargetLbl = new QLabel("0", numRow);
-        QFont nf = mCNFont; nf.setPixelSize(22); nf.setBold(true);
-        mTargetLbl->setFont(nf);
-        mTargetLbl->setStyleSheet("color:#fe5f55; background:transparent;");
-        numBl->addWidget(mTargetLbl);
-
-        mvbl->addWidget(numRow);
-        hbl->addWidget(mid, 1);
-
-        // 右侧 $$$
-        mBlindRewardSym = new QLabel("", row);
-        QFont rf = mCNFont; rf.setPixelSize(20); rf.setBold(true);
-        mBlindRewardSym->setFont(rf);
-        mBlindRewardSym->setStyleSheet("color:#f3b958; background:transparent;");
-        mBlindRewardSym->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-        hbl->addWidget(mBlindRewardSym);
-
-        vbl->addWidget(row);
-    }
-
-    // ── 虚线分隔 ──
-    {
-        QLabel *div = new QLabel(QString(48, '.'), panel);
-        QFont dvf = mPixelFont; dvf.setPixelSize(14);
-        div->setFont(dvf);
-        div->setStyleSheet("color:white; background:transparent;");
-        div->setAlignment(Qt::AlignCenter);
-        vbl->addWidget(div);
-    }
-
-    // ── 出牌剩余 ──
-    vbl->addWidget(makeRow(&mHandsNumLbl, "#009dff",
-                           "剩余出牌次数(每次$1)", &mHandsRewardSym));
-
-    // ── 利息 ──
-    vbl->addWidget(makeRow(&mInterestNumLbl, "#f3b958",
-                           "每$5获得1利息(最高 5)", &mInterestRewardSym));
-
-    // ── 金牌/投资标签/回合末小丑等额外金币，通常为 0，非 0 时显示。 ──
+    // 顺序对齐原版 round_eval：出牌奖励 → 利息 → 额外奖励。
+    innerVbl->addWidget(makeRow(&mHandsNumLbl, "#009dff",
+                                "剩余出牌次数(每次$1)", &mHandsRewardSym));
+    innerVbl->addWidget(makeRow(&mInterestNumLbl, "#f3b958",
+                                "每$5获得1利息(最高 5)", &mInterestRewardSym));
     mExtraRow = makeRow(&mExtraNumLbl, "#d8b4ff",
                         "额外回合奖励", &mExtraRewardSym);
     mExtraRow->hide();
-    vbl->addWidget(mExtraRow);
+    innerVbl->addWidget(mExtraRow);
 
+    // 内框不要拉伸，仅按内容高度撑起；剩余空间留给外层（外层下方加 stretch）。
+    vbl->addWidget(innerBox, 0, Qt::AlignTop);
     vbl->addStretch();
 }
 
 
+void RoundEndOverlay::resizeEvent(QResizeEvent *e)
+{
+    QWidget::resizeEvent(e);
+    relayoutPanel();
+}
+
+void RoundEndOverlay::relayoutPanel()
+{
+    if (!mPanel) return;
+    // overlay 现在覆盖 mPlayPage 整块，但面板尺寸固定。把 panel 放在 (avail-W, bottom)：
+    // 水平按"可用区域"减去 mRightReserve 后居中，垂直贴底。
+    const int availW = qMax(0, width() - mRightReserve);
+    int x = (availW - mPanel->width()) / 2;
+    if (x < 0) x = 0;
+    int y = qMax(0, height() - mPanel->height());
+    mPanel->move(x, y);
+}
+
 void RoundEndOverlay::showFromBottom(const QRect &finalGeometry)
 {
-    if (!parentWidget()) {
+    if (!mPanel) {
         setGeometry(finalGeometry);
         raise();
         show();
         return;
     }
+    // overlay 现在只覆盖 panel 自身那块矩形，外部的小丑 / 牌堆区域因此不会被
+    // RoundEndOverlay 截走鼠标，可以正常 hover / click。
+    const int parentW = finalGeometry.width();
+    const int parentH = finalGeometry.height();
+    const int availW  = qMax(0, parentW - mRightReserve);
+    const int panelW  = mPanel->width();
+    const int panelH  = mPanel->height();
+    int overlayX = (availW - panelW) / 2;
+    if (overlayX < 0) overlayX = 0;
+    // 终点 Y：与 parent 底贴齐。
+    const int overlayEndY   = qMax(0, parentH - panelH);
+    const int overlayStartY = parentH;   // 起点：刚好从下方屏外滑入
 
-    QRect start = finalGeometry;
-    start.moveTop(finalGeometry.bottom() + 1);
-    setGeometry(start);
+    // 让 overlay widget 直接代替 mPanel 进行 slide：geometry 动画整体上滑 / 下滑。
+    mPanel->move(0, 0);
+    setGeometry(overlayX, overlayStartY, panelW, panelH);
     raise();
     show();
 
-    auto *anim = new QPropertyAnimation(this, "geometry", this);
+    auto *anim = new QPropertyAnimation(this, "pos", this);
     anim->setDuration(320);
-    anim->setStartValue(start);
-    anim->setEndValue(finalGeometry);
+    anim->setStartValue(QPoint(overlayX, overlayStartY));
+    anim->setEndValue(QPoint(overlayX, overlayEndY));
     anim->setEasingCurve(QEasingCurve::OutCubic);
     anim->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
 void RoundEndOverlay::hideToBottom(std::function<void()> after)
 {
-    QRect start = geometry();
-    QRect end = start;
-    end.moveTop(start.bottom() + 1);
+    if (!mPanel || !parentWidget()) {
+        hide();
+        if (after) after();
+        return;
+    }
+    const QPoint startPos = pos();
+    const int parentH = parentWidget()->height();
+    const QPoint endPos(startPos.x(), parentH);
 
-    auto *anim = new QPropertyAnimation(this, "geometry", this);
+    auto *anim = new QPropertyAnimation(this, "pos", this);
     anim->setDuration(260);
-    anim->setStartValue(start);
-    anim->setEndValue(end);
+    anim->setStartValue(startPos);
+    anim->setEndValue(endPos);
     anim->setEasingCurve(QEasingCurve::InCubic);
     connect(anim, &QPropertyAnimation::finished, this, [this, after]() {
         hide();
@@ -268,12 +325,7 @@ void RoundEndOverlay::setData(int blindChipRow, double targetScore, int blindRew
     int total = (totalPayout >= 0) ? totalPayout : (blindReward + handBonus + interest + extraBonus);
     mCashOutBtn->setText(QString("提现: $%1").arg(total));
 
-    QPixmap sheet(":/textures/images/BlindChips.png");
-    if (!sheet.isNull()) {
-        QPixmap pix = sheet.copy(0, blindChipRow * 68, 68, 68);
-        mBlindChip->setPixmap(pix.scaled(50, 50, Qt::KeepAspectRatio,
-                                         Qt::SmoothTransformation));
-    }
+    if (mBlindChip) mBlindChip->setBlindRow(blindChipRow);
 
     mTargetLbl->setText(formatLargeNumber(targetScore));
     mBlindRewardSym->setText(QString(blindReward, '$'));
