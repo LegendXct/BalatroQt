@@ -13,6 +13,9 @@
 #include <QVBoxLayout>
 #include <QVector>
 #include <QSet>
+#include <QList>
+#include <QTimer>
+#include <QAbstractAnimation>
 #include <QPointer>
 #include "../game/gamestate.h"
 #include "../card/carditem.h"
@@ -113,7 +116,16 @@ private:
 
     bool mGameOverHandled = false;
     bool mScoringInProgress = false;
+    bool mSuppressHandReveal = false;   // 消耗牌翻面序列期间，抑制 onHandChanged 里的房屋 Boss 翻正
     int mEndRoundAnimationDelay = 260;
+
+    // ── 局内进程暂停（打开比赛信息/选项/牌组时）──
+    bool mGamePaused = false;
+    QList<QPointer<QTimer>> mGameTimers;   // scheduleGame 创建的可暂停定时器
+    QList<QPointer<QAbstractAnimation>> mPausedAnims;  // 暂停时记录、恢复时 resume
+    void scheduleGame(int delayMs, std::function<void()> fn);  // 替代计分链里的 singleShot
+    void pauseGameProcesses();
+    void resumeGameProcesses();
 
     QVector<ConsumableItem*> mConsumableItems;
 

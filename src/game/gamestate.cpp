@@ -254,13 +254,36 @@ void GameState::syncShopJokerRules()
     mShop.setGrosMichelExtinct(mGrosMichelExtinct);
 }
 
-void GameState::dealCards() {
-    while (mHand.size() < handSize() && !mDeck.isEmpty())
-        mHand.append(mDeck.draw());
+void GameState::dealCards(DrawContext ctx) {
+    const bool chicot = hasJokerType(JokerType::Chicot);
+    // 巨蛇(The Serpent)：出牌/弃牌后无视手牌上限，固定补 3 张。
+    const bool serpent = !chicot && mBossEffect == BossEffect::TheSerpent
+                         && ctx != DrawContext::BlindStart;
+    const int toDraw = serpent ? 3 : (handSize() - mHand.size());
+
+    for (int i = 0; i < toDraw && !mDeck.isEmpty(); ++i) {
+        CardData c = mDeck.draw();
+        if (!chicot) {
+            bool faceDown = false;
+            // 轮子(The Wheel)：1/7 概率背面朝下。
+            if (mBossEffect == BossEffect::TheWheel
+                && QRandomGenerator::global()->bounded(7) == 0) faceDown = true;
+            // 标记(The Mark)：人头牌背面朝下。
+            if (mBossEffect == BossEffect::TheMark
+                && (c.rank == Rank::Jack || c.rank == Rank::Queen || c.rank == Rank::King))
+                faceDown = true;
+            // 鱼(The Fish)：每次出牌后补的牌背面朝下。
+            if (mBossEffect == BossEffect::TheFish && ctx == DrawContext::AfterPlay)
+                faceDown = true;
+            if (faceDown) c.faceUp = false;
+        }
+        mHand.append(c);
+    }
     if (mSortMode == HandSortMode::ByRank)
         std::sort(mHand.begin(), mHand.end(), rankComp);
     else if (mSortMode == HandSortMode::BySuit)
         std::sort(mHand.begin(), mHand.end(), suitComp);
+    refreshCeruleanForced();
     emit handChanged();
 }
 
@@ -277,7 +300,13 @@ void GameState::playCards(const QVector<int> &indices) {
 
     // 取出 played，评分动画期间暂时不补牌；补牌要等所有计分动画和收牌动画结束后再做。
     QVector<CardData> played;
-    for (int i : sorted) played.append(mHand[i]);
+    for (int i : sorted) {
+        // 背面朝下的牌（房屋/轮子/鱼/标记）一旦被打出就翻回正面，正常参与计分与展示。
+        mHand[i].faceUp = true;
+        played.append(mHand[i]);
+        // 支柱(The Pillar)：记录本 Ante 打出过的牌，进入下一盘时禁用它们。
+        mCardsPlayedThisAnte.insert(mHand[i].uid);
+    }
 
     // DNA：只有本盲注第一次出牌且只打 1 张牌时生效。
     // 多个 DNA / 蓝图 / 头脑风暴复制 DNA 时，本次出牌可以创建多张复制牌。
@@ -305,6 +334,14 @@ void GameState::playCards(const QVector<int> &indices) {
         mLastResult = result;
         emit handPlayed();
         return;
+    }
+
+    // 绯红之心(Crimson Heart)：每出一手随机禁用 1 张小丑，本手结算后恢复。
+    mCrimsonHeartDisabled = -1;
+    if (mBossEffect == BossEffect::CrimsonHeart && !hasJokerType(JokerType::Chicot)
+        && !mJokers.isEmpty()) {
+        mCrimsonHeartDisabled = QRandomGenerator::global()->bounded(mJokers.size());
+        mJokers[mCrimsonHeartDisabled].isDebuffed = true;
     }
 
     HandLevel &lv = mHandLevels[result.type];
@@ -517,9 +554,28 @@ void GameState::finalizePlayedHand()
     if (!mAwaitingScoreFinalize) return;
     mAwaitingScoreFinalize = false;
 
+    // 绯红之心(Crimson Heart)：恢复本手被禁用的小丑。
+    bool crimsonRestored = false;
+    if (mCrimsonHeartDisabled >= 0 && mCrimsonHeartDisabled < mJokers.size()) {
+        mJokers[mCrimsonHeartDisabled].isDebuffed = false;
+        crimsonRestored = true;
+    }
+    mCrimsonHeartDisabled = -1;
+
+    const int playedCount = mPendingPlayedIndices.size();
+
     const HandResult result = mLastResult;
     mScore += mPendingHandScore;
     mHandsLeft--;
+
+    // 公牛(The Ox)：打出当前最常用牌型时，金币归零。
+    if (mBossEffect == BossEffect::TheOx && !hasJokerType(JokerType::Chicot)) {
+        int mostPlayed = 0;
+        for (auto it = mHandLevels.constBegin(); it != mHandLevels.constEnd(); ++it)
+            mostPlayed = qMax(mostPlayed, it.value().played);
+        if (mostPlayed > 0 && mHandLevels[mLastResult.type].played >= mostPlayed)
+            mGold = 0;
+    }
     mHandLevels[mLastResult.type].played++;
 
     QVector<QPair<int,int>> idxPairs;
@@ -558,11 +614,19 @@ void GameState::finalizePlayedHand()
 
     decayEndOfHandJokers();
 
+    // 牙齿(The Tooth)：每打出 1 张牌失去 $1。
+    if (mBossEffect == BossEffect::TheTooth && !hasJokerType(JokerType::Chicot))
+        mGold = qMax(0, mGold - playedCount);
+    // 房屋(The House)：第一手出完后，剩余手牌全部翻回正面。
+    if (mBossEffect == BossEffect::TheHouse)
+        for (CardData &c : mHand) c.faceUp = true;
+
     applyBossPostPlay();
     applyBossDebuffs();
 
     emit scoreChanged();
     emit goldChanged();
+    if (crimsonRestored) emit jokersChanged();   // 恢复绯红之心禁用的小丑后刷新显示
 
     if (mScore >= mTargetScore) {
         finishWinningRound();
@@ -575,7 +639,7 @@ void GameState::finalizePlayedHand()
     }
 
     // 只有未过关且还能继续出牌时，才在计分动画和收牌动画结束后补新牌。
-    dealCards();
+    dealCards(DrawContext::AfterPlay);
     applyBossDebuffs();
     emit handChanged();
 }
@@ -713,12 +777,13 @@ void GameState::discardCards(const QVector<int> &indices)
     QVector<int> sorted = indices;
     std::sort(sorted.begin(), sorted.end(), std::greater<int>());
     for (int i : sorted) {
+        mHand[i].faceUp = true;   // 背面朝下的牌被弃掉时翻回正面
         mDeck.discard(mHand[i]);
         mHand.removeAt(i);
     }
 
     mDiscardLeft--;
-    dealCards();
+    dealCards(DrawContext::AfterDiscard);
     applyBossDebuffs();
 
     emit handChanged();
@@ -726,14 +791,32 @@ void GameState::discardCards(const QVector<int> &indices)
 
 double GameState::calcTargetScore() const {
     const int baseScores[] = { 0, 300, 800, 2000, 5000, 11000, 20000, 35000, 50000 };
+    double base;
+    if (mAnte <= 8) {
+        base = double(baseScores[qBound(0, mAnte, 8)]);
+    } else {
+        // 无尽模式 ante 9+ 的指数级膨胀，沿用原版 get_blind_amount 公式。
+        const double k = 0.75, A = 50000.0, B = 1.6;
+        const double C = mAnte - 8;
+        const double D = 1.0 + 0.2 * (mAnte - 8);
+        double amt = std::floor(A * std::pow(B + std::pow(k * C, D), C));
+        if (std::isfinite(amt) && amt > 0.0) {
+            double mag = std::pow(10.0, std::floor(std::log10(amt)) - 1.0);
+            if (mag >= 1.0) amt -= std::fmod(amt, mag);   // 取整到有效数字
+        }
+        base = std::isfinite(amt) ? amt : 1e300;
+    }
     double mult = 1.0;
     switch (mBlindType) {
     case BlindType::Small: mult = Constants::SMALL_BLIND_MULT; break;
     case BlindType::Big:   mult = Constants::BIG_BLIND_MULT;   break;
     case BlindType::Boss:  mult = Constants::BOSS_BLIND_MULT;  break;
     }
-    double target = double(baseScores[qBound(0, mAnte, 8)]) * mult;
-    if (mBossEffect == BossEffect::TheWall && !hasJokerType(JokerType::Chicot)) target *= 2.0;
+    double target = base * mult;
+    if (!hasJokerType(JokerType::Chicot)) {
+        if (mBossEffect == BossEffect::TheWall)         target *= 2.0;  // 围墙 mult 4 = 2×2
+        if (mBossEffect == BossEffect::VioletVessel)    target *= 3.0;  // 紫罗兰之器 mult 6 = 2×3
+    }
     return target;
 }
 
@@ -749,60 +832,6 @@ bool GameState::canAddJokerWithEdition(Edition edition) const {
     // 购买负片小丑后也会立即变成 6/6，不应该被满槽判断拦住。
     if (edition == Edition::Negative) return true;
     return canAddJoker();
-}
-
-void GameState::applyCardEnhancements(HandResult &result) {
-    for (const CardData &c : result.scoringCards) {
-        if (c.isDebuffed) continue;
-
-        // 先加筹码
-        result.chips += c.chipValue();
-
-        switch (c.enhancement) {
-        case Enhancement::Bonus: result.chips += 30; break;
-        case Enhancement::Mult: result.mult  += 4; break;
-        case Enhancement::Glass: result.mult  *= 2; break;
-        case Enhancement::Stone: result.chips += 50; break;
-        default: break;
-        }
-
-        switch (c.edition) {
-        case Edition::Foil: result.chips += 50; break;
-        case Edition::Holographic: result.mult += 10; break;
-        case Edition::Polychrome: result.mult = result.mult * 1.5; break;
-        default: break;
-        }
-    }
-}
-
-void GameState::applyJokerEffects(HandResult &result) {
-    TriggerContext ctx{
-        result, *this, mHand, result.scoringCards, nullptr
-    };
-
-    for (const Joker &j : mJokers) {
-        if (j.isDebuffed) continue;
-
-        if (j.timing == TriggerTiming::Passive ||
-            j.timing == TriggerTiming::OnPlayedHand) {
-            j.effect(ctx);
-        }
-
-        switch (j.edition) {
-        case Edition::Foil:        result.chips += 50; break;
-        case Edition::Holographic: result.mult += 10; break;
-        case Edition::Polychrome:  result.xmult *= 1.5; break;
-        default: break;
-        }
-
-        if (j.timing == TriggerTiming::OnScoringCard) {
-            for (const CardData &card : result.scoringCards) {
-                ctx.currentCard = &card;
-                j.effect(ctx);
-            }
-            ctx.currentCard = nullptr;
-        }
-    }
 }
 
 void GameState::checkGameOver() {
@@ -842,7 +871,15 @@ void GameState::rerollShop() {
 void GameState::applyBossDebuffs() {
     bool bossDisabled = hasJokerType(JokerType::Chicot);
     for (CardData &c : mHand) {
-        c.isDebuffed = !bossDisabled && bossDebuffsCard(mBossEffect, c);
+        bool d = !bossDisabled && bossDebuffsCard(mBossEffect, c);
+        // 支柱(The Pillar)：本 Ante 之前打出过的牌被禁用。
+        if (!bossDisabled && mBossEffect == BossEffect::ThePillar
+            && mCardsPlayedThisAnte.contains(c.uid))
+            d = true;
+        // 翠绿之叶(Verdant Leaf)：卖出 1 张小丑前，所有牌都被禁用。
+        if (!bossDisabled && mBossEffect == BossEffect::VerdantLeaf && mVerdantLeafActive)
+            d = true;
+        c.isDebuffed = d;
     }
 }
 
@@ -926,6 +963,14 @@ bool GameState::sellJoker(int idx) {
     int v = qMax(1, mJokers[idx].sellValue);
     mJokers.removeAt(idx);
     mGold += v;
+    // 翠绿之叶(Verdant Leaf)：卖出任意小丑即解除全牌禁用。
+    if (mVerdantLeafActive && mBossEffect == BossEffect::VerdantLeaf) {
+        mVerdantLeafActive = false;
+        applyBossDebuffs();
+        emit handChanged();
+    }
+    // 绯红之心：被禁用小丑的下标可能因移除而失效。
+    if (mCrimsonHeartDisabled >= mJokers.size()) mCrimsonHeartDisabled = -1;
     syncShopJokerRules();
     if (mPhase == GamePhase::Shop) {
         mShop.refreshCurrentOfferCosts();
@@ -1739,6 +1784,11 @@ void GameState::startGame()
     mHasLastUsedConsumable = false;
     mLastUsedConsumable = ConsumableType::Tarot_Fool;
     mGrosMichelExtinct = false;
+    mEndlessMode = false;
+    mCardsPlayedThisAnte.clear();
+    mCrimsonHeartDisabled = -1;
+    mVerdantLeafActive = false;
+    mCeruleanForcedUid = -1;
 
     for (int i = 0; i < 3; ++i)
         mBlindStates[i] = (i == 0) ? BlindState::Current : BlindState::Upcoming;
@@ -1794,11 +1844,25 @@ void GameState::startBlind(BlindType type)
     mDNACopiesCreatedThisPlay = 0;
     mDiscardLeft = qMax(0, Constants::INITIAL_DISCARDS + mExtraDiscardsPerRound);
 
+    mCrimsonHeartDisabled = -1;
+    mVerdantLeafActive = false;
+    mCeruleanForcedUid = -1;
+
     if (type == BlindType::Boss) {
         mBossEffect = mPendingBossEffect;     // 用预先确定的
         if (!hasJokerType(JokerType::Chicot)) {
             if (mBossEffect == BossEffect::TheNeedle) { mHandsLeft = 1; mBlindStartingHands = 1; }
             if (mBossEffect == BossEffect::TheWater)  mDiscardLeft = 0;
+            // 翠绿之叶：卖出小丑前全牌禁用。
+            if (mBossEffect == BossEffect::VerdantLeaf) mVerdantLeafActive = true;
+            // 琥珀橡果：所有小丑翻面并打乱顺序（顺序会影响蓝图等小丑）。
+            if (mBossEffect == BossEffect::AmberAcorn && mJokers.size() > 1) {
+                for (int i = mJokers.size() - 1; i > 0; --i) {
+                    int j = QRandomGenerator::global()->bounded(i + 1);
+                    mJokers.swapItemsAt(i, j);
+                }
+                emit jokersChanged();
+            }
         }
         mBossMouthHasHand = false;
         mBossEyePlayedHands.clear();
@@ -1814,10 +1878,31 @@ void GameState::startBlind(BlindType type)
     mHand.clear();
     mDeck.reset();
     dealCards();
+
+    // 房屋(The House)：开局第一手牌全部背面朝下。
+    if (mBossEffect == BossEffect::TheHouse && !hasJokerType(JokerType::Chicot))
+        for (CardData &c : mHand) c.faceUp = false;
+    // 蔚蓝铃铛(Cerulean Bell)：随机锁定一张手牌为强制选中。
+    if (mBossEffect == BossEffect::CeruleanBell && !hasJokerType(JokerType::Chicot))
+        refreshCeruleanForced();
+
     applyBossDebuffs();
 
     emit handChanged();
     emit blindStarted();
+}
+
+void GameState::refreshCeruleanForced()
+{
+    if (mBossEffect != BossEffect::CeruleanBell || hasJokerType(JokerType::Chicot)) {
+        mCeruleanForcedUid = -1;
+        return;
+    }
+    // 已锁定的牌仍在手牌里就保持不变，否则重新随机挑一张。
+    for (const CardData &c : mHand)
+        if (c.uid == mCeruleanForcedUid) return;
+    if (mHand.isEmpty()) { mCeruleanForcedUid = -1; return; }
+    mCeruleanForcedUid = mHand[QRandomGenerator::global()->bounded(mHand.size())].uid;
 }
 
 void GameState::nextBlind()
@@ -1829,8 +1914,10 @@ void GameState::nextBlind()
         mAnte++;
         mPendingBossEffect = BossEffect::None;
         mBossRerollsUsedThisAnte = 0;
+        mCardsPlayedThisAnte.clear();   // 支柱：换 Ante 清空已打出记录
         prepareBlindTags();
-        if (mAnte > 8) {
+        if (mAnte > 8 && !mEndlessMode) {
+            // 通关 ante 8：弹出胜利结算；玩家可选择继续无尽模式。
             mPhase = GamePhase::GameOver;
             emit gameOver(true);
             return;
@@ -1842,6 +1929,18 @@ void GameState::nextBlind()
         else if (i == mBlindIdx) mBlindStates[i] = BlindState::Current;
         else                     mBlindStates[i] = BlindState::Upcoming;
     }
+    enterBlindSelect();
+}
+
+void GameState::continueEndless()
+{
+    // 仅在通关 ante 8（已进入胜利结算）后可调用：开启无尽模式并继续。
+    if (mPhase != GamePhase::GameOver) return;
+    if (mAnte <= 8) return;
+    mEndlessMode = true;
+    mBlindIdx = 0;
+    for (int i = 0; i < 3; ++i)
+        mBlindStates[i] = (i == 0) ? BlindState::Current : BlindState::Upcoming;
     enterBlindSelect();
 }
 

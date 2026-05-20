@@ -10,8 +10,10 @@ namespace Constants {
 
     // 经济
     constexpr int INITIAL_GOLD = 104; // 初始资金（调试）
-    constexpr int INTEREST_MAX = 5; // 利息上限（每5金币+1）
-    constexpr int HAND_GOLD = 1; // 每次出牌获得金币
+    // 利息计息持币上限：每持有 5 金币结算 +$1，最多按 25 金币计（即默认利息上限 $5）。
+    // 注意 GameState 里是 qMin(gold/5, mInterestCap/5)，所以这里存的是“持币上限”。
+    constexpr int INTEREST_MAX = 25;
+    constexpr int HAND_GOLD = 1; // 回合结束时每剩余 1 次出牌获得的金币
     constexpr int WIN_GOLD = 3; // 通过盲注奖励
 
     // 槽位

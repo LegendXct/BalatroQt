@@ -524,6 +524,7 @@ MainWindow::MainWindow(QWidget *parent)
     // 不必等用户挪动鼠标才触发 hoverLeaveEvent。
     connect(mDeckViewWidget, &DeckViewWidget::closed, this, [this]() {
         mDeckViewOpen = false;
+        resumeGameProcesses();
         if (!mDeckBackCard || !mView) return;
         const QPoint gp = QCursor::pos();
         const QPoint viewPt = mView->mapFromGlobal(gp);
@@ -1182,11 +1183,16 @@ void MainWindow::setupLeftPanel() {
         QFont bf = mCNFont; bf.setPixelSize(uiPx(21)); bf.setBold(true); back->setFont(bf);
         back->setFixedHeight(46);
         back->setStyleSheet("QPushButton { background:qlineargradient(x1:0,y1:0,x2:0,y2:1, stop:0 #ffc45b, stop:1 #e58c00); color:white; border:2px solid #ffe2a0; border-radius:14px; } QPushButton:hover { background:#ffb730; }");
-        connect(back, &QPushButton::clicked, overlay, [overlay]() {
+        connect(back, &QPushButton::clicked, overlay, [this, overlay]() {
             overlay->hide();
             overlay->deleteLater();
+            resumeGameProcesses();
         });
         root->addWidget(back);
+
+        // 打开比赛信息：暂停计分动画/火焰/背景等一切局内进程。
+        // 必须在面板自身的滑入动画创建之前调用，避免把它一起暂停。
+        pauseGameProcesses();
 
         // 滑入动画：面板从下方升起 + 背景渐显。沿用 mShopWidget 的入场手感。
         overlay->show();
@@ -1316,6 +1322,9 @@ void MainWindow::setupLeftPanel() {
 
 void MainWindow::showOptionsOverlay()
 {
+    // 打开选项：暂停一切局内进程（计分动画/火焰/背景）。
+    // 在面板滑入动画创建之前调用——animateIn 经 singleShot(0) 延后执行，不会被一起暂停。
+    pauseGameProcesses();
     // 不再使用 QDialog::exec()：全屏窗口上叠加/关闭顶层原生对话框时，
     // QOpenGLWidget 可能在部分 Windows 显卡驱动上重建后台缓冲，表现为瞬时黑屏。
     // 这里改为普通子 QWidget 覆盖层，和游戏场景共用同一个窗口，不触发原生窗口切换。
@@ -1403,7 +1412,10 @@ void MainWindow::showOptionsOverlay()
     back->setObjectName("back");
     back->setFont(titleFont);
     back->setMinimumHeight(kBtnH);
-    connect(back, &QPushButton::clicked, this, &MainWindow::hideOptionsOverlay);
+    connect(back, &QPushButton::clicked, this, [this]() {
+        hideOptionsOverlay();
+        resumeGameProcesses();
+    });
     v->addWidget(back);
 
     centerRow->addWidget(panel);
@@ -1426,6 +1438,15 @@ void MainWindow::hideOptionsOverlay()
 
 void MainWindow::startNewRunFromOptions()
 {
+    // 丢弃暂停中的计分进程：新开局后不应恢复上一局的定时器。
+    for (auto &t : mGameTimers) if (t) { t->stop(); t->deleteLater(); }
+    mGameTimers.clear();
+    for (auto &a : mPausedAnims) if (a) a->stop();
+    mPausedAnims.clear();
+    mGamePaused = false;
+    if (mFlameTick && !mFlameTick->isActive()) mFlameTick->start(33);
+    if (mDynamicBg) mDynamicBg->setPaused(false);
+
     // 保持覆盖层可见直到所有状态和界面刷新完成，避免玩家看到半帧清空场景。
     // 不再 setUpdatesEnabled(false)，因为整窗禁用/恢复更新也会在部分机器上触发黑底中间帧。
     resetTransientOverlaysForNewRun();
@@ -1784,6 +1805,12 @@ void MainWindow::refreshHand() {
                     });
         } else {
             match->setCardData(hc);
+            // 房屋 Boss 出完第一手后，原本背面朝下的剩余手牌翻回正面。
+            // 仅在房屋 Boss 下生效，且不能打断消耗牌自身的翻面动画。
+            if (!mSuppressHandReveal
+                && mGameState->bossEffect() == BossEffect::TheHouse
+                && hc.faceUp && !match->cardData().faceUp)
+                match->flip();
         }
         reordered.append(match);
     }
@@ -1798,6 +1825,18 @@ void MainWindow::refreshHand() {
         }
         mHandCards[i]->setCardSelected(wasSelected);
         if (wasSelected) mSelected.append(i);
+    }
+
+    // 蔚蓝铃铛 Boss：强制把锁定的手牌设为选中。
+    const int forcedUid = mGameState->ceruleanForcedUid();
+    if (forcedUid > 0) {
+        for (int i = 0; i < mHandCards.size(); ++i) {
+            if (mHandCards[i]->cardData().uid == forcedUid
+                && !mSelected.contains(i) && mSelected.size() < 5) {
+                mHandCards[i]->setCardSelected(true);
+                mSelected.append(i);
+            }
+        }
     }
 
     layoutHandCards();
@@ -2036,6 +2075,8 @@ void MainWindow::onDeckClicked(CardItem *)
     // 标记必须在 open() 之前置位：show() 一瞬间 QGraphicsScene 会把 hoverLeaveEvent
     // 投给牌堆 CardItem；如果不屏蔽，按钮 / 面板会立刻"收回再展开"，造成反复滑动。
     mDeckViewOpen = true;
+    // 打开牌组前暂停局内进程；必须早于 open() 内部的滑入动画创建。
+    pauseGameProcesses();
     mDeckViewWidget->setGeometry(mPlayPage->rect());
     mDeckViewWidget->open(mGameState->remainingDeckCards(), mGameState->fullDeckCards());
 }
@@ -2312,7 +2353,12 @@ void MainWindow::onCardClicked(CardItem *card) {
     int idx = mHandCards.indexOf(card);
     if (idx < 0) return;
 
+    // 蔚蓝铃铛 Boss：被锁定的手牌不能取消选中。
+    const bool isForced = mGameState->ceruleanForcedUid() > 0
+                          && card->cardData().uid == mGameState->ceruleanForcedUid();
+
     if (mSelected.contains(idx)) {
+        if (isForced) return;
         mSelected.removeAll(idx);
         card->setCardSelected(false);
     } else {
@@ -2550,6 +2596,7 @@ void MainWindow::onPlayClicked() {
         c->setCardSelected(false);
         c->setZValue(500);
         c->setBaseRotation(0);
+        if (!c->cardData().faceUp) c->flip();   // 背面朝下的牌被打出时翻开
         playedCards.prepend(c);
     }
     mPlayedCards = playedCards;
@@ -2582,6 +2629,7 @@ void MainWindow::onDiscardClicked() {
         CardItem *c = mHandCards.takeAt(idx);
         c->setCardSelected(false);
         c->setZValue(5);
+        if (!c->cardData().faceUp) c->flip();   // 背面朝下的牌被弃掉时翻开
 
         QPointF target(mSceneW + CARD_W, c->pos().y());
         c->moveTo(target, 350);
@@ -2649,7 +2697,7 @@ void MainWindow::onHandPlayed()
     for (int i = 0; i < scoringIndices.size(); ++i) {
         int idx = scoringIndices[i];
         int delay = playArrivalMs + i * staggerStepMs;
-        QTimer::singleShot(delay, this, [this, idx, upDurationMs]() {
+        scheduleGame(delay, [this, idx, upDurationMs]() {
             if (idx < 0 || idx >= mPlayedCards.size()) return;
             CardItem *c = mPlayedCards[idx];
             if (!c) return;
@@ -2670,13 +2718,13 @@ void MainWindow::onHandPlayed()
     for (int ei = 0; ei < r.events.size(); ++ei) {
         const ScoreEvent ev = r.events[ei];
         int delay = delayBase + ei * delayStep;
-        QTimer::singleShot(delay, this, [this, ev]() {
+        scheduleGame(delay, [this, ev]() {
             playScoreEvent(ev);
         });
     }
 
     int finalDelay = delayBase + r.events.size() * delayStep + 260;
-    QTimer::singleShot(finalDelay, this, [this, r, gained, finalDelay]() {
+    scheduleGame(finalDelay, [this, r, gained, finalDelay]() {
         mDisplayedChips = r.chips;
         mDisplayedMult  = r.mult * r.xmult;
         setLabelScaledText(mLblChips, formatScoreNumber(r.chips),          uiPx(42));
@@ -3188,15 +3236,18 @@ void MainWindow::showConsumableAction(int idx)
                 //   2) 应用增强/花色/点数变化
                 //   3) 再 flip 回正面，把新外观"翻"出来
                 const auto &cs = mGameState->consumables();
-                const bool needsHandFlip = (idx >= 0 && idx < cs.size())
-                                           && cs[idx].needsSelection > 0
-                                           && !sel.isEmpty();
+                // 该消耗牌是否消耗选中的手牌（如奖励/倍率/换花色等塔罗）。
+                const bool usesSelection = (idx >= 0 && idx < cs.size())
+                                           && cs[idx].needsSelection > 0;
+                const bool needsHandFlip = usesSelection && !sel.isEmpty();
 
-                auto doUseAndRefresh = [this, idx, sel]() {
+                auto doUseAndRefresh = [this, idx, sel, usesSelection]() {
                     if (mGameState->useConsumable(idx, sel)) {
                         mSelectedConsumableIdx = -1;
                         hideConsumableAction();
-                        mSelected.clear();
+                        // 仅消耗选中手牌的塔罗才清空选择；命运之轮等不选牌的
+                        // 消耗牌不应取消玩家已有的手牌选中。
+                        if (usesSelection) mSelected.clear();
                         refreshHand();
                         refreshGold();
                         refreshScore();
@@ -3220,6 +3271,10 @@ void MainWindow::showConsumableAction(int idx)
                         targets.append(QPointer<CardItem>(mHandCards[i]));
                 }
 
+                // 翻面序列期间禁止 refreshHand 里的“房屋 Boss 翻正”逻辑，
+                // 否则会和这里的手动 flip 打架，导致选中的牌停在背面。
+                mSuppressHandReveal = true;
+
                 // 1) flip 翻到背面。flip() 内部用 scale 1→0→1 动画，整段 240ms。
                 for (auto &t : targets) if (t) t->flip();
 
@@ -3228,8 +3283,9 @@ void MainWindow::showConsumableAction(int idx)
                     doUseAndRefresh();
                     // 3) 等 doUse 完成 + 小延迟后，再把牌翻回正面。setCardData 已经保留了 faceUp=false，
                     // 所以现在 mHandCards 里对应的 CardItem 还是背面。
-                    QTimer::singleShot(180, this, [targets]() {
+                    QTimer::singleShot(180, this, [this, targets]() {
                         for (const auto &t : targets) if (t) t->flip();
+                        mSuppressHandReveal = false;
                     });
                 });
             });
@@ -3691,6 +3747,65 @@ void MainWindow::animateShopEntrance()
             eff->deleteLater();
     });
     group->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+// 替代计分链里的 QTimer::singleShot：创建可暂停的定时器。
+void MainWindow::scheduleGame(int delayMs, std::function<void()> fn)
+{
+    QTimer *t = new QTimer(this);
+    t->setSingleShot(true);
+    t->setInterval(qMax(0, delayMs));
+    connect(t, &QTimer::timeout, this, [this, t, fn]() {
+        mGameTimers.removeAll(t);
+        t->deleteLater();
+        fn();
+    });
+    mGameTimers.append(t);
+    if (mGamePaused) t->setProperty("pauseRemain", t->interval());
+    else             t->start();
+}
+
+void MainWindow::pauseGameProcesses()
+{
+    if (mGamePaused) return;
+    mGamePaused = true;
+
+    // 1) 可暂停定时器：记录剩余时间后停表。
+    for (auto &t : mGameTimers) {
+        if (!t) continue;
+        int rem = t->isActive() ? t->remainingTime() : t->interval();
+        t->setProperty("pauseRemain", qMax(0, rem));
+        t->stop();
+    }
+    // 2) 正在播放的计分/卡牌动画。
+    mPausedAnims.clear();
+    const auto anims = findChildren<QAbstractAnimation*>();
+    for (auto *a : anims) {
+        if (a && a->state() == QAbstractAnimation::Running) {
+            a->pause();
+            mPausedAnims.append(a);
+        }
+    }
+    // 3) 火焰 + 动态背景。
+    if (mFlameTick) mFlameTick->stop();
+    if (mDynamicBg) mDynamicBg->setPaused(true);
+}
+
+void MainWindow::resumeGameProcesses()
+{
+    if (!mGamePaused) return;
+    mGamePaused = false;
+
+    for (auto &t : mGameTimers) {
+        if (!t) continue;
+        t->start(qMax(0, t->property("pauseRemain").toInt()));
+    }
+    for (auto &a : mPausedAnims)
+        if (a && a->state() == QAbstractAnimation::Paused) a->resume();
+    mPausedAnims.clear();
+
+    if (mFlameTick && !mFlameTick->isActive()) mFlameTick->start(33);
+    if (mDynamicBg) mDynamicBg->setPaused(false);
 }
 
 bool MainWindow::eventFilter(QObject *obj, QEvent *ev)
@@ -4345,7 +4460,7 @@ void MainWindow::animateScoreTotalThenFinalize(double gained, int /*delayAfterEv
         setLabelScaledText(mLblScore, formatScoreNumber(after), uiPx(38));
         updateScoreProgressBar(after, true);
         // 火焰目标在 900ms 后归零(spring ease 自然熄灭)
-        QTimer::singleShot(900, this, [this]() { resetScoreFlame(); });
+        scheduleGame(900, [this]() { resetScoreFlame(); });
 
         animatePlayedCardsToDiscardThen([this]() {
             mGameState->finalizePlayedHand();
@@ -4397,7 +4512,7 @@ void MainWindow::animatePlayedCardsToDiscardThen(std::function<void()> after)
             fade->start(QAbstractAnimation::DeleteWhenStopped);
         }
     }
-    QTimer::singleShot(duration + 40, this, [this, after]() {
+    scheduleGame(duration + 40, [this, after]() {
         clearPlayedCards();
         mShatteredPlayedIndices.clear();
         if (after) after();
@@ -4435,11 +4550,27 @@ void MainWindow::showGameOverOverlay(bool won)
         auto *hl = new QHBoxLayout(row);
         hl->setContentsMargins(0, 0, 0, 0);
         hl->setSpacing(12);
+        auto *cont = makeBtn("继续（无尽）", "#2bd96b", "#52e589", mCNFont, row, 48);
+        cont->setObjectName("gameOverContinue");
         auto *restart = makeBtn("重新开始", "#009dff", "#33b0ff", mCNFont, row, 48);
         auto *quit = makeBtn("退出", "#fe5f55", "#ff7066", mCNFont, row, 48);
+        hl->addWidget(cont);
         hl->addWidget(restart);
         hl->addWidget(quit);
         vl->addWidget(row);
+        connect(cont, &QPushButton::clicked, this, [this]() {
+            hideGameOverOverlay();
+            mGameOverHandled = false;
+            mGameState->continueEndless();
+            refreshGold();
+            refreshCounters();
+            refreshJokerSlots();
+            refreshConsumableSlots();
+            refreshScore();
+            if (mView) mView->viewport()->update();
+            if (mDynamicBg) mDynamicBg->update();
+            update();
+        });
         connect(restart, &QPushButton::clicked, this, [this]() {
             resetTransientOverlaysForNewRun();
             for (auto *c : mHandCards) { if (c->scene()) mScene->removeItem(c); c->deleteLater(); }
@@ -4463,9 +4594,11 @@ void MainWindow::showGameOverOverlay(bool won)
     auto *body = mGameOverPanel->findChild<QLabel*>("gameOverBody");
     if (title) title->setText(won ? "胜利" : "游戏结束");
     if (body) body->setText(won
-                          ? "你击败了所有盲注。"
+                          ? "你击败了所有盲注。\n可以继续挑战无尽模式。"
                           : QString("未达到盲注要求\n分数：%1 / %2\n底注：%3")
                                 .arg(formatScoreNumber(mGameState->score())).arg(formatScoreNumber(mGameState->targetScore())).arg(mGameState->ante()));
+    if (auto *cont = mGameOverPanel->findChild<QPushButton*>("gameOverContinue"))
+        cont->setVisible(won);
     mGameOverPanel->adjustSize();
     mGameOverProxy->setPos((mSceneW - mGameOverPanel->width()) / 2.0,
                            mSceneH + 40);

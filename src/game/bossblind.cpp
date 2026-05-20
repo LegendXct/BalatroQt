@@ -19,6 +19,19 @@ BossInfo bossInfo(BossEffect e) {
     case BossEffect::TheArm:     return {"手臂",   "出牌后该牌型等级下降"};
     case BossEffect::TheMouth:   return {"嘴",     "本盲注只能出第一种牌型"};
     case BossEffect::TheEye:     return {"眼",     "本盲注不能重复出同一种牌型"};
+    case BossEffect::TheOx:      return {"公牛",   "打出最常用牌型时金币归零"};
+    case BossEffect::TheHouse:   return {"房屋",   "第一手牌背面朝下发出"};
+    case BossEffect::TheWheel:   return {"轮子",   "1/7 的牌背面朝下发出"};
+    case BossEffect::TheFish:    return {"鱼",     "每次出牌后补的牌背面朝下"};
+    case BossEffect::TheMark:    return {"标记",   "所有人头牌背面朝下发出"};
+    case BossEffect::ThePillar:  return {"支柱",   "本 Ante 之前打出过的牌被禁用"};
+    case BossEffect::TheTooth:   return {"牙齿",   "每打出 1 张牌失去 $1"};
+    case BossEffect::TheSerpent: return {"巨蛇",   "出牌或弃牌后固定只补 3 张"};
+    case BossEffect::AmberAcorn: return {"琥珀橡果", "所有小丑翻面并打乱顺序"};
+    case BossEffect::CeruleanBell:return {"蔚蓝铃铛","强制 1 张手牌始终被选中"};
+    case BossEffect::CrimsonHeart:return {"绯红之心","每出一手随机禁用 1 张小丑"};
+    case BossEffect::VerdantLeaf: return {"翠绿之叶","所有牌被禁用，直到卖出 1 张小丑"};
+    case BossEffect::VioletVessel:return {"紫罗兰之器","超大盲注"};
     case BossEffect::None:       return {"",       ""};
     }
     return {"", ""};
@@ -42,6 +55,19 @@ int bossChipRow(BossEffect e)
     case BossEffect::TheArm:     return 11;
     case BossEffect::TheMouth:   return 18;
     case BossEffect::TheEye:     return 17;
+    case BossEffect::TheOx:      return 2;
+    case BossEffect::TheHouse:   return 3;
+    case BossEffect::TheFish:    return 5;
+    case BossEffect::TheWheel:   return 10;
+    case BossEffect::TheSerpent: return 15;
+    case BossEffect::ThePillar:  return 16;
+    case BossEffect::TheTooth:   return 22;
+    case BossEffect::TheMark:    return 23;
+    case BossEffect::CrimsonHeart:return 25;
+    case BossEffect::CeruleanBell:return 26;
+    case BossEffect::AmberAcorn: return 27;
+    case BossEffect::VerdantLeaf:return 28;
+    case BossEffect::VioletVessel:return 29;
     default: return 7;
     }
 }
@@ -49,6 +75,16 @@ int bossChipRow(BossEffect e)
 struct BossCandidate { BossEffect effect; int minAnte; int maxAnte; };
 
 BossEffect randomBossEffect(int ante) {
+    // 终盘 Boss：ante 为 8 的倍数时（含无尽模式的 16/24…）固定出现。
+    if (ante > 0 && ante % 8 == 0) {
+        static const BossEffect finishers[] = {
+            BossEffect::AmberAcorn, BossEffect::CeruleanBell,
+            BossEffect::CrimsonHeart, BossEffect::VerdantLeaf,
+            BossEffect::VioletVessel,
+        };
+        return finishers[QRandomGenerator::global()->bounded(int(sizeof(finishers)/sizeof(*finishers)))];
+    }
+
     static const BossCandidate pool[] = {
         {BossEffect::TheHook, 1, 10}, {BossEffect::TheClub, 1, 10},
         {BossEffect::TheGoad, 1, 10}, {BossEffect::TheHead, 1, 10},
@@ -58,6 +94,10 @@ BossEffect randomBossEffect(int ante) {
         {BossEffect::TheFlint, 2, 10}, {BossEffect::TheMouth, 2, 10},
         {BossEffect::TheEye, 3, 10}, {BossEffect::TheArm, 2, 10},
         {BossEffect::ThePlant, 4, 10},
+        {BossEffect::TheOx, 6, 10}, {BossEffect::TheHouse, 2, 10},
+        {BossEffect::TheWheel, 2, 10}, {BossEffect::TheFish, 2, 10},
+        {BossEffect::TheMark, 2, 10}, {BossEffect::ThePillar, 1, 10},
+        {BossEffect::TheTooth, 3, 10}, {BossEffect::TheSerpent, 5, 10},
     };
     QVector<BossEffect> legal;
     for (const auto &c : pool) {

@@ -30,6 +30,11 @@ public:
 
     void setSceneSize(qreal w, qreal h);
     void setMood(Mood mood);
+    // 暂停/恢复背景动画（打开比赛信息/选项/牌组时用）。
+    void setPaused(bool p) {
+        if (p) mTimer.stop();
+        else if (!mTimer.isActive()) { mLastTick = mClock.elapsed() / 1000.0; mTimer.start(16); }
+    }
 
 protected:
     void initializeGL() override;

@@ -73,8 +73,9 @@ void PackOpenWidget::buildUi()
     mPanel->setStyleSheet("background: transparent; border: none;");
 
     auto *root = new QVBoxLayout(mPanel);
-    root->setContentsMargins(18, 12, 18, 12);
-    root->setSpacing(8);
+    // 整体上移并压缩纵向间距：让放大后的塔罗牌选项卡（含“选择”按钮）完整落在可见区域内。
+    root->setContentsMargins(18, 8, 18, 10);
+    root->setSpacing(4);
 
     mLblTitle = new QLabel("打开包", mPanel);
     QFont tf = mCNFont; tf.setPixelSize(24); tf.setBold(true);
@@ -83,7 +84,7 @@ void PackOpenWidget::buildUi()
     mLblTitle->setAlignment(Qt::AlignCenter);
 
     mLblChoose = new QLabel("", mPanel);
-    QFont cf = mCNFont; cf.setPixelSize(15);
+    QFont cf = mCNFont; cf.setPixelSize(22);
     mLblChoose->setFont(cf);
     mLblChoose->setStyleSheet("color:white; background:transparent;");
     mLblChoose->setAlignment(Qt::AlignCenter);
@@ -99,8 +100,9 @@ void PackOpenWidget::buildUi()
     mHandView->setAttribute(Qt::WA_TranslucentBackground);
     mHandView->viewport()->setAttribute(Qt::WA_TranslucentBackground);
     mHandView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    // 270：给下方选项卡 + 包名/跳过行留足空间，避免底部被裁。
-    mHandView->setMinimumHeight(270);
+    // 收窄手牌区高度，给下方放大后的塔罗牌选项卡腾出空间。
+    mHandView->setMinimumHeight(230);
+    mHandView->setMaximumHeight(230);
     mHandView->setMouseTracking(true);
     root->addWidget(mHandView);
 
@@ -115,50 +117,50 @@ void PackOpenWidget::buildUi()
     optionsBox->setAttribute(Qt::WA_StyledBackground, true);
     optionsBox->setStyleSheet("QWidget#packOptionsBox { background:transparent; border:none; }");
     auto *optionsLayout = new QHBoxLayout(optionsBox);
-    optionsLayout->setContentsMargins(8, 6, 8, 6);
+    optionsLayout->setContentsMargins(8, 2, 8, 2);
     optionsLayout->setSpacing(8);
-    optionsLayout->setAlignment(Qt::AlignCenter);
+    // 选项卡靠上对齐：紧贴上方手牌，富余的空间留到卡片下方，确保“选择”按钮可见可点。
+    optionsLayout->setAlignment(Qt::AlignHCenter | Qt::AlignTop);
 
     for (int i = 0; i < 5; ++i) {
         OptUi ou;
         ou.card = new QWidget(optionsBox);
-        // 卡片图采样比例 142×190 ≈ 1:1.34；imageLbl 必须高度 ≥ 168 才能完整展示，
-        // 否则像之前那样把 126×168 缩放成的 pixmap 塞进 126×148 的 QLabel，
-        // 上下各被裁掉约 10px——表现就是塔罗 / 幻灵牌顶部和底部"少了一截"。
-        ou.card->setFixedSize(160, 320);
+        // 卡片图采样比例 142×190 ≈ 1:1.34；卡牌整体放大约 20%，文字相应放大，
+        // 让开包界面里的牌和说明文字更清晰可读。纵向间距收紧，整张卡更紧凑。
+        ou.card->setFixedSize(196, 392);
         ou.card->setStyleSheet("background:transparent; border:none;");
 
         auto *vbl = new QVBoxLayout(ou.card);
-        vbl->setContentsMargins(4, 4, 4, 4);
-        vbl->setSpacing(4);
+        vbl->setContentsMargins(4, 2, 4, 2);
+        vbl->setSpacing(1);
 
         ou.imageLbl = new QLabel(ou.card);
-        ou.imageLbl->setFixedSize(140, 188);
+        ou.imageLbl->setFixedSize(168, 226);
         ou.imageLbl->setAlignment(Qt::AlignCenter);
         ou.imageLbl->setStyleSheet("background:transparent;");
         vbl->addWidget(ou.imageLbl, 0, Qt::AlignCenter);
 
         ou.nameLbl = new QLabel("", ou.card);
-        QFont nf = mCNFont; nf.setPixelSize(13); nf.setBold(true);
+        QFont nf = mCNFont; nf.setPixelSize(22); nf.setBold(true);
         ou.nameLbl->setFont(nf);
         ou.nameLbl->setStyleSheet("color:white; background:transparent;");
         ou.nameLbl->setAlignment(Qt::AlignCenter);
         ou.nameLbl->setWordWrap(true);
-        ou.nameLbl->setFixedHeight(36);
+        ou.nameLbl->setFixedHeight(46);
         vbl->addWidget(ou.nameLbl);
 
         ou.descLbl = new QLabel("", ou.card);
-        QFont df = mCNFont; df.setPixelSize(10);
+        QFont df = mCNFont; df.setPixelSize(17);
         ou.descLbl->setFont(df);
         ou.descLbl->setStyleSheet("color:#aab2ba; background:transparent;");
         ou.descLbl->setAlignment(Qt::AlignCenter);
         ou.descLbl->setWordWrap(true);
-        ou.descLbl->setFixedHeight(44);
+        ou.descLbl->setFixedHeight(58);
         vbl->addWidget(ou.descLbl);
 
         ou.takeBtn = new QPushButton("选择", ou.card);
-        ou.takeBtn->setFixedHeight(34);
-        QFont bf = mCNFont; bf.setPixelSize(13);
+        ou.takeBtn->setFixedHeight(44);
+        QFont bf = mCNFont; bf.setPixelSize(20);
         ou.takeBtn->setFont(bf);
         ou.takeBtn->setCursor(Qt::PointingHandCursor);
         ou.takeBtn->setStyleSheet(

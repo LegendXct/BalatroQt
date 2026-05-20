@@ -48,6 +48,13 @@ enum class HandSortMode {
     Manual
 };
 
+// 补牌场景：用于区分开局发牌与出牌/弃牌后的补牌（巨蛇、鱼等 Boss 需要）。
+enum class DrawContext {
+    BlindStart,
+    AfterPlay,
+    AfterDiscard
+};
+
 class GameState : public QObject
 {
     Q_OBJECT
@@ -164,6 +171,12 @@ public:
     bool justSkipped() const { return mJustSkipped; }
     bool grosMichelExtinct() const { return mGrosMichelExtinct; }
 
+    // 无尽模式：通关 ante 8 后继续游玩。
+    bool isEndlessMode() const { return mEndlessMode; }
+    void continueEndless();
+    // 蔚蓝铃铛 Boss：被强制选中的手牌 uid（-1 表示无）。
+    int ceruleanForcedUid() const { return mCeruleanForcedUid; }
+
     HandResult previewSelection(const QVector<int> &indices) const;
 signals:
     void handChanged();
@@ -215,10 +228,8 @@ private:
     HandSortMode mSortMode = HandSortMode::ByRank;   // 默认按点数
     void enterBlindSelect();
 
-    void dealCards(); // 补牌到满
+    void dealCards(DrawContext ctx = DrawContext::BlindStart); // 补牌
     double calcTargetScore() const;
-    void applyCardEnhancements(HandResult &result);
-    void applyJokerEffects(HandResult &result);
     void checkGameOver();
     int roundReward() const;
     static QPair<int, int> handLevelDelta(HandType t);   // {chipsΔ, multΔ}
@@ -256,6 +267,14 @@ private:
     TagType mBlindTags[2] = { TagType::Skip, TagType::Skip };
     TagType mLastSkippedTag = TagType::Skip;
     QVector<TagType> mActiveTags;
+
+    // 无尽模式 / 新增 Boss 状态
+    bool mEndlessMode = false;
+    QSet<int> mCardsPlayedThisAnte;   // 支柱(The Pillar)：本 Ante 已打出过的牌 uid
+    int mCrimsonHeartDisabled = -1;   // 绯红之心：本手被禁用的小丑下标
+    bool mVerdantLeafActive = false;  // 翠绿之叶：尚未卖出小丑时为 true
+    int mCeruleanForcedUid = -1;      // 蔚蓝铃铛：强制选中的手牌 uid
+    void refreshCeruleanForced();     // 强制牌离开手牌后重新挑一张
 
     double mCainoXMult = 1.0;
     double mYorickXMult = 1.0;

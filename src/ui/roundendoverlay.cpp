@@ -162,9 +162,13 @@ void RoundEndOverlay::buildUi()
         mvbl->addWidget(numRow);
 
         hbl->addWidget(mid, 1);
-        // 不放右侧 $$$；保留指针避免空指针访问。
+        // 右侧显示盲注奖励金（boss / 大小盲注通关奖励），与下方明细行一致用 $ 串。
         mBlindRewardSym = new QLabel("", row);
-        mBlindRewardSym->hide();
+        QFont brf = mCNFont; brf.setPixelSize(20); brf.setBold(true);
+        mBlindRewardSym->setFont(brf);
+        mBlindRewardSym->setStyleSheet("color:#f3b958; background:transparent;");
+        mBlindRewardSym->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        hbl->addWidget(mBlindRewardSym);
         innerVbl->addWidget(row);
     }
 

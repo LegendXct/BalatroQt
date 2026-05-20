@@ -789,10 +789,11 @@ void paintFlame(QPainter *p, const QRectF &rect, double amount,
     if (!p || amount <= 0.05 || rect.width() <= 1 || rect.height() <= 1) return;
 
     // 移植 flame.fs:小分辨率 fractal noise,每帧重新算。
-    // 之前 0.35 倍 sample 太小，放大后非常糊；提到 0.7×、上限 140，火焰边缘更利。
+    // 采样分辨率提到 0.85×、上限 170，配合下方的软边 alpha + 平滑放大，
+    // 火焰边缘不再是硬锯齿。
     const double intensity = std::min(10.0, amount);
-    const int W = qBound(40, int(rect.width()  * 0.70), 140);
-    const int H = qBound(40, int(rect.height() * 0.70), 140);
+    const int W = qBound(48, int(rect.width()  * 0.85), 170);
+    const int H = qBound(48, int(rect.height() * 0.85), 170);
 
     QImage img(W, H, QImage::Format_ARGB32_Premultiplied);
     img.fill(0);
@@ -868,18 +869,27 @@ void paintFlame(QPainter *p, const QRectF &rect, double amount,
                 double mix = (-2.0 + 0.5 * intensity * smokeRes) * k;
                 r += r * mix;  g += g * mix;  b += b * mix;
             }
-            int ir = qBound(0, int(r * 255.0), 255);
-            int ig = qBound(0, int(g * 255.0), 255);
-            int ib = qBound(0, int(b * 255.0), 255);
-            // 对齐 flame.fs：smokeRes <= 1 时 alpha 固定 1.0；不再在顶部人为渐隐。
-            // premultiplied
-            row[px] = qRgba(ir, ig, ib, 255);
+            // 软边 alpha：smokeRes 越接近 1.0（火焰/烟雾边界）越透明，
+            // 消除原本 0/255 硬切造成的锯齿。premultiplied 格式下 RGB 需 ≤ alpha，
+            // 因此先把颜色钳到 [0,1] 再乘 alpha。
+            double edge = 1.0;
+            if (smokeRes > 0.70) edge = 1.0 - (smokeRes - 0.70) / 0.30;
+            edge = qBound(0.0, edge, 1.0);
+            edge = edge * edge * (3.0 - 2.0 * edge);   // smoothstep
+            r = qBound(0.0, r, 1.0);
+            g = qBound(0.0, g, 1.0);
+            b = qBound(0.0, b, 1.0);
+            int ia = int(255.0 * edge);
+            int ir = int(r * 255.0 * edge);
+            int ig = int(g * 255.0 * edge);
+            int ib = int(b * 255.0 * edge);
+            row[px] = qRgba(ir, ig, ib, ia);
         }
     }
 
     p->save();
-    // 关闭平滑插值——原版火焰是 pixel-art 风格，nearest-neighbor 放大保留锯齿边的"硬"火焰感。
-    p->setRenderHint(QPainter::SmoothPixmapTransform, false);
+    // 开启平滑插值：配合软边 alpha，放大后火焰边缘柔和、无锯齿。
+    p->setRenderHint(QPainter::SmoothPixmapTransform, true);
     p->drawImage(rect, img);
     p->restore();
 }
