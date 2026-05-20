@@ -1189,6 +1189,7 @@ void MainWindow::setupLeftPanel() {
         connect(back, &QPushButton::clicked, overlay, [this, overlay]() {
             overlay->hide();
             overlay->deleteLater();
+            if (mRunInfoOverlay == overlay) mRunInfoOverlay = nullptr;
             resumeGameProcesses();
         });
         root->addWidget(back);
@@ -1446,8 +1447,6 @@ void MainWindow::startNewRunFromOptions()
     mGameTimers.clear();
     if (mScoreCountAnim) mScoreCountAnim->stop();
     mGamePaused = false;
-    if (mFlameTick && !mFlameTick->isActive()) mFlameTick->start(33);
-    if (mDynamicBg) mDynamicBg->setPaused(false);
 
     // 保持覆盖层可见直到所有状态和界面刷新完成，避免玩家看到半帧清空场景。
     // 不再 setUpdatesEnabled(false)，因为整窗禁用/恢复更新也会在部分机器上触发黑底中间帧。
@@ -3816,13 +3815,12 @@ void MainWindow::pauseGameProcesses()
         t->setProperty("pauseRemain", qMax(0, rem));
         t->stop();
     }
-    // 2) 回合总分计数动画。只暂停这一个明确跟踪的动画，
-    //    不再用 findChildren 盲扫——那会误暂停动画组的子动画，造成状态错乱甚至崩溃。
+    // 2) 回合总分计数动画。只暂停这一个明确跟踪的动画。
+    //    不碰火焰计时器与动态背景（QOpenGLWidget）——在其上叠加 widget 覆盖层时
+    //    停掉 GL 渲染会在部分驱动上触发上下文重建并崩溃（见 mainwindow.h 注释）。
+    //    它们只是环境动画，被半透明菜单遮住，不暂停也无妨。
     if (mScoreCountAnim && mScoreCountAnim->state() == QAbstractAnimation::Running)
         mScoreCountAnim->pause();
-    // 3) 火焰 + 动态背景。
-    if (mFlameTick) mFlameTick->stop();
-    if (mDynamicBg) mDynamicBg->setPaused(true);
 }
 
 void MainWindow::resumeGameProcesses()
@@ -3836,9 +3834,6 @@ void MainWindow::resumeGameProcesses()
     }
     if (mScoreCountAnim && mScoreCountAnim->state() == QAbstractAnimation::Paused)
         mScoreCountAnim->resume();
-
-    if (mFlameTick && !mFlameTick->isActive()) mFlameTick->start(33);
-    if (mDynamicBg) mDynamicBg->setPaused(false);
 }
 
 bool MainWindow::eventFilter(QObject *obj, QEvent *ev)
