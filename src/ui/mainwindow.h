@@ -82,6 +82,7 @@ private:
     QPushButton *mBtnSortNum = nullptr; // 点数理牌
     QPushButton *mBtnSortSuit = nullptr; // 花色理牌
     QPushButton *mBtnDiscard = nullptr; // 弃牌
+    QPushButton *mBtnBestPlay = nullptr; // 最佳出牌提示
     QGraphicsTextItem *mHandCountLabel  = nullptr;  // 8/8
     QPointer<class QVariantAnimation> mHandCountLabelAnim;  // 手牌行下沉时 8/8 标签的动画
     QGraphicsTextItem *mDeckLabel       = nullptr;  // 52/52
@@ -155,6 +156,7 @@ private:
     QGraphicsProxyWidget *mPlayProxy    = nullptr;
     QGraphicsProxyWidget *mSortProxy    = nullptr;
     QGraphicsProxyWidget *mDiscardProxy = nullptr;
+    QGraphicsProxyWidget *mBestPlayProxy = nullptr;
 
     QLabel *mBlindChipLbl = nullptr;
 
@@ -224,6 +226,7 @@ private:
     void onHandPlayed();
     void onSortByNum();
     void onSortBySuit();
+    void onBestPlayHint();
     void setPlayPhaseVisible(bool v);
 
     void onRoundWon(int blindReward, int handBonus, int interest);
@@ -314,6 +317,7 @@ private:
     QPointF mPlayBtnHome;
     QPointF mSortBtnHome;
     QPointF mDiscardBtnHome;
+    QPointF mBestPlayBtnHome;
 
     void updateHandPreview();
     void playScoreEvent(const ScoreEvent &ev);

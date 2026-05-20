@@ -1244,6 +1244,7 @@ bool GameState::dnaCanTriggerThisPlay() const
 
 void GameState::createDNACopy(const CardData &card)
 {
+    if (mDryRun) return;
     if (!dnaCanTriggerThisPlay()) return;
     CardData copy = card;
     copy.assignNewUid();              // 这是新复制出的实体牌，不能沿用原牌 uid
@@ -1265,6 +1266,254 @@ void GameState::decayEndOfHandJokers()
         }
     }
     if (changed) emit jokersChanged();
+}
+
+// ── 最佳出牌提示：无副作用计分模拟器 ─────────────────────────────
+// 镜像 playCards() 的计分段（约 319–544 行），但只写入局部 HandResult，
+// 不改 mHand/mJokers/mHandLevels；随机效果按期望值估算；mDryRun 抑制
+// 小丑效果里的 addGold/createDNACopy 等状态改写。
+double GameState::simulatePlayScore(const QVector<int> &orderedIndices)
+{
+    if (orderedIndices.isEmpty()) return 0.0;
+
+    QVector<CardData> played;
+    QSet<int> playedSet;
+    for (int i : orderedIndices) {
+        if (i < 0 || i >= mHand.size()) return 0.0;
+        played.append(mHand[i]);
+        playedSet.insert(i);
+    }
+
+    HandResult result = HandEvaluator::evaluate(played);
+
+    // 牌型等级加成（只读 mHandLevels）
+    int lvLevel = 1, lvChips = 0, lvMult = 0;
+    auto itLv = mHandLevels.constFind(result.type);
+    if (itLv != mHandLevels.constEnd()) {
+        lvLevel = itLv->level; lvChips = itLv->chipsBonus; lvMult = itLv->multBonus;
+    }
+    // The Arm：用降一级后的加成估算（不真正修改等级）
+    if (!hasJokerType(JokerType::Chicot) && mBossEffect == BossEffect::TheArm && lvLevel > 1) {
+        auto d = handLevelDelta(result.type);
+        lvLevel = qMax(1, lvLevel - 1);
+        lvChips = qMax(0, lvChips - d.first);
+        lvMult  = qMax(0, lvMult  - d.second);
+    }
+    result.chips += lvChips;
+    result.mult  += lvMult;
+    result.level  = lvLevel;
+    result.xmult  = 1.0;
+
+    if (!hasJokerType(JokerType::Chicot) && mBossEffect == BossEffect::TheFlint) {
+        result.chips = std::max(0.0, std::floor(result.chips * 0.5 + 0.5));
+        result.mult  = std::max(1.0, std::floor(result.mult  * 0.5 + 0.5));
+    }
+
+    // 找出 played 中参与计分的下标（与 playCards 相同的匹配逻辑）
+    QVector<int> scoringPlayedIdx;
+    QSet<int> used;
+    for (const CardData &sc : result.scoringCards) {
+        for (int k = 0; k < played.size(); ++k) {
+            if (used.contains(k)) continue;
+            const CardData &p = played[k];
+            if (p.rank == sc.rank && p.suit == sc.suit
+                && p.enhancement == sc.enhancement
+                && p.edition == sc.edition && p.seal == sc.seal) {
+                scoringPlayedIdx.append(k); used.insert(k); break;
+            }
+        }
+    }
+    for (int k = 0; k < played.size(); ++k) {
+        if (played[k].enhancement != Enhancement::Stone) continue;
+        if (!scoringPlayedIdx.contains(k)) scoringPlayedIdx.append(k);
+        result.scoringCards.append(played[k]);
+    }
+    std::sort(scoringPlayedIdx.begin(), scoringPlayedIdx.end());
+
+    const int sockRetriggers = countResolvedJokersOfType(mJokers, JokerType::SockAndBuskin);
+    const int chadRetriggers = 2 * countResolvedJokersOfType(mJokers, JokerType::HangingChad);
+    const int hikerTriggers  = countResolvedJokersOfType(mJokers, JokerType::Hiker);
+
+    // 单张计分牌的算分（镜像 scoreCard，去掉事件/RNG，随机效果取期望值）
+    auto simScoreCard = [this, &result](const CardData &card) {
+        if (card.enhancement != Enhancement::Stone) {
+            int v = card.chipValue() + qMax(0, card.permanentBonusChips);
+            if (v > 0) result.chips += v;
+        }
+        switch (card.enhancement) {
+        case Enhancement::Bonus: result.chips += 30;   break;
+        case Enhancement::Mult:  result.mult  += 4;    break;
+        case Enhancement::Glass: result.xmult *= 2.0;  break;
+        case Enhancement::Stone: result.chips += 50;   break;
+        case Enhancement::Lucky: result.mult  += 4.0;  break;   // 期望值：20 × 1/5
+        default: break;
+        }
+        switch (card.edition) {
+        case Edition::Foil:        result.chips += 50;  break;
+        case Edition::Holographic: result.mult  += 10;  break;
+        case Edition::Polychrome:  result.xmult *= 1.5; break;
+        default: break;
+        }
+        for (int ji = 0; ji < mJokers.size(); ++ji) {
+            if (mJokers[ji].isDebuffed) continue;
+            const Joker *ej = resolveCopiedJoker(mJokers, ji);
+            if (!ej || ej->isDebuffed || ej->timing != TriggerTiming::OnScoringCard) continue;
+            if (card.enhancement == Enhancement::Stone && jokerUsesCardRankOrSuit(ej->type)) continue;
+            if (ej->type == JokerType::Bloodstone) {            // 随机 → 期望值
+                if (!card.isDebuffed && card.suit == Suit::Hearts) result.xmult *= 1.25;
+                continue;
+            }
+            TriggerContext ctx{ result, *this, mHand, result.scoringCards, &card };
+            applyResolvedJokerEffect(*ej, ctx);
+        }
+    };
+
+    mDryRun = true;
+
+    bool firstScoringCard = true;
+    for (int playedIdx : scoringPlayedIdx) {
+        CardData card = played[playedIdx];
+        if (card.isDebuffed) { firstScoringCard = false; continue; }
+
+        const int redSealReps = (card.seal == Seal::Red) ? 1 : 0;
+        int triggers = 1 + redSealReps;
+        const bool hasRankAndSuit = card.enhancement != Enhancement::Stone;
+        const bool isFace = hasRankAndSuit &&
+            (card.rank == Rank::Jack || card.rank == Rank::Queen || card.rank == Rank::King);
+        if (isFace) triggers += sockRetriggers;
+        if (firstScoringCard) triggers += chadRetriggers;
+
+        if (hikerTriggers > 0) card.permanentBonusChips += 5 * hikerTriggers;
+
+        for (int t = 0; t < triggers; ++t) simScoreCard(card);
+        firstScoringCard = false;
+    }
+
+    // 留手牌效果（Steel / Baron / ShootTheMoon + Mime / 红蜡封重触发）
+    QVector<CardData> heldHand;
+    for (int i = 0; i < mHand.size(); ++i)
+        if (!playedSet.contains(i)) heldHand.append(mHand[i]);
+
+    const int mimeRetriggers     = countResolvedJokersOfType(mJokers, JokerType::Mime);
+    const int baronTriggers      = countResolvedJokersOfType(mJokers, JokerType::Baron);
+    const int shootMoonTriggers  = countResolvedJokersOfType(mJokers, JokerType::ShootTheMoon);
+    for (const CardData &c : heldHand) {
+        if (c.isDebuffed) continue;
+        const bool hasHeldEffect = (c.enhancement == Enhancement::Steel)
+            || (c.rank == Rank::King  && baronTriggers > 0)
+            || (c.rank == Rank::Queen && shootMoonTriggers > 0);
+        const int redSealReps = (hasHeldEffect && c.seal == Seal::Red) ? 1 : 0;
+        int retriggers = 1 + redSealReps + (hasHeldEffect ? mimeRetriggers : 0);
+        for (int r = 0; r < retriggers; ++r) {
+            if (c.enhancement == Enhancement::Steel) result.xmult *= 1.5;
+            if (c.rank == Rank::King)
+                for (int b = 0; b < baronTriggers; ++b) result.xmult *= 1.5;
+            if (c.rank == Rank::Queen)
+                for (int sm = 0; sm < shootMoonTriggers; ++sm) result.mult += 13;
+        }
+    }
+
+    // OnPlayedHand / Passive 小丑遍历 + 小丑版本
+    {
+        TriggerContext ctx{ result, *this, heldHand, result.scoringCards, nullptr };
+        for (int ji = 0; ji < mJokers.size(); ++ji) {
+            const Joker &j = mJokers[ji];
+            if (j.isDebuffed) continue;
+            const Joker *ej = resolveCopiedJoker(mJokers, ji);
+            if (ej && !ej->isDebuffed &&
+                (ej->timing == TriggerTiming::Passive ||
+                 ej->timing == TriggerTiming::OnPlayedHand)) {
+                if (ej->type == JokerType::Misprint) result.mult += 11.5;  // 期望值：0~23 均值
+                else applyResolvedJokerEffect(*ej, ctx);
+            }
+            switch (j.edition) {
+            case Edition::Foil:        result.chips += 50;  break;
+            case Edition::Holographic: result.mult  += 10;  break;
+            case Edition::Polychrome:  result.xmult *= 1.5; break;
+            default: break;
+            }
+        }
+    }
+
+    mDryRun = false;
+
+    double score = result.chips * result.mult * result.xmult;
+    if (!std::isfinite(score)) score = std::numeric_limits<double>::infinity();
+    return score;
+}
+
+QVector<int> GameState::findBestPlay()
+{
+    const int n = qMin(mHand.size(), 16);   // 防御性上限，正常手牌远小于此
+    if (n == 0) return {};
+    const int maxI = qMin(5, n);
+    int minI = 1;
+    // 灵媒(The Psychic)：必须出 5 张
+    if (mBossEffect == BossEffect::ThePsychic && !hasJokerType(JokerType::Chicot))
+        minI = maxI;
+
+    QVector<int> best;
+    double bestScore = -1.0;
+
+    for (quint32 mask = 1; mask < (1u << n); ++mask) {
+        int pc = 0;
+        for (int b = 0; b < n; ++b) if (mask & (1u << b)) ++pc;
+        if (pc < minI || pc > maxI) continue;
+
+        QVector<int> combo;                 // 手牌下标
+        QVector<CardData> comboCards;
+        for (int b = 0; b < n; ++b)
+            if (mask & (1u << b)) { combo.append(b); comboCards.append(mHand[b]); }
+
+        // 牌型与"哪些牌计分"只取决于集合，先评估一次
+        HandResult hr = HandEvaluator::evaluate(comboCards);
+        QVector<int> scoringPos;            // combo 内位置
+        QSet<int> usedPos;
+        for (const CardData &sc : hr.scoringCards) {
+            for (int k = 0; k < comboCards.size(); ++k) {
+                if (usedPos.contains(k)) continue;
+                const CardData &p = comboCards[k];
+                if (p.rank == sc.rank && p.suit == sc.suit
+                    && p.enhancement == sc.enhancement
+                    && p.edition == sc.edition && p.seal == sc.seal) {
+                    scoringPos.append(k); usedPos.insert(k); break;
+                }
+            }
+        }
+        for (int k = 0; k < comboCards.size(); ++k)
+            if (comboCards[k].enhancement == Enhancement::Stone && !usedPos.contains(k)) {
+                scoringPos.append(k); usedPos.insert(k);
+            }
+        QVector<int> nonScoringPos;
+        for (int k = 0; k < comboCards.size(); ++k)
+            if (!usedPos.contains(k)) nonScoringPos.append(k);
+
+        // 只对计分牌做全排列（非计分牌顺序不影响分数）
+        std::sort(scoringPos.begin(), scoringPos.end());
+        QVector<int> perm = scoringPos;
+        do {
+            QVector<int> ordered;
+            for (int p : perm)          ordered.append(combo[p]);
+            for (int p : nonScoringPos) ordered.append(combo[p]);
+            double s = simulatePlayScore(ordered);
+            if (s > bestScore) { bestScore = s; best = ordered; }
+        } while (std::next_permutation(perm.begin(), perm.end()));
+    }
+    return best;
+}
+
+void GameState::bringHandCardsToFront(const QVector<int> &indices)
+{
+    if (indices.isEmpty()) return;
+    QSet<int> sel(indices.begin(), indices.end());
+    QVector<CardData> front, rest;
+    for (int i : indices)
+        if (i >= 0 && i < mHand.size()) front.append(mHand[i]);
+    for (int i = 0; i < mHand.size(); ++i)
+        if (!sel.contains(i)) rest.append(mHand[i]);
+    mHand = front + rest;
+    mSortMode = HandSortMode::Manual;
+    emit handChanged();
 }
 
 void GameState::scoreCard(const CardData &card, HandResult &result, int playedIdx)

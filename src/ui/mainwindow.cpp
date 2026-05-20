@@ -1622,25 +1622,33 @@ void MainWindow::setupSceneButtons() {
     mDiscardProxy = mScene->addWidget(mBtnDiscard);
     mDiscardProxy->setZValue(50);
 
+    mBtnBestPlay = makeSceneBtn("最佳出牌", "#8a4fd3", "#9b60e8");
+    mBestPlayProxy = mScene->addWidget(mBtnBestPlay);
+    mBestPlayProxy->setZValue(50);
+    connect(mBtnBestPlay, &QPushButton::clicked, this, &MainWindow::onBestPlayHint);
+
     layoutSceneButtons();
 }
 
 void MainWindow::layoutSceneButtons() {
-    if (!mPlayProxy || !mSortProxy || !mDiscardProxy) return;
+    if (!mPlayProxy || !mSortProxy || !mDiscardProxy || !mBestPlayProxy) return;
     const int btnW = 176;
     const int gap = 16;
-    const int totalW = btnW * 3 + gap * 2;
+    const int totalW = btnW * 4 + gap * 3;
     const int startX = (mSceneW - HAND_RIGHT_RESERVE - totalW) / 2;
     const int y = mBtnY;
 
-    mPlayProxy->setPos(startX, y);
-    mSortProxy->setPos(startX + btnW + gap, y);
-    mDiscardProxy->setPos(startX + (btnW + gap) * 2, y);
+    // 顺序：最佳出牌 / 出牌 / 理牌 / 弃牌
+    mBestPlayProxy->setPos(startX, y);
+    mPlayProxy->setPos(startX + (btnW + gap), y);
+    mSortProxy->setPos(startX + (btnW + gap) * 2, y);
+    mDiscardProxy->setPos(startX + (btnW + gap) * 3, y);
 
-    // 记录三个按钮的原位,出牌时滑出屏幕,计分完成后滑回。
-    mPlayBtnHome    = mPlayProxy->pos();
-    mSortBtnHome    = mSortProxy->pos();
-    mDiscardBtnHome = mDiscardProxy->pos();
+    // 记录按钮原位,出牌时滑出屏幕,计分完成后滑回。
+    mBestPlayBtnHome = mBestPlayProxy->pos();
+    mPlayBtnHome     = mPlayProxy->pos();
+    mSortBtnHome     = mSortProxy->pos();
+    mDiscardBtnHome  = mDiscardProxy->pos();
 }
 
 void MainWindow::updateSceneSize() {
@@ -2740,6 +2748,35 @@ void MainWindow::onSortByNum() {
 
 void MainWindow::onSortBySuit() {
     mGameState->sortHandBySuit();
+}
+
+void MainWindow::onBestPlayHint() {
+    if (!mGameState) return;
+    if (mGameState->phase() != GamePhase::Blind) return;
+    if (mScoringInProgress) return;
+    if (mGameState->hand().isEmpty()) return;
+
+    // 遍历所有出牌组合/排列，找当前小丑顺序下分数最高的一种。
+    QApplication::setOverrideCursor(Qt::WaitCursor);
+    QVector<int> best = mGameState->findBestPlay();
+    QApplication::restoreOverrideCursor();
+    if (best.isEmpty()) return;
+
+    const int k = best.size();
+    // 把最佳出牌按最优顺序移到手牌最前；handChanged 会同步重建 mHandCards。
+    mGameState->bringHandCardsToFront(best);
+
+    // 重建后最佳出牌就在最前面，选中前 k 张。
+    mSelected.clear();
+    for (int i = 0; i < mHandCards.size(); ++i) {
+        const bool sel = (i < k);
+        mHandCards[i]->setCardSelected(sel);
+        if (sel) mSelected.append(i);
+    }
+
+    layoutHandCards();
+    refreshCounters();
+    updateHandPreview();
 }
 
 void MainWindow::onGameOver(bool won)
@@ -3980,6 +4017,7 @@ void MainWindow::onBlindStarted()
     if (mBtnPlay) mBtnPlay->setEnabled(true);
 
     // 确保按钮回到 home 位置(可能上一局结束时按钮滑出去了)
+    if (mBestPlayProxy && !mBestPlayBtnHome.isNull()) mBestPlayProxy->setPos(mBestPlayBtnHome);
     if (mPlayProxy && !mPlayBtnHome.isNull())    mPlayProxy->setPos(mPlayBtnHome);
     if (mSortProxy && !mSortBtnHome.isNull())    mSortProxy->setPos(mSortBtnHome);
     if (mDiscardProxy && !mDiscardBtnHome.isNull()) mDiscardProxy->setPos(mDiscardBtnHome);
@@ -4295,6 +4333,7 @@ void MainWindow::relayoutObtainedTags()
 
 void MainWindow::setPlayPhaseVisible(bool v)
 {
+    if (mBestPlayProxy)  mBestPlayProxy->setVisible(v);
     if (mPlayProxy)      mPlayProxy->setVisible(v);
     if (mSortProxy)      mSortProxy->setVisible(v);
     if (mDiscardProxy)   mDiscardProxy->setVisible(v);
@@ -4774,6 +4813,7 @@ void MainWindow::hidePlayControlsForScoring()
         anim->setEasingCurve(QEasingCurve::OutCubic);
         anim->start(QAbstractAnimation::DeleteWhenStopped);
     };
+    slideOut(mBestPlayProxy, mBestPlayBtnHome);
     slideOut(mPlayProxy,    mPlayBtnHome);
     slideOut(mSortProxy,    mSortBtnHome);
     slideOut(mDiscardProxy, mDiscardBtnHome);
@@ -4791,6 +4831,7 @@ void MainWindow::showPlayControlsAfterScoring()
         anim->setEasingCurve(QEasingCurve::OutCubic);
         anim->start(QAbstractAnimation::DeleteWhenStopped);
     };
+    slideIn(mBestPlayProxy, mBestPlayBtnHome);
     slideIn(mPlayProxy,    mPlayBtnHome);
     slideIn(mSortProxy,    mSortBtnHome);
     slideIn(mDiscardProxy, mDiscardBtnHome);

@@ -81,7 +81,7 @@ public:
     int currentBlindStartingHands() const { return mBlindStartingHands; }
     BlindType blindType() const {return mBlindType;}
     GamePhase phase() const {return mPhase;}
-    void addGold(int amount) { mGold += amount; if (!mSuppressGoldSignal) emit goldChanged(); }
+    void addGold(int amount) { if (mDryRun) return; mGold += amount; if (!mSuppressGoldSignal) emit goldChanged(); }
     const HandResult &lastResult() const{return mLastResult;}
     void sortHandByRank();
     void sortHandBySuit();
@@ -178,6 +178,11 @@ public:
     int ceruleanForcedUid() const { return mCeruleanForcedUid; }
 
     HandResult previewSelection(const QVector<int> &indices) const;
+
+    // 最佳出牌提示：遍历所有出牌组合/排列，返回得分最高的一组手牌下标（按最优顺序）。
+    QVector<int> findBestPlay();
+    // 把指定手牌按给定顺序移到手牌最前，排序模式切到 Manual。
+    void bringHandCardsToFront(const QVector<int> &indices);
 signals:
     void handChanged();
     void scoreChanged();
@@ -297,6 +302,11 @@ private:
     void updateOwnedSellValues();
     void scoreCard(const CardData &card, HandResult &result, int playedIdx);
     void decayEndOfHandJokers();
+
+    // 最佳出牌提示用的无副作用计分模拟器：返回该出牌（按 orderedIndices 顺序）的得分。
+    // 随机效果按期望值估算；mDryRun 期间所有状态改写被抑制。
+    bool mDryRun = false;
+    double simulatePlayScore(const QVector<int> &orderedIndices);
     static ConsumableType planetTypeFor(HandType t);
 };
 
