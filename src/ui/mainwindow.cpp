@@ -724,6 +724,9 @@ void MainWindow::setupLeftPanel() {
     mLblScore->setStyleSheet("color:white; background:transparent;");
     // 回合分数数字水平居中——比标题右侧的"靠右"更对称，看上去像原版的"回合分数 [筹码图] 0"。
     mLblScore->setAlignment(Qt::AlignCenter);
+    // 固定宽度：setLabelScaledText 依据标签宽度缩放字号；若标签随内容自适应，
+    // 缩放→变窄→再缩放会形成反馈回路把字号一路缩到下限。固定宽度切断该回路。
+    mLblScore->setFixedWidth(dp(150));
     sbl->addWidget(mLblScore);
     sbl->addStretch();
     scoreVBox->addWidget(scoreTop);
@@ -1438,11 +1441,10 @@ void MainWindow::hideOptionsOverlay()
 
 void MainWindow::startNewRunFromOptions()
 {
-    // 丢弃暂停中的计分进程：新开局后不应恢复上一局的定时器。
+    // 丢弃暂停中的计分进程：新开局后不应恢复上一局的定时器/动画。
     for (auto &t : mGameTimers) if (t) { t->stop(); t->deleteLater(); }
     mGameTimers.clear();
-    for (auto &a : mPausedAnims) if (a) a->stop();
-    mPausedAnims.clear();
+    if (mScoreCountAnim) mScoreCountAnim->stop();
     mGamePaused = false;
     if (mFlameTick && !mFlameTick->isActive()) mFlameTick->start(33);
     if (mDynamicBg) mDynamicBg->setPaused(false);
@@ -3814,15 +3816,10 @@ void MainWindow::pauseGameProcesses()
         t->setProperty("pauseRemain", qMax(0, rem));
         t->stop();
     }
-    // 2) 正在播放的计分/卡牌动画。
-    mPausedAnims.clear();
-    const auto anims = findChildren<QAbstractAnimation*>();
-    for (auto *a : anims) {
-        if (a && a->state() == QAbstractAnimation::Running) {
-            a->pause();
-            mPausedAnims.append(a);
-        }
-    }
+    // 2) 回合总分计数动画。只暂停这一个明确跟踪的动画，
+    //    不再用 findChildren 盲扫——那会误暂停动画组的子动画，造成状态错乱甚至崩溃。
+    if (mScoreCountAnim && mScoreCountAnim->state() == QAbstractAnimation::Running)
+        mScoreCountAnim->pause();
     // 3) 火焰 + 动态背景。
     if (mFlameTick) mFlameTick->stop();
     if (mDynamicBg) mDynamicBg->setPaused(true);
@@ -3837,9 +3834,8 @@ void MainWindow::resumeGameProcesses()
         if (!t) continue;
         t->start(qMax(0, t->property("pauseRemain").toInt()));
     }
-    for (auto &a : mPausedAnims)
-        if (a && a->state() == QAbstractAnimation::Paused) a->resume();
-    mPausedAnims.clear();
+    if (mScoreCountAnim && mScoreCountAnim->state() == QAbstractAnimation::Paused)
+        mScoreCountAnim->resume();
 
     if (mFlameTick && !mFlameTick->isActive()) mFlameTick->start(33);
     if (mDynamicBg) mDynamicBg->setPaused(false);
@@ -4486,6 +4482,7 @@ void MainWindow::animateScoreTotalThenFinalize(double gained, int /*delayAfterEv
     if (!std::isfinite(after)) after = std::numeric_limits<double>::infinity();
 
     auto *anim = new QVariantAnimation(this);
+    mScoreCountAnim = anim;   // 跟踪它，打开菜单时可暂停/恢复
     anim->setDuration(520);
     anim->setStartValue(before);
     anim->setEndValue(after);

@@ -123,7 +123,7 @@ private:
     // ── 局内进程暂停（打开比赛信息/选项/牌组时）──
     bool mGamePaused = false;
     QList<QPointer<QTimer>> mGameTimers;   // scheduleGame 创建的可暂停定时器
-    QList<QPointer<QAbstractAnimation>> mPausedAnims;  // 暂停时记录、恢复时 resume
+    QPointer<QAbstractAnimation> mScoreCountAnim;  // 当前的回合总分计数动画（可暂停）
     void scheduleGame(int delayMs, std::function<void()> fn);  // 替代计分链里的 singleShot
     void pauseGameProcesses();
     void resumeGameProcesses();
