@@ -3,6 +3,7 @@
 #include <QPainter>
 #include <QFontDatabase>
 #include <QGraphicsProxyWidget>
+#include <QGraphicsPixmapItem>
 #include <algorithm>
 #include <QTimer>
 #include <QGuiApplication>
@@ -511,6 +512,8 @@ MainWindow::MainWindow(QWidget *parent)
 
     mPackOpenWidget = new PackOpenWidget(mCNFont, mPixelFont, mPlayPage);
     mPackOpenWidget->hide();
+    connect(mPackOpenWidget, &PackOpenWidget::choiceAnimationRequested,
+            this, &MainWindow::prepareSlotFlyInAnimation);
     connect(mPackOpenWidget, &PackOpenWidget::choiceMade,
             this, &MainWindow::onPackChoiceMade);
     connect(mPackOpenWidget, &PackOpenWidget::inventoryConsumableRequested,
@@ -1699,6 +1702,128 @@ void MainWindow::updateSceneSize() {
     fitSceneToView();
 }
 
+
+QRect MainWindow::sceneRectOnPlayPage(const QPointF &sceneTopLeft, const QSizeF &sceneSize) const
+{
+    if (!mView || !mPlayPage) return QRect();
+    const QPoint viewTL = mView->mapFromScene(sceneTopLeft);
+    const QPoint viewBR = mView->mapFromScene(sceneTopLeft + QPointF(sceneSize.width(), sceneSize.height()));
+    QRect viewRect(viewTL, viewBR);
+    viewRect = viewRect.normalized();
+    QPoint pageTL = mView->mapTo(mPlayPage, viewRect.topLeft());
+    QSize pageSize(qMax(1, viewRect.width()), qMax(1, viewRect.height()));
+    return QRect(pageTL, pageSize);
+}
+
+QPixmap MainWindow::deckBackPixmap() const
+{
+    QPixmap enh(":/textures/images/Enhancers.png");
+    if (enh.isNull()) return QPixmap();
+    return enh.copy(0, 0, CardItem::SRC_W, CardItem::SRC_H);
+}
+
+void MainWindow::animateTopLayerCardToScene(const QPixmap &pixmap, const QPoint &globalCenter,
+                                            const QPointF &targetSceneTopLeft, const QSizeF &sceneSize,
+                                            bool flipToBack, QGraphicsObject *revealItem)
+{
+    if (pixmap.isNull() || !mPlayPage || !mView) {
+        if (revealItem) revealItem->setOpacity(1.0);
+        return;
+    }
+
+    QRect targetRect = sceneRectOnPlayPage(targetSceneTopLeft, sceneSize);
+    if (!targetRect.isValid() || targetRect.width() <= 1 || targetRect.height() <= 1) {
+        targetRect = QRect(QPoint(int(targetSceneTopLeft.x()), int(targetSceneTopLeft.y())),
+                           QSize(int(sceneSize.width()), int(sceneSize.height())));
+    }
+
+    QSize startSize = targetRect.size();
+    QPixmap front = pixmap.scaled(startSize, Qt::KeepAspectRatio, Qt::FastTransformation);
+    QPixmap back;
+    if (flipToBack) {
+        back = deckBackPixmap().scaled(startSize, Qt::KeepAspectRatio, Qt::FastTransformation);
+        if (back.isNull()) back = front;
+    }
+
+    const QPoint pageCenter = mPlayPage->mapFromGlobal(globalCenter);
+    QRect startRect(QPoint(pageCenter.x() - front.width() / 2,
+                           pageCenter.y() - front.height() / 2),
+                    QSize(front.width(), front.height()));
+
+    auto *ghost = new QLabel(mPlayPage);
+    ghost->setAttribute(Qt::WA_TranslucentBackground, true);
+    ghost->setScaledContents(true);
+    ghost->setPixmap(front);
+    ghost->setGeometry(startRect);
+    ghost->show();
+    ghost->raise();
+    if (mShopWidget && mShopWidget->isVisible()) mShopWidget->raise();
+    if (mPackOpenWidget && mPackOpenWidget->isVisible()) mPackOpenWidget->raise();
+    ghost->raise();  // 明确盖在商店/开包 overlay 上方，避免“从商店下面滑动”。
+
+    auto *anim = new QVariantAnimation(ghost);
+    anim->setDuration(flipToBack ? 520 : 380);
+    anim->setStartValue(0.0);
+    anim->setEndValue(1.0);
+    anim->setEasingCurve(QEasingCurve::OutCubic);
+
+    QPointer<QLabel> ghostGuard(ghost);
+    QPointer<QGraphicsObject> revealGuard(revealItem);
+    connect(anim, &QVariantAnimation::valueChanged, this,
+            [ghostGuard, front, back, startRect, targetRect, flipToBack](const QVariant &v) mutable {
+        if (!ghostGuard) return;
+        const qreal t = v.toDouble();
+        QPointF c0 = startRect.center();
+        QPointF c1 = targetRect.center();
+        QPointF c = c0 + (c1 - c0) * t;
+
+        qreal lift = std::sin(t * 3.14159265358979323846) * 22.0;
+        QSizeF baseSize(startRect.width() + (targetRect.width() - startRect.width()) * t,
+                        startRect.height() + (targetRect.height() - startRect.height()) * t);
+        qreal wScale = 1.0;
+        if (flipToBack) {
+            qreal fp = qMin<qreal>(1.0, t / 0.62);
+            wScale = qMax<qreal>(0.14, std::abs(std::cos(fp * 3.14159265358979323846)));
+            ghostGuard->setPixmap((fp >= 0.50) ? back : front);
+        }
+        QSize sz(qMax(2, int(baseSize.width() * wScale)), qMax(2, int(baseSize.height())));
+        ghostGuard->setGeometry(QRect(QPoint(int(c.x() - sz.width() / 2.0),
+                                            int(c.y() - sz.height() / 2.0 - lift)), sz));
+        ghostGuard->setWindowOpacity(1.0 - 0.10 * t);
+    });
+    connect(anim, &QVariantAnimation::finished, this, [ghostGuard, revealGuard]() {
+        if (revealGuard) revealGuard->setOpacity(1.0);
+        if (ghostGuard) ghostGuard->deleteLater();
+    });
+    anim->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+void MainWindow::prepareSlotFlyInAnimation(const QPixmap &pixmap, const QPoint &globalCenter, int targetArea)
+{
+    if (targetArea <= 0 || pixmap.isNull() || !mScene || !mView) {
+        mPendingSlotFlyIn = PendingSlotFlyIn();
+        return;
+    }
+
+    QPixmap scaled = pixmap.scaled(CARD_W, CARD_H, Qt::KeepAspectRatio, Qt::FastTransformation);
+    QPointF center = mView->mapToScene(mView->mapFromGlobal(globalCenter));
+    const QPointF startTopLeft = center - QPointF(scaled.width() / 2.0, scaled.height() / 2.0);
+
+    if (targetArea == 1 || targetArea == 2) {
+        mPendingSlotFlyIn.active = true;
+        mPendingSlotFlyIn.targetArea = targetArea;
+        mPendingSlotFlyIn.sceneStartTopLeft = startTopLeft;
+        mPendingSlotFlyIn.sceneSize = QSizeF(scaled.width(), scaled.height());
+        mPendingSlotFlyIn.pixmap = pixmap;
+        mPendingSlotFlyIn.globalCenter = globalCenter;
+        return;
+    }
+
+    // 扑克牌购买后加入牌组：顶层飞行，前半段翻成背面，再落到右下方牌堆。
+    QPointF target(mDeckBackCard ? mDeckBackCard->pos() : QPointF(mSceneW - CARD_W - 60, mHandYScoring));
+    animateTopLayerCardToScene(pixmap, globalCenter, target, QSizeF(CARD_W, CARD_H), true, nullptr);
+}
+
 void MainWindow::setupConnections() {
     connect(mBtnPlay, &QPushButton::clicked, this, &MainWindow::onPlayClicked);
     connect(mBtnDiscard, &QPushButton::clicked, this, &MainWindow::onDiscardClicked);
@@ -1742,6 +1867,8 @@ void MainWindow::setupConnections() {
             this, &MainWindow::onLeaveShopClicked);
     connect(mShopWidget, &ShopWidget::packBuyRequested,
             this, &MainWindow::onPackBuyRequested);
+    connect(mShopWidget, &ShopWidget::shopItemBoughtForAnimation,
+            this, &MainWindow::prepareSlotFlyInAnimation);
 
     connect(mBlindSelectWidget, &BlindSelectWidget::skipClicked,
             this, &MainWindow::onSkipBlind);
@@ -2521,6 +2648,7 @@ void MainWindow::onHandCardDragReleased(CardItem *card, QPointF scenePos)
     to = qBound(0, to, n - 1);
 
     if (from != to) {
+        mBestPlayHintActive = false;
         QVector<int> newSelected;
         for (int s : mSelected) {
             int ns = s;
@@ -2582,6 +2710,7 @@ void MainWindow::onHandCardDragReleased(CardItem *card, QPointF scenePos)
 }
 
 void MainWindow::onPlayClicked() {
+    mBestPlayHintActive = false;
     if (mScoringInProgress) return;
     if (mSelected.isEmpty()) return;
     mScoringInProgress = true;
@@ -2626,6 +2755,7 @@ void MainWindow::onPlayClicked() {
 }
 
 void MainWindow::onDiscardClicked() {
+    mBestPlayHintActive = false;
     if (mScoringInProgress) return;
     if (mSelected.isEmpty()) return;
 
@@ -2744,10 +2874,12 @@ void MainWindow::onHandPlayed()
 }
 
 void MainWindow::onSortByNum() {
+    mBestPlayHintActive = false;
     mGameState->sortHandByRank();
 }
 
 void MainWindow::onSortBySuit() {
+    mBestPlayHintActive = false;
     mGameState->sortHandBySuit();
 }
 
@@ -2756,6 +2888,24 @@ void MainWindow::onBestPlayHint() {
     if (mGameState->phase() != GamePhase::Blind) return;
     if (mScoringInProgress) return;
     if (mGameState->hand().isEmpty()) return;
+
+    // 第二次点击“最佳出牌”：如果玩家没有手动拖动/重新理牌，就恢复到原来的点数/花色排序。
+    if (mBestPlayHintActive) {
+        mBestPlayHintActive = false;
+        mSelected.clear();
+        for (CardItem *c : mHandCards)
+            if (c) c->setCardSelected(false);
+
+        if (mGameState->sortMode() == HandSortMode::BySuit)
+            mGameState->sortHandBySuit();
+        else
+            mGameState->sortHandByRank();
+
+        layoutHandCards();
+        refreshCounters();
+        updateHandPreview();
+        return;
+    }
 
     // 遍历所有出牌组合/排列，找当前小丑顺序下分数最高的一种。
     QApplication::setOverrideCursor(Qt::WaitCursor);
@@ -2766,6 +2916,7 @@ void MainWindow::onBestPlayHint() {
     const int k = best.size();
     // 把最佳出牌按最优顺序移到手牌最前；handChanged 会同步重建 mHandCards。
     mGameState->bringHandCardsToFront(best);
+    mBestPlayHintActive = true;
 
     // 重建后最佳出牌就在最前面，选中前 k 张。
     mSelected.clear();
@@ -2851,6 +3002,12 @@ void MainWindow::refreshJokerSlotFrames()
 
 void MainWindow::refreshJokerSlots()
 {
+    QVector<QPointF> oldPositions;
+    oldPositions.reserve(mJokerItems.size());
+    for (auto *ji : mJokerItems) {
+        if (ji) oldPositions.append(ji->pos());
+    }
+
     refreshJokerSlotFrames();
     hideJokerInfo();
 
@@ -2862,6 +3019,9 @@ void MainWindow::refreshJokerSlots()
 
     const auto &js = mGameState->jokers();
     int n = js.size();
+    const bool flyInNewJoker = mPendingSlotFlyIn.active
+                               && mPendingSlotFlyIn.targetArea == 1
+                               && n == oldPositions.size() + 1;
     if (mJokerCountLabel) {
         mJokerCountLabel->setPlainText(QString("%1/%2").arg(n).arg(mGameState->jokerSlots()));
         mJokerCountLabel->setPos(22, JOKER_Y + CARD_H + 40);
@@ -2887,9 +3047,23 @@ void MainWindow::refreshJokerSlots()
     for (int i = 0; i < js.size(); ++i) {
         int x = startX + i * step;
         int y = jokerY;
+        const QPointF targetPos(x, y);
         auto *ji = new JokerItem(js[i]);
-        ji->setPos(x, y);
-        ji->setZValue(20 + i);
+
+        if (flyInNewJoker && i == js.size() - 1) {
+            // 新小丑真实卡先占到目标槽但透明，顶层 QLabel 负责从购买/开包位置飞入。
+            // 这样动画永远盖在商店/开包界面上方，也不会出现槽位里先生成一张的重影。
+            ji->setPos(targetPos);
+            ji->setOpacity(0.0);
+            ji->setZValue(20 + i);
+        } else if (flyInNewJoker && i < oldPositions.size()) {
+            ji->setPos(oldPositions[i]);
+            ji->setZValue(20 + i);
+        } else {
+            ji->setPos(targetPos);
+            ji->setZValue(20 + i);
+        }
+
         mScene->addItem(ji);
         mJokerItems.append(ji);
         connect(ji, &JokerItem::pressed, this, &MainWindow::onJokerPressed);
@@ -2900,7 +3074,21 @@ void MainWindow::refreshJokerSlots()
             if (hovered && idx >= 0) showJokerInfo(idx, false);
             else if (!hovered && mSelectedJokerIdx < 0) hideJokerInfo();
         });
+
+        if (flyInNewJoker) {
+            if (i == js.size() - 1) {
+                animateTopLayerCardToScene(mPendingSlotFlyIn.pixmap,
+                                           mPendingSlotFlyIn.globalCenter,
+                                           targetPos, QSizeF(CARD_W, CARD_H),
+                                           false, ji);
+            } else {
+                ji->moveTo(targetPos, 220);
+            }
+        }
     }
+
+    if (mPendingSlotFlyIn.active && mPendingSlotFlyIn.targetArea == 1)
+        mPendingSlotFlyIn = PendingSlotFlyIn();
 }
 
 void MainWindow::showJokerInfo(int idx, bool showSellButton)
@@ -3391,12 +3579,21 @@ void MainWindow::refreshConsumableSlotFrames()
 
 void MainWindow::refreshConsumableSlots()
 {
+    QVector<QPointF> oldPositions;
+    oldPositions.reserve(mConsumableItems.size());
+    for (auto *ci : mConsumableItems) {
+        if (ci) oldPositions.append(ci->pos());
+    }
+
     refreshConsumableSlotFrames();
 
     for (auto *ci : mConsumableItems) { mScene->removeItem(ci); delete ci; }
     mConsumableItems.clear();
 
     const auto &cs = mGameState->consumables();
+    const bool flyInNewConsumable = mPendingSlotFlyIn.active
+                                    && mPendingSlotFlyIn.targetArea == 2
+                                    && cs.size() == oldPositions.size() + 1;
     if (mSelectedConsumableIdx >= cs.size()) {
         mSelectedConsumableIdx = -1;
         hideConsumableAction();
@@ -3417,10 +3614,22 @@ void MainWindow::refreshConsumableSlots()
     int step = overlappedCardStep(totalW, CARD_W, cs.size(), CARD_W + 14);
     for (int i = 0; i < cs.size(); ++i) {
         int x = startX + i * step;
-        int y = JOKER_Y + 18;
+        int y = JOKER_Y + 18 + ((i == mSelectedConsumableIdx) ? -42 : 0);
+        const QPointF targetPos(x, y);
         auto *ci = new ConsumableItem(cs[i]);
-        ci->setPos(x, y);
-        ci->setZValue(30 + i);
+
+        if (flyInNewConsumable && i == cs.size() - 1) {
+            ci->setPos(targetPos);
+            ci->setOpacity(0.0);
+            ci->setZValue(30 + i);
+        } else if (flyInNewConsumable && i < oldPositions.size()) {
+            ci->setPos(oldPositions[i]);
+            ci->setZValue(30 + i);
+        } else {
+            ci->setPos(targetPos);
+            ci->setZValue(30 + i);
+        }
+
         mScene->addItem(ci);
         mConsumableItems.append(ci);
 
@@ -3430,8 +3639,26 @@ void MainWindow::refreshConsumableSlots()
                 this, &MainWindow::onConsumableDragMoved);
         connect(ci, &ConsumableItem::dragReleased,
                 this, &MainWindow::onConsumableDragReleased);
+
+        if (flyInNewConsumable) {
+            if (i == cs.size() - 1) {
+                animateTopLayerCardToScene(mPendingSlotFlyIn.pixmap,
+                                           mPendingSlotFlyIn.globalCenter,
+                                           targetPos, QSizeF(CARD_W, CARD_H),
+                                           false, ci);
+            } else {
+                ci->moveTo(targetPos, 220);
+            }
+        }
     }
-    layoutConsumableItems(false);
+
+    if (flyInNewConsumable) {
+        mPendingSlotFlyIn = PendingSlotFlyIn();
+    } else {
+        layoutConsumableItems(false);
+        if (mPendingSlotFlyIn.active && mPendingSlotFlyIn.targetArea == 2)
+            mPendingSlotFlyIn = PendingSlotFlyIn();
+    }
 }
 
 void MainWindow::layoutConsumableItems(bool animate)
@@ -3630,13 +3857,16 @@ void MainWindow::onConsumableDragReleased(ConsumableItem *item, QPointF scenePos
 
 void MainWindow::onPackChoiceMade(int chosenIdx, QVector<int> selectedPackHandIdx)
 {
+    const bool buffoonChoice = (chosenIdx >= 0 && mPendingPack.kind == PackKind::Buffoon);
     if (chosenIdx >= 0) {
         mGameState->applyPackChoice(mPendingPack, chosenIdx, selectedPackHandIdx, mPendingPackHand);
         mPackOpenWidget->setPackHand(mPendingPackHand);
         mPackOpenWidget->setInventoryConsumables(mGameState->consumables());
     }
     refreshConsumableSlots();
-    refreshJokerSlots();
+    // 小丑包选择后，jokersChanged 已经触发带飞入起点的 refreshJokerSlots。
+    // 这里不要再立即刷新一次，否则会把刚开始的飞行动画删掉，看起来像“先生成再滑入”。
+    if (!buffoonChoice) refreshJokerSlots();
     refreshGold();
     refreshCounters();
     if (mPackOpenWidget && mPackOpenWidget->isVisible())
@@ -4005,7 +4235,6 @@ void MainWindow::onBlindStarted()
     mDisplayedMult  = 0;
     mScoringInProgress = false;
     resetScoreFlame();
-    if (mBtnPlay) mBtnPlay->setEnabled(true);
 
     // 确保按钮回到 home 位置(可能上一局结束时按钮滑出去了)
     if (mBestPlayProxy && !mBestPlayBtnHome.isNull()) mBestPlayProxy->setPos(mBestPlayBtnHome);
@@ -4013,8 +4242,7 @@ void MainWindow::onBlindStarted()
     if (mSortProxy && !mSortBtnHome.isNull())    mSortProxy->setPos(mSortBtnHome);
     if (mDiscardProxy && !mDiscardBtnHome.isNull()) mDiscardProxy->setPos(mDiscardBtnHome);
 
-    if (mBtnPlay) mBtnPlay->setEnabled(true);
-    if (mBtnDiscard) mBtnDiscard->setEnabled(true);
+    refreshCounters();
 }
 
 void MainWindow::animateCollectRoundCardsThen(std::function<void()> after)
@@ -4498,11 +4726,10 @@ void MainWindow::animateScoreTotalThenFinalize(double gained, int /*delayAfterEv
             mScoringInProgress = false;
 
             if (mGameState->phase() == GamePhase::Blind) {
-                if (mBtnPlay) mBtnPlay->setEnabled(true);
-                if (mBtnDiscard) mBtnDiscard->setEnabled(true);
                 mHandY = mHandYNormal;
                 showPlayControlsAfterScoring();
                 layoutHandCards();
+                refreshCounters();
             }
         });
     });

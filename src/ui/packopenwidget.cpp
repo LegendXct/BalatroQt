@@ -313,12 +313,16 @@ void PackOpenWidget::setPackHand(const QVector<CardData> &packHand)
     mSelectedHand.erase(std::remove_if(mSelectedHand.begin(), mSelectedHand.end(),
                                        [this](int idx) { return idx < 0 || idx >= mPackHand.size(); }),
                         mSelectedHand.end());
+    if (mFinishing && (mContent.kind == PackKind::Buffoon || mContent.kind == PackKind::Standard))
+        return;
     refreshAll();
 }
 
 void PackOpenWidget::setInventoryConsumables(const QVector<Consumable> &inv)
 {
     mInventoryConsumables = inv;
+    if (mFinishing && (mContent.kind == PackKind::Buffoon || mContent.kind == PackKind::Standard))
+        return;
     refreshInventoryUi();
     refreshOptionUi();
 }
@@ -326,6 +330,8 @@ void PackOpenWidget::setInventoryConsumables(const QVector<Consumable> &inv)
 void PackOpenWidget::setFreeJokerSlots(int freeSlots)
 {
     mFreeJokerSlots = qMax(0, freeSlots);
+    if (mFinishing && mContent.kind == PackKind::Buffoon)
+        return;
     refreshOptionUi();
 }
 
@@ -552,15 +558,20 @@ void PackOpenWidget::refreshOptionUi()
     for (int i = 0; i < mOptUi.size(); ++i) {
         OptUi &ou = mOptUi[i];
         if (i >= total) { ou.card->hide(); continue; }
+
+        bool chosen = optionAlreadyChosen(i);
+        // 原版开包时，被选择的那张牌本体飞走，原位置变空。
+        // 之前 refreshAll() 会把 onChoose() 里 hide() 掉的源卡重新 show()，
+        // 导致“小丑包/标准包原地留一张，另一个贴图飞走”的双贴图问题。
+        if (chosen) { ou.card->hide(); continue; }
+
         ou.card->show();
         ou.imageLbl->setPixmap(renderOption(i));
         ou.nameLbl->setText(optionName(i));
         ou.descLbl->setText(optionDesc(i));
 
-        bool chosen = optionAlreadyChosen(i);
-        ou.takeBtn->setText(chosen ? "已选" :
-                                (mContent.kind == PackKind::Arcana || mContent.kind == PackKind::Spectral ? "使用" : "选择"));
-        ou.takeBtn->setEnabled(!mFinishing && !chosen
+        ou.takeBtn->setText(mContent.kind == PackKind::Arcana || mContent.kind == PackKind::Spectral ? "使用" : "选择");
+        ou.takeBtn->setEnabled(!mFinishing
                                && mChoicesUsed < mContent.choicesAllowed
                                && optionAvailableFor(i));
     }
@@ -801,21 +812,57 @@ void PackOpenWidget::onChoose(int idx)
     if (optionAlreadyChosen(idx)) return;
     if (!optionAvailableFor(idx)) return;
 
-    emit choiceMade(idx, mSelectedHand);
+    const QVector<int> selectedHandBeforeChoice = mSelectedHand;
+
+    int animationTarget = 0;
+    if (mContent.kind == PackKind::Buffoon) animationTarget = 1;       // 飞入小丑槽
+    else if (mContent.kind == PackKind::Standard) animationTarget = 3; // 翻成背面飞入右下牌堆
+
+    QPixmap flyPixmap;
+    QPoint flyCenter;
+    if (animationTarget != 0 && idx < mOptUi.size() && mOptUi[idx].imageLbl) {
+        flyPixmap = renderOption(idx);
+        flyCenter = mOptUi[idx].imageLbl->mapToGlobal(
+            QPoint(mOptUi[idx].imageLbl->width() / 2, mOptUi[idx].imageLbl->height() / 2));
+        // 先隐藏源卡，再启动顶层飞行动画和数据刷新；这样不会出现源卡原地重绘一帧，
+        // 小丑包选择时也少一次视觉卡顿。
+        if (mOptUi[idx].card) mOptUi[idx].card->hide();
+    }
 
     mChosenOptions.append(idx);
     ++mChoicesUsed;
     if (mContent.kind == PackKind::Buffoon && mFreeJokerSlots > 0) --mFreeJokerSlots;
 
+    const bool finalChoice = (mChoicesUsed >= mContent.choicesAllowed);
+    if (finalChoice) mFinishing = true;
+
+    if (animationTarget != 0 && !flyPixmap.isNull())
+        emit choiceAnimationRequested(flyPixmap, flyCenter, animationTarget);
+
+    emit choiceMade(idx, selectedHandBeforeChoice);
+
     mSelectedHand.clear();
 
-    if (mChoicesUsed >= mContent.choicesAllowed) {
-        mFinishing = true;
-        refreshAll();
+    if (finalChoice) {
         mLblChoose->setText("已使用，正在收起...");
-        QTimer::singleShot(
-            (mContent.kind == PackKind::Arcana || mContent.kind == PackKind::Spectral) ? 1000 : 350,
-            this, &PackOpenWidget::finishAndClose);
+        for (OptUi &ou : mOptUi) {
+            if (ou.takeBtn) ou.takeBtn->setEnabled(false);
+        }
+        if (mBtnSkip) mBtnSkip->setEnabled(false);
+
+        // 小丑包/标准包选择后正在播放飞入动画，避免立刻 refreshAll() 重绘整组选项，
+        // 否则低配机器会在动画第一帧出现卡顿；Arcana/Spectral 仍保留原刷新逻辑。
+        if (mContent.kind != PackKind::Buffoon && mContent.kind != PackKind::Standard)
+            refreshAll();
+
+        int closeDelay = 350;
+        if (mContent.kind == PackKind::Arcana || mContent.kind == PackKind::Spectral)
+            closeDelay = 1000;
+        else if (mContent.kind == PackKind::Standard)
+            closeDelay = 640;   // 标准包翻成背面飞往牌堆，动画更长
+        else if (mContent.kind == PackKind::Buffoon)
+            closeDelay = 720;   // 等小丑飞入槽位后再关包，避免关闭时打断动画
+        QTimer::singleShot(closeDelay, this, &PackOpenWidget::finishAndClose);
     } else {
         refreshAll();
     }
@@ -838,8 +885,10 @@ void PackOpenWidget::onSkip()
 void PackOpenWidget::finishAndClose()
 {
     mFinishing = true;
-    hide();
+    // 先通知 MainWindow 把商店 / 盲注选择界面抬起来，再隐藏开包层。
+    // 之前先 hide() 会露出一帧底层暗背景，小丑包选择后看起来像黑屏卡顿。
     emit packFinished();
+    hide();
 }
 
 void PackOpenWidget::animateCardsIn()

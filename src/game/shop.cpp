@@ -366,6 +366,14 @@ ShopOffer Shop::takeShopOffer(int idx) {
     return o;
 }
 
+bool Shop::moveShopOffer(int from, int to)
+{
+    if (from < 0 || from >= mShopOffers.size() || to < 0 || to >= mShopOffers.size()) return false;
+    if (from == to) return true;
+    mShopOffers.move(from, to);
+    return true;
+}
+
 bool Shop::canBuyVoucher(int idx, int gold) const {
     if (idx < 0 || idx >= mVoucherOffers.size()) return false;
     const ShopOffer &o = mVoucherOffers[idx];
@@ -388,6 +396,14 @@ ShopOffer Shop::takeBoosterOffer(int idx) {
     ShopOffer o = mBoosterOffers[idx];
     mBoosterOffers[idx].sold = true;
     return o;
+}
+
+bool Shop::moveBoosterOffer(int from, int to)
+{
+    if (from < 0 || from >= mBoosterOffers.size() || to < 0 || to >= mBoosterOffers.size()) return false;
+    if (from == to) return true;
+    mBoosterOffers.move(from, to);
+    return true;
 }
 
 void Shop::onReroll() {

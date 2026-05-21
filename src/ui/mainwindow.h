@@ -17,6 +17,8 @@
 #include <QTimer>
 #include <QAbstractAnimation>
 #include <QPointer>
+#include <QPixmap>
+#include <QSizeF>
 #include "../game/gamestate.h"
 #include "../card/carditem.h"
 #include "roundendoverlay.h"
@@ -43,6 +45,7 @@ QT_END_NAMESPACE
 class QProgressBar;
 class QGraphicsDropShadowEffect;
 class QPropertyAnimation;
+class QGraphicsObject;
 
 class MainWindow : public QMainWindow
 {
@@ -92,6 +95,7 @@ private:
     QVector<CardItem *> mPlayedCards; // 出牌区
     QSet<int> mShatteredPlayedIndices;
     QVector <int> mSelected; // 选中的手牌下标
+    bool mBestPlayHintActive = false; // 第二次点击最佳出牌时恢复原点数/花色顺序
 
     RoundEndOverlay *mRoundEndOverlay = nullptr;
 
@@ -137,6 +141,16 @@ private:
     PackContent     mPendingPack;        // 当前正在打开的包
     QVector<CardData> mPendingPackHand;  // 开包界面临时翻出的一手牌
     bool mPackFromTag = false;
+
+    struct PendingSlotFlyIn {
+        bool active = false;
+        int targetArea = 0;          // 1 = Joker, 2 = 消耗牌
+        QPointF sceneStartTopLeft;
+        QSizeF sceneSize;
+        QPixmap pixmap;             // 顶层飞行动画使用的牌面
+        QPoint globalCenter;        // 购买/选择时的屏幕起点，避免被商店/开包 overlay 遮住
+    };
+    PendingSlotFlyIn mPendingSlotFlyIn;
 
     QGraphicsTextItem *mConsCountLabel = nullptr;
     QGraphicsRectItem *mPlayBgRect     = nullptr;
@@ -206,6 +220,12 @@ private:
     void setupScene();
     void setupSceneButtons();
     void setupConnections();
+    void prepareSlotFlyInAnimation(const QPixmap &pixmap, const QPoint &globalCenter, int targetArea);
+    QRect sceneRectOnPlayPage(const QPointF &sceneTopLeft, const QSizeF &sceneSize) const;
+    void animateTopLayerCardToScene(const QPixmap &pixmap, const QPoint &globalCenter,
+                                    const QPointF &targetSceneTopLeft, const QSizeF &sceneSize,
+                                    bool flipToBack, QGraphicsObject *revealItem = nullptr);
+    QPixmap deckBackPixmap() const;
 
     void refreshHand();
     void refreshScore();

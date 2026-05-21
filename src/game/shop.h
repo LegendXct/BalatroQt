@@ -102,6 +102,7 @@ public:
     const QVector<ShopOffer>& shopOffers() const { return mShopOffers; }
     bool canBuyShop(int idx, int gold) const;
     ShopOffer takeShopOffer(int idx);
+    bool moveShopOffer(int from, int to);
 
     // 下半区左：voucher
     const QVector<ShopOffer>& voucherOffers() const { return mVoucherOffers; }
@@ -114,6 +115,7 @@ public:
     QVector<ShopOffer>& voucherOffersMutable() { return mVoucherOffers; }
     bool canBuyBooster(int idx, int gold) const;
     ShopOffer takeBoosterOffer(int idx);
+    bool moveBoosterOffer(int from, int to);
 
     int  rerollCost() const { return mRerollCost; }
     void onReroll();

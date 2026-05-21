@@ -14,11 +14,15 @@
 #include <QPropertyAnimation>
 #include <QEasingCurve>
 #include <QAbstractAnimation>
+#include <QGraphicsOpacityEffect>
 #include <QGuiApplication>
 #include <QScreen>
 #include <QCursor>
 #include <QtGlobal>
+#include <QVariant>
+#include <QByteArray>
 #include <cmath>
+#include <limits>
 #include "../utils/shadereffects.h"
 
 
@@ -372,7 +376,7 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
     const int actionReserveW = isBooster ? 0 : 48;
     const int containerW = slotW + actionReserveW;
     // 价格标签 28 + 间距 2 + 卡图 slotH + 间距 2 + 名字 38。
-    const int containerH = 28 + 2 + slotH + 2 + 38;
+    const int containerH = 28 + 2 + slotH + 6 + 42;
 
     ou.card = new QWidget(parent);
     ou.card->setFixedSize(dp(containerW), dp(containerH));
@@ -416,12 +420,13 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
     //     · 小丑 / 扑克牌 → 黄色"购买"
     //     · 塔罗 / 星球 / 幻灵 → 黄色"购买" + 右侧 useBtn 红色"购买&使用"
     //   - useBtn (右侧竖向) 只有消耗牌位才显示，对应原版 UI_definitions.lua 的 buy_and_use 按钮。
-    QFont bbf = mCNFont; bbf.setPixelSize(fontPx(12)); bbf.setBold(true);
+    QFont bbf = mCNFont; bbf.setPixelSize(fontPx(14)); bbf.setBold(true);
 
-    // 收窄到卡牌宽 ≈ 45%，紧贴卡片底部居中，看起来"挂在卡片下方"。
+    // 原版购买/打开/兑换按钮是挂在卡牌底边的短横条，宽度略大、厚度够，
+    // 这样卡牌上浮后按钮不会显得又窄又矮。
     ou.buyBtn = new QPushButton("购买", ou.card);
     ou.buyBtn->setCursor(Qt::PointingHandCursor);
-    ou.buyBtn->setFixedSize(dp(slotW * 48 / 100), dp(26));
+    ou.buyBtn->setFixedSize(dp(slotW * 64 / 100), dp(38));
     ou.buyBtn->setFont(bbf);
     ou.buyBtn->hide();
 
@@ -529,6 +534,143 @@ void ShopWidget::hideOfferInfo()
 bool ShopWidget::eventFilter(QObject *obj, QEvent *event)
 {
     QWidget *w = qobject_cast<QWidget *>(obj);
+
+    // 商店同一区块内拖拽换位：拖动时使用顶层 ghost，避免被 shopBox/boosterBox 裁切；
+    // 其它商品会在鼠标悬停到目标槽前就预先让位，和小丑槽拖拽的手感一致。
+    if (w) {
+        int slot = -1;
+        DragGroup group = dragGroupForWidget(w, &slot);
+        if (group != DragGroup::None) {
+            QWidget *container = w->parentWidget();
+            if (event->type() == QEvent::MouseButtonPress) {
+                auto *me = static_cast<QMouseEvent *>(event);
+                if (me->button() == Qt::LeftButton && container) {
+                    mDragGroup = group;
+                    mDragFromSlot = slot;
+                    mDragWidget = container;
+                    mDragStartGlobal = me->globalPosition().toPoint();
+                    mDragPressOffset = container->mapFromGlobal(mDragStartGlobal);
+                    mDragSlotBasePos.clear();
+                    const QVector<OfferUi> *vec = nullptr;
+                    if (group == DragGroup::Shop) vec = &mShopUi;
+                    else if (group == DragGroup::Voucher) vec = &mVoucherUi;
+                    else if (group == DragGroup::Booster) vec = &mBoosterUi;
+                    if (vec) {
+                        for (const OfferUi &ou : *vec)
+                            mDragSlotBasePos.append(ou.card ? ou.card->pos() : QPoint());
+                    }
+                    mDragPreviewSlot = slot;
+                    mDraggingOffer = false;
+                }
+            } else if (event->type() == QEvent::MouseMove && mDragGroup != DragGroup::None && mDragWidget) {
+                auto *me = static_cast<QMouseEvent *>(event);
+                if (me->buttons() & Qt::LeftButton) {
+                    const QPoint gp = me->globalPosition().toPoint();
+                    if (!mDraggingOffer && (gp - mDragStartGlobal).manhattanLength() > dp(8)) {
+                        mDraggingOffer = true;
+                        hideOfferInfo();
+
+                        destroyDragGhost();
+                        mDragGhost = new QLabel(this);
+                        mDragGhost->setAttribute(Qt::WA_TranslucentBackground, true);
+                        mDragGhost->setScaledContents(true);
+                        mDragGhost->setPixmap(mDragWidget->grab());
+                        mDragGhost->setFixedSize(mDragWidget->size());
+                        const QPoint startInThis = mapFromGlobal(mDragWidget->mapToGlobal(QPoint(0, 0)));
+                        mDragGhost->move(startInThis);
+                        mDragGhost->show();
+                        mDragGhost->raise();
+
+                        // 保留源 widget 在原 layout 里占位，但把它淡掉，避免 layout 收缩或出现双贴图。
+                        auto *eff = new QGraphicsOpacityEffect(mDragWidget);
+                        eff->setOpacity(0.02);
+                        mDragWidget->setGraphicsEffect(eff);
+                        mDragHiddenEffect = eff;
+                        w->setCursor(Qt::ClosedHandCursor);
+                    }
+                    if (mDraggingOffer) {
+                        if (mDragGhost) {
+                            mDragGhost->move(mapFromGlobal(gp) - mDragPressOffset);
+                            mDragGhost->raise();
+                        }
+                        int to = slotAtGlobalPos(mDragGroup, gp);
+                        if (to < 0) to = mDragFromSlot;
+                        if (to != mDragPreviewSlot) {
+                            mDragPreviewSlot = to;
+                            updateDragPreview(mDragGroup, mDragFromSlot, to);
+                        }
+                        return true;
+                    }
+                }
+            } else if (event->type() == QEvent::MouseButtonRelease && mDragGroup != DragGroup::None) {
+                auto *me = static_cast<QMouseEvent *>(event);
+                const DragGroup releaseGroup = mDragGroup;
+                const int from = mDragFromSlot;
+                const bool wasDragging = mDraggingOffer;
+                const int to = slotAtGlobalPos(releaseGroup, me->globalPosition().toPoint());
+                QWidget *groupParent = nullptr;
+                if (releaseGroup == DragGroup::Shop && !mShopUi.isEmpty() && mShopUi[0].card)
+                    groupParent = mShopUi[0].card->parentWidget();
+                else if (releaseGroup == DragGroup::Voucher && !mVoucherUi.isEmpty() && mVoucherUi[0].card)
+                    groupParent = mVoucherUi[0].card->parentWidget();
+                else if (releaseGroup == DragGroup::Booster && !mBoosterUi.isEmpty() && mBoosterUi[0].card)
+                    groupParent = mBoosterUi[0].card->parentWidget();
+
+                QPoint dropPos;
+                if (mDragGhost && groupParent)
+                    dropPos = groupParent->mapFromGlobal(mapToGlobal(mDragGhost->pos()));
+                else if (mDragWidget)
+                    dropPos = mDragWidget->pos();
+
+                mDragGroup = DragGroup::None;
+                mDragFromSlot = -1;
+                mDraggingOffer = false;
+                mDragPreviewSlot = -1;
+                w->unsetCursor();
+
+                if (wasDragging) {
+                    const bool canMove = (to >= 0 && from >= 0 && to != from
+                                          && moveOfferInGroup(releaseGroup, from, to));
+                    if (canMove) {
+                        if (mDragWidget) mDragWidget->setGraphicsEffect(nullptr);
+                        mDragHiddenEffect = nullptr;
+                        destroyDragGhost();
+                        animateOfferReorder(releaseGroup, from, to, dropPos);
+                    } else {
+                        mDragGroup = releaseGroup;
+                        clearDragPreview(true);
+                        mDragGroup = DragGroup::None;
+                        if (mDragGhost && from >= 0 && from < mDragSlotBasePos.size() && mDragWidget) {
+                            const QPoint endInThis = mapFromGlobal(mDragWidget->parentWidget()->mapToGlobal(mDragSlotBasePos[from]));
+                            auto *anim = new QPropertyAnimation(mDragGhost, "pos", mDragGhost);
+                            anim->setDuration(170);
+                            anim->setStartValue(mDragGhost->pos());
+                            anim->setEndValue(endInThis);
+                            anim->setEasingCurve(QEasingCurve::OutCubic);
+                            QPointer<QWidget> sourceGuard(mDragWidget);
+                            QPointer<ShopWidget> self(this);
+                            connect(anim, &QPropertyAnimation::finished, this, [self, sourceGuard]() {
+                                if (sourceGuard) sourceGuard->setGraphicsEffect(nullptr);
+                                if (self) {
+                                    self->mDragHiddenEffect = nullptr;
+                                    self->destroyDragGhost();
+                                }
+                            });
+                            anim->start(QAbstractAnimation::DeleteWhenStopped);
+                        } else {
+                            if (mDragWidget) mDragWidget->setGraphicsEffect(nullptr);
+                            mDragHiddenEffect = nullptr;
+                            destroyDragGhost();
+                        }
+                    }
+                    mDragWidget = nullptr;
+                    return true;
+                }
+                mDragWidget = nullptr;
+            }
+        }
+    }
+
     if (w && w->property("infoTitle").isValid()) {
         if (event->type() == QEvent::Enter) {
             showOfferInfo(w);
@@ -664,8 +806,6 @@ void ShopWidget::refresh()
             ou.useBtn->setVisible(showUse);
             if (showUse) ou.useBtn->setEnabled(true);
         }
-        if (selectedHere) positionSlotActionButtons(ou, ou.useBtn && ou.useBtn->isVisible());
-
         // 选中卡片轻微上浮——对齐原版 card.lua highlighted 时的 highlight_offset。
         if (ou.cardBtn) {
             QPointer<QWidget> btnGuard(ou.cardBtn);
@@ -674,8 +814,11 @@ void ShopWidget::refresh()
                 QWidget *btn = btnGuard.data();
                 QVariant base = btn->property("baseY");
                 int baseY = base.isValid() ? base.toInt() : btn->y();
+                // layout 可能在窗口缩放后重算 y；如果当前按钮回到了布局给的位置，更新基准。
+                if (!base.isValid() || (!selectedHere && qAbs(btn->y() - baseY) > dp(40))) baseY = btn->y();
                 btn->setProperty("baseY", baseY);
-                const int targetY = baseY;
+                const int targetY = baseY + (selectedHere ? -dp(36) : 0);
+                btn->setProperty("cardTargetY", targetY);
                 if (btn->y() == targetY) return;
                 auto *anim = new QPropertyAnimation(btn, "pos", btn);
                 anim->setDuration(160);
@@ -685,6 +828,7 @@ void ShopWidget::refresh()
                 anim->start(QAbstractAnimation::DeleteWhenStopped);
             });
         }
+        if (selectedHere) positionSlotActionButtons(ou, ou.useBtn && ou.useBtn->isVisible());
     };
 
     const auto &shopOffers = mGS->shop().shopOffers();
@@ -866,6 +1010,242 @@ QPixmap ShopWidget::playingCardPixmap(const CardData &c) const
     return pix;
 }
 
+ShopWidget::DragGroup ShopWidget::dragGroupForWidget(QWidget *w, int *slotOut) const
+{
+    if (slotOut) *slotOut = -1;
+    if (!w) return DragGroup::None;
+    QWidget *container = w->parentWidget();
+    if (!container) return DragGroup::None;
+
+    QVariant shopIdx = container->property("shopOfferIdx");
+    if (shopIdx.isValid()) {
+        if (slotOut) *slotOut = shopIdx.toInt();
+        return DragGroup::Shop;
+    }
+    QVariant voucherIdx = container->property("voucherSlotIdx");
+    if (voucherIdx.isValid()) {
+        if (slotOut) *slotOut = voucherIdx.toInt();
+        return DragGroup::Voucher;
+    }
+    QVariant boosterIdx = container->property("boosterSlotIdx");
+    if (boosterIdx.isValid()) {
+        if (slotOut) *slotOut = boosterIdx.toInt();
+        return DragGroup::Booster;
+    }
+    return DragGroup::None;
+}
+
+int ShopWidget::slotAtGlobalPos(DragGroup group, const QPoint &globalPos) const
+{
+    const QVector<OfferUi> *vec = nullptr;
+    if (group == DragGroup::Shop) vec = &mShopUi;
+    else if (group == DragGroup::Voucher) vec = &mVoucherUi;
+    else if (group == DragGroup::Booster) vec = &mBoosterUi;
+    else return -1;
+
+    if (!vec || vec->isEmpty()) return -1;
+
+    QWidget *parent = nullptr;
+    for (const OfferUi &ou : *vec) {
+        if (ou.card && ou.card->parentWidget()) { parent = ou.card->parentWidget(); break; }
+    }
+    if (!parent) return -1;
+
+    // 不要求鼠标正好压在某张卡上。只要在同一个商品区附近，就按横向中心找最近槽，
+    // 这样从左拖到右时右侧卡会提前让位，不用精确压到目标卡牌才触发。
+    const QRect groupRect = QRect(parent->mapToGlobal(QPoint(0, 0)), parent->size())
+                                .adjusted(-dp(90), -dp(100), dp(90), dp(100));
+    if (!groupRect.contains(globalPos)) return -1;
+
+    int best = -1;
+    int bestDist = std::numeric_limits<int>::max();
+    const bool useStableBaseSlots = (mDragGroup == group && mDragSlotBasePos.size() == vec->size());
+    for (int i = 0; i < vec->size(); ++i) {
+        QWidget *card = (*vec)[i].card;
+        if (!card || !card->isVisible()) continue;
+        QPoint center;
+        if (useStableBaseSlots) {
+            // 拖拽过程中其它卡牌会被动画挪到预览槽位；如果继续用当前 card->pos()
+            // 判断最近槽，目标会在 0/1 之间来回跳，导致“移回去不让位”和抖动。
+            // 这里固定用按下瞬间记录的槽位中心，和主小丑槽拖动逻辑一致。
+            const QPoint base = mDragSlotBasePos.value(i, card->pos());
+            center = parent->mapToGlobal(base + QPoint(card->width() / 2, card->height() / 2));
+        } else {
+            center = card->mapToGlobal(QPoint(card->width() / 2, card->height() / 2));
+        }
+        int dist = std::abs(globalPos.x() - center.x());
+        if (dist < bestDist) {
+            bestDist = dist;
+            best = i;
+        }
+    }
+    return best;
+}
+
+bool ShopWidget::moveOfferInGroup(DragGroup group, int from, int to)
+{
+    if (from == to) return true;
+    bool ok = false;
+    if (group == DragGroup::Shop) {
+        ok = mGS->moveShopOffer(from, to);
+        if (ok) {
+            if (mSelectedShopSlot == from) mSelectedShopSlot = to;
+            else if (from < to && mSelectedShopSlot > from && mSelectedShopSlot <= to) --mSelectedShopSlot;
+            else if (from > to && mSelectedShopSlot >= to && mSelectedShopSlot < from) ++mSelectedShopSlot;
+        }
+    } else if (group == DragGroup::Voucher) {
+        // 原版券区目前只有一个槽位：允许拖出查看/松手吸回，但没有可交换的第二张券。
+        ok = (from == to);
+    } else if (group == DragGroup::Booster) {
+        ok = mGS->moveBoosterOffer(from, to);
+        if (ok) {
+            if (mSelectedBoosterSlot == from) mSelectedBoosterSlot = to;
+            else if (from < to && mSelectedBoosterSlot > from && mSelectedBoosterSlot <= to) --mSelectedBoosterSlot;
+            else if (from > to && mSelectedBoosterSlot >= to && mSelectedBoosterSlot < from) ++mSelectedBoosterSlot;
+        }
+    }
+    return ok;
+}
+
+
+void ShopWidget::updateDragPreview(DragGroup group, int from, int to)
+{
+    QVector<OfferUi> *vec = nullptr;
+    if (group == DragGroup::Shop) vec = &mShopUi;
+    else if (group == DragGroup::Voucher) vec = &mVoucherUi;
+    else if (group == DragGroup::Booster) vec = &mBoosterUi;
+    if (!vec || from < 0 || from >= vec->size() || mDragSlotBasePos.size() != vec->size()) return;
+
+    if (to < 0 || to >= vec->size()) to = from;
+    for (int i = 0; i < vec->size(); ++i) {
+        QWidget *card = (*vec)[i].card;
+        if (!card || card == mDragWidget) continue;
+
+        int visualSlot = i;
+        if (from < to) {
+            if (i > from && i <= to) visualSlot = i - 1;
+        } else if (from > to) {
+            if (i >= to && i < from) visualSlot = i + 1;
+        }
+        QPoint target = mDragSlotBasePos.value(visualSlot, card->pos());
+        // 只要目标槽位没变，就不要反复启动新的 pos 动画。
+        // 之前每次 mouseMove 都会在旧动画还没跑完时再塞一条同目标动画，
+        // 看起来就像卡牌在目标附近抖动、晃来晃去。
+        const QVariant previewProp = card->property("dragPreviewPos");
+        if (previewProp.isValid() && previewProp.toPoint() == target)
+            continue;
+        card->setProperty("dragPreviewPos", target);
+        for (QObject *child : card->children()) {
+            if (auto *oldAnim = qobject_cast<QPropertyAnimation *>(child)) {
+                if (oldAnim->propertyName() == QByteArray("pos")) oldAnim->stop();
+            }
+        }
+        card->raise();
+        auto *anim = new QPropertyAnimation(card, "pos", card);
+        anim->setDuration(120);
+        anim->setStartValue(card->pos());
+        anim->setEndValue(target);
+        anim->setEasingCurve(QEasingCurve::OutCubic);
+        anim->start(QAbstractAnimation::DeleteWhenStopped);
+    }
+}
+
+void ShopWidget::clearDragPreview(bool animateBack)
+{
+    QVector<OfferUi> *vec = nullptr;
+    if (mDragGroup == DragGroup::Shop) vec = &mShopUi;
+    else if (mDragGroup == DragGroup::Voucher) vec = &mVoucherUi;
+    else if (mDragGroup == DragGroup::Booster) vec = &mBoosterUi;
+    if (!vec || mDragSlotBasePos.size() != vec->size()) return;
+
+    for (int i = 0; i < vec->size(); ++i) {
+        QWidget *card = (*vec)[i].card;
+        if (!card || card == mDragWidget) continue;
+        QPoint target = mDragSlotBasePos.value(i, card->pos());
+        card->setProperty("dragPreviewPos", QVariant());
+        for (QObject *child : card->children()) {
+            if (auto *oldAnim = qobject_cast<QPropertyAnimation *>(child)) {
+                if (oldAnim->propertyName() == QByteArray("pos")) oldAnim->stop();
+            }
+        }
+        if (!animateBack) {
+            card->move(target);
+            continue;
+        }
+        auto *anim = new QPropertyAnimation(card, "pos", card);
+        anim->setDuration(140);
+        anim->setStartValue(card->pos());
+        anim->setEndValue(target);
+        anim->setEasingCurve(QEasingCurve::OutCubic);
+        anim->start(QAbstractAnimation::DeleteWhenStopped);
+    }
+}
+
+void ShopWidget::destroyDragGhost()
+{
+    if (mDragGhost) {
+        mDragGhost->hide();
+        mDragGhost->deleteLater();
+        mDragGhost = nullptr;
+    }
+}
+
+
+void ShopWidget::animateOfferReorder(DragGroup group, int from, int to, const QPoint &dropPos)
+{
+    QVector<OfferUi> *vec = nullptr;
+    if (group == DragGroup::Shop) vec = &mShopUi;
+    else if (group == DragGroup::Voucher) vec = &mVoucherUi;
+    else if (group == DragGroup::Booster) vec = &mBoosterUi;
+    if (!vec || from < 0 || to < 0 || from >= vec->size() || to >= vec->size()) {
+        refresh();
+        return;
+    }
+
+    QVector<QPoint> slotPos = mDragSlotBasePos;
+    if (slotPos.size() != vec->size()) {
+        slotPos.clear();
+        for (const OfferUi &ou : *vec) slotPos.append(ou.card ? ou.card->pos() : QPoint());
+    }
+
+    refresh();
+
+    // moveOfferInGroup 使用 takeAt/insert 语义。refresh 后每个固定槽位显示的是“新位置”的 offer。
+    // 先把每个槽位放回该 offer 原先所在的视觉位置，再动画归位，避免变成瞬间换贴图。
+    for (int i = 0; i < vec->size(); ++i) {
+        QWidget *card = (*vec)[i].card;
+        if (!card || i >= slotPos.size()) continue;
+
+        int originalIndex = i;
+        if (from < to) {
+            if (i >= from && i < to) originalIndex = i + 1;
+            else if (i == to) originalIndex = from;
+        } else if (from > to) {
+            if (i == to) originalIndex = from;
+            else if (i > to && i <= from) originalIndex = i - 1;
+        }
+
+        QPoint start = (i == to) ? dropPos : slotPos.value(originalIndex, slotPos.value(i));
+        QPoint end = slotPos.value(i, card->pos());
+        card->setProperty("dragPreviewPos", QVariant());
+        for (QObject *child : card->children()) {
+            if (auto *oldAnim = qobject_cast<QPropertyAnimation *>(child)) {
+                if (oldAnim->propertyName() == QByteArray("pos")) oldAnim->stop();
+            }
+        }
+        card->move(start);
+        card->raise();
+
+        auto *anim = new QPropertyAnimation(card, "pos", card);
+        anim->setDuration(i == to ? 230 : 190);
+        anim->setStartValue(start);
+        anim->setEndValue(end);
+        anim->setEasingCurve(QEasingCurve::OutCubic);
+        anim->start(QAbstractAnimation::DeleteWhenStopped);
+    }
+    mDragSlotBasePos.clear();
+}
+
 void ShopWidget::onShopCardClicked(int slot)
 {
     if (slot < 0 || slot >= mGS->shop().shopOffers().size()) return;
@@ -912,11 +1292,15 @@ void ShopWidget::positionSlotActionButtons(OfferUi &ou, bool hasUseBtn)
     QTimer::singleShot(0, this, [buyGuard, useGuard, cardGuard, containerGuard, hasUseBtn]() {
         if (!cardGuard || !containerGuard) return;
         QPoint p = cardGuard->mapTo(containerGuard.data(), QPoint(0, 0));
-        // cardBtn 在选中后向上抬起 dp(18)；按钮要跟着抬起后的卡片走，否则会和卡片之间出现"空挡"。
+        // refresh() 会提前写入 cardTargetY。按钮按目标位置摆放，
+        // 这样卡牌正在上浮动画时，按钮也能贴在上浮后的卡牌底边。
+        bool ok = false;
+        int visualY = cardGuard->property("cardTargetY").toInt(&ok);
+        if (ok) p.setY(visualY);
         if (buyGuard && buyGuard->isVisible()) {
-            // 叠放在卡片底部，不遮挡名称标签。
+            // 挂在卡牌下方，和牌面留出细微缝隙；不再半压在牌面上，避免选中时按钮与卡片重叠。
             int x = p.x() + (cardGuard->width() - buyGuard->width()) / 2;
-            int y = p.y() + cardGuard->height() - buyGuard->height();
+            int y = p.y() + cardGuard->height() + dp(3);
             buyGuard->move(x, y);
             buyGuard->raise();
         }
@@ -931,9 +1315,34 @@ void ShopWidget::positionSlotActionButtons(OfferUi &ou, bool hasUseBtn)
 }
 
 void ShopWidget::onBuyShop(int slot) {
+    if (slot < 0 || slot >= mGS->shop().shopOffers().size()) return;
+    const ShopOffer offerBeforeBuy = mGS->shop().shopOffers()[slot];
+    QPixmap flyPix = offerPixmap(offerBeforeBuy);
+    QPoint flyCenter;
+    if (slot >= 0 && slot < mShopUi.size() && mShopUi[slot].cardBtn)
+        flyCenter = mShopUi[slot].cardBtn->mapToGlobal(
+            QPoint(mShopUi[slot].cardBtn->width() / 2, mShopUi[slot].cardBtn->height() / 2));
+
+    int targetArea = 0;
+    if (offerBeforeBuy.kind == OfferKind::Joker) targetArea = 1;
+    else if (offerBeforeBuy.kind == OfferKind::Tarot ||
+             offerBeforeBuy.kind == OfferKind::Planet ||
+             offerBeforeBuy.kind == OfferKind::Spectral) targetArea = 2;
+    else if (offerBeforeBuy.kind == OfferKind::PlayingCard) targetArea = 3;
+
+    // 小丑/消耗牌购买后会立刻触发 GameState 的 changed 信号。先把起点交给 MainWindow，
+    // 让新生成的真实卡片直接从购买位置飞入槽位，避免“槽位先生成一张 + 又飞来一张”的重影。
+    const bool needsSlotFlyIn = (targetArea == 1 || targetArea == 2);
+    if (needsSlotFlyIn && !flyPix.isNull())
+        emit shopItemBoughtForAnimation(flyPix, flyCenter, targetArea);
+
     if (mGS->buyShopOffer(slot)) {
+        if (!needsSlotFlyIn && targetArea != 0 && !flyPix.isNull())
+            emit shopItemBoughtForAnimation(flyPix, flyCenter, targetArea);
         mSelectedShopSlot = -1;
         refresh();
+    } else if (needsSlotFlyIn) {
+        emit shopItemBoughtForAnimation(QPixmap(), QPoint(), 0); // 购买失败时清掉预备动画
     }
 }
 

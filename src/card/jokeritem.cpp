@@ -28,8 +28,9 @@ QTimer *sJokerShaderTimer = nullptr;
 
 bool jokerNeedsShaderTick(const Joker &j)
 {
-    // 原版版本效果是 GPU shader，不应该因为闪箔/镭射/多彩/负片本身
-    // 让每张小丑进入 CPU 定时刷新。这里只有真正会浮动的 soul 层需要 tick。
+    Q_UNUSED(j.edition);
+    // 多彩/闪箔/镭射都按静态贴图缓存绘制；只有真正带 soul 浮动层的小丑需要刷新。
+    // 这样多彩买进槽位后仍保留多彩外观，但不会像动画 shader 一样一直闪动。
     QPoint unused;
     return legendarySoulPos(j.type, unused) || hologramSoulPos(j.type, unused);
 }

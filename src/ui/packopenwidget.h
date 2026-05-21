@@ -3,6 +3,8 @@
 
 #include <QWidget>
 #include <QVector>
+#include <QPixmap>
+#include <QPoint>
 #include "../game/boosterpack.h"
 #include "../card/consumable.h"
 
@@ -33,6 +35,7 @@ public:
     const QVector<CardData> &packHand() const { return mPackHand; }
 
 signals:
+    void choiceAnimationRequested(const QPixmap &pixmap, const QPoint &globalCenter, int targetArea);
     void choiceMade(int chosenIdx, QVector<int> selectedHandIdx);
     void inventoryConsumableRequested(int inventoryIdx, QVector<int> selectedHandIdx);
     void packHandReordered(QVector<CardData> packHand);

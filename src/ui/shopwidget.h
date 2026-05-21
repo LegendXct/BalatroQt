@@ -4,10 +4,15 @@
 #include <QWidget>
 #include <QLabel>
 #include <QPushButton>
+#include <QPixmap>
+#include <QPoint>
+#include <QPointer>
+#include <QGraphicsOpacityEffect>
 #include "../game/gamestate.h"
 #include "../card/consumable.h"
 
 class QEvent;
+class QLabel;
 
 class ShopWidget : public QWidget
 {
@@ -21,6 +26,9 @@ public:
 signals:
     void leaveClicked();
     void packBuyRequested(int slot);
+    // 购买小丑/消耗牌前先把起点交给 MainWindow，随后 changed 刷新时直接让真实卡片飞入槽位。
+    // targetArea: 1 = Joker 槽，2 = 消耗牌槽，3 = 牌组/其它，0 = 清除待播动画。
+    void shopItemBoughtForAnimation(const QPixmap &pixmap, const QPoint &globalCenter, int targetArea);
 
 protected:
     void resizeEvent(QResizeEvent *e) override;
@@ -83,6 +91,26 @@ private:
     void onVoucherCardClicked(int slot);
     void onBoosterCardClicked(int slot);
     void positionSlotActionButtons(OfferUi &ou, bool hasUseBtn);
+
+    enum class DragGroup { None, Shop, Voucher, Booster };
+    DragGroup dragGroupForWidget(QWidget *w, int *slotOut = nullptr) const;
+    int slotAtGlobalPos(DragGroup group, const QPoint &globalPos) const;
+    bool moveOfferInGroup(DragGroup group, int from, int to);
+    void animateOfferReorder(DragGroup group, int from, int to, const QPoint &dropPos);
+    void updateDragPreview(DragGroup group, int from, int to);
+    void clearDragPreview(bool animateBack);
+    void destroyDragGhost();
+
+    DragGroup mDragGroup = DragGroup::None;
+    int mDragFromSlot = -1;
+    QPoint mDragStartGlobal;
+    QPoint mDragPressOffset;
+    QVector<QPoint> mDragSlotBasePos;
+    QPointer<QWidget> mDragWidget;
+    QPointer<QLabel> mDragGhost;
+    QPointer<QGraphicsOpacityEffect> mDragHiddenEffect;
+    int mDragPreviewSlot = -1;
+    bool mDraggingOffer = false;
 };
 
 #endif

@@ -514,6 +514,7 @@ QPixmap renderEditionPixmap(const QPixmap &base, Edition edition, double intensi
 {
     if (edition == Edition::None || base.isNull()) return base;
 
+    // 版本牌在卡槽/商店中都按静态贴图缓存绘制：多彩保留彩色外观，但不持续闪动。
     bool gpuOk = false;
     QPixmap gpu = renderEditionPixmapGpu(base, edition, intensity, &gpuOk);
     if (gpuOk && !gpu.isNull()) {

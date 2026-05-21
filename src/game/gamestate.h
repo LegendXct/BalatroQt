@@ -146,6 +146,8 @@ public:
     bool moveJoker(int from, int to);
     bool moveConsumable(int from, int to);
     bool moveHandCard(int from, int to);
+    bool moveShopOffer(int from, int to);
+    bool moveBoosterOffer(int from, int to);
     void collectRoundCardsToDeck();
 
     // 商店买入：扩展为支持 3 种 offer

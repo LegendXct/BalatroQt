@@ -445,6 +445,26 @@ void GameState::playCards(const QVector<int> &indices) {
     }
     std::sort(scoringPlayedIdx.begin(), scoringPlayedIdx.end());
 
+    // DNA 属于原版 context.before：本盲注第一次且只出 1 张时，
+    // 先把复制牌永久加入手牌最右侧，再进入本手的计分流程。
+    // 这样如果复制出来的是钢铁牌，它会作为“留在手牌中的牌”参与本次计分。
+    if (mDNAEligibleThisPlay) {
+        if (played.size() == 1 && result.scoringCards.size() == 1) {
+            const int dnaCopies = countResolvedJokersOfType(mJokers, JokerType::DNA);
+            for (int i = 0; i < dnaCopies; ++i) {
+                CardData copy = played.first();
+                copy.assignNewUid();
+                copy.faceUp = true;
+                copy.isDebuffed = false;
+                mHand.append(copy);
+                ++mDNACopiesCreatedThisPlay;
+            }
+        }
+        // 后面的 OnPlayedHand 小丑循环仍会经过 DNA 本体；提前关掉资格，
+        // 避免同一张 DNA 在 joker loop 里再复制一次。
+        mDNAEligibleThisPlay = false;
+    }
+
     QVector<bool> shattered(played.size(), false);
 
     const int sockRetriggers = countResolvedJokersOfType(mJokers, JokerType::SockAndBuskin);
@@ -720,10 +740,8 @@ void GameState::finalizePlayedHand()
         mHand.removeAt(pr.first);
     }
 
-    // DNA 复制牌必须等本手计分动画和收牌完成后再放回手牌区。
-    // 之前在计分过程中 emit handChanged，会让新牌生成一个脱离正常手牌布局的“幽灵牌”。
-    for (const CardData &copy : mPendingDNACopies)
-        mHand.append(copy);
+    // DNA 复制牌已经在 playCards() 的 context.before 阶段加入 mHand，
+    // 这里仅清理旧路径的临时缓存，避免遗留状态影响下一手。
     mPendingDNACopies.clear();
 
     mPendingPlayedIndices.clear();
@@ -1255,6 +1273,22 @@ bool GameState::moveHandCard(int from, int to) {
     return true;
 }
 
+bool GameState::moveShopOffer(int from, int to)
+{
+    if (mPhase != GamePhase::Shop) return false;
+    if (!mShop.moveShopOffer(from, to)) return false;
+    emit shopChanged();
+    return true;
+}
+
+bool GameState::moveBoosterOffer(int from, int to)
+{
+    if (mPhase != GamePhase::Shop) return false;
+    if (!mShop.moveBoosterOffer(from, to)) return false;
+    emit shopChanged();
+    return true;
+}
+
 void GameState::collectRoundCardsToDeck() {
     // RoundEnd → Shop 时调用：把最后留在手上的牌、以及出牌区已弃进弃牌堆的牌
     // 统一合回摸牌堆并洗牌，保证商店开包/下一盲注看到的是完整当前牌组。
@@ -1506,8 +1540,9 @@ void GameState::createDNACopy(const CardData &card)
     copy.assignNewUid();              // 这是新复制出的实体牌，不能沿用原牌 uid
     copy.faceUp = true;
     copy.isDebuffed = false;
-    // 原版 DNA 的复制牌在计分事件结束后才进入手牌区。这里先暂存，
-    // finalizePlayedHand() 收走本手打出的牌后，再把复制牌插到手牌右侧。
+    // 兼容旧的 joker effect 路径：正常实战中 DNA 已经在 playCards() 的
+    // context.before 阶段提前处理；若有其它调用路径走到这里，仍暂存到
+    // finalizePlayedHand() 前清理，避免计分中途 emit handChanged 产生幽灵牌。
     mPendingDNACopies.append(copy);
     ++mDNACopiesCreatedThisPlay;
 }
@@ -1784,7 +1819,8 @@ void GameState::bringHandCardsToFront(const QVector<int> &indices)
     for (int i = 0; i < mHand.size(); ++i)
         if (!sel.contains(i)) rest.append(mHand[i]);
     mHand = front + rest;
-    mSortMode = HandSortMode::Manual;
+    // 最佳出牌只是临时把推荐牌移到最前方便选择，不应覆盖玩家原先的
+    // 点数/花色理牌偏好；本手出完补牌后仍按原模式自动排序。
     emit handChanged();
 }
 
