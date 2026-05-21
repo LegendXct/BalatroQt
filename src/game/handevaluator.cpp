@@ -1,7 +1,7 @@
 #include "handevaluator.h"
 #include <algorithm>
 
-HandResult HandEvaluator::evaluate(const QVector<CardData> &cards) {
+HandResult HandEvaluator::evaluate(const QVector<CardData> &cards, const HandMods &mods) {
     // 石头牌没有点数和花色：不参与牌型判定，只在 GameState 计分阶段作为额外计分牌 +50。
     QVector<CardData> effective;
     effective.reserve(cards.size());
@@ -24,8 +24,8 @@ HandResult HandEvaluator::evaluate(const QVector<CardData> &cards) {
         return result;
     }
 
-    bool flush = isFlush(effective);
-    bool straight = isStraight(effective);
+    bool flush = isFlush(effective, mods);
+    bool straight = isStraight(effective, mods);
     auto groups = groupByRank(effective);
 
     QVector<int> counts;
@@ -85,6 +85,9 @@ HandResult HandEvaluator::evaluate(const QVector<CardData> &cards) {
         scoringCards.append(effective[0]);
     }
 
+    // 水花：所有打出的牌（石头牌之外）都参与计分
+    if (mods.splash) scoringCards = effective;
+
     HandResult result;
     result.type = type;
     result.scoringCards = scoringCards;
@@ -135,53 +138,58 @@ HandResult HandEvaluator::evaluate(const QVector<CardData> &cards) {
     return result;
 }
 
-bool HandEvaluator::isFlush(const QVector<CardData> &cards) {
-    if (cards.size() < 5) return false;
+bool HandEvaluator::isFlush(const QVector<CardData> &cards, const HandMods &mods) {
+    const int need = mods.fourFingers ? 4 : 5;
+    if (cards.size() < need) return false;
 
-    Suit refSuit; // 第一张非万能花色
-    bool foundRef = false;
+    // 涂抹小丑：♥♦归为一色、♠♣归为一色
+    auto suitKey = [&](Suit s) -> int {
+        if (!mods.smeared) return static_cast<int>(s);
+        return (s == Suit::Hearts || s == Suit::Diamonds) ? 0 : 1;
+    };
+
+    int cnt[4] = {0, 0, 0, 0};
+    int wild = 0;
     for (const CardData &c : cards) {
-        if (c.enhancement == Enhancement::Wild) continue;
         if (c.enhancement == Enhancement::Stone) return false;
-        if (!foundRef) {
-            refSuit = c.suit;
-            foundRef = true;
-        }
-        else if (c.suit != refSuit) return false;
+        if (c.enhancement == Enhancement::Wild) { ++wild; continue; }
+        ++cnt[suitKey(c.suit)];
     }
-    return true;
+    for (int k = 0; k < 4; ++k)
+        if (cnt[k] + wild >= need) return true;
+    return false;
 }
 
-bool HandEvaluator::isStraight(const QVector<CardData> &sorted) {
-    if (sorted.size() < 5) return false;
+bool HandEvaluator::isStraight(const QVector<CardData> &sorted, const HandMods &mods) {
+    const int need = mods.fourFingers ? 4 : 5;
+    if (sorted.size() < need) return false;
 
     QVector<int> ranks;
     for (const CardData &c : sorted) {
-        // 跳过石头牌
-        if (c.enhancement == Enhancement::Stone) continue;
+        if (c.enhancement == Enhancement::Stone) continue;   // 跳过石头牌
         ranks.append(static_cast<int>(c.rank));
     }
+    std::sort(ranks.begin(), ranks.end(), std::greater<int>());
     ranks.erase(std::unique(ranks.begin(), ranks.end()), ranks.end());
-    if (ranks.size() < 5) return false;
+    if (ranks.size() < need) return false;
 
-    bool normal = true;
-    for (int i = 0; i < 4; i++)
-        if (ranks[i] - ranks[i+1] != 1) {
-            normal = false; break;
-        }
-    if (normal) return true;
+    // A 可作高(14)亦可作低(1)：有 A 时额外加入 1
+    QVector<int> rs = ranks;
+    if (ranks.contains(static_cast<int>(Rank::Ace))) {
+        rs.append(1);
+        std::sort(rs.begin(), rs.end(), std::greater<int>());
+        rs.erase(std::unique(rs.begin(), rs.end()), rs.end());
+    }
 
-    if (ranks[0] == static_cast<int>(Rank::Ace)) {
-        QVector<int> low = ranks.mid(1);
-        low.append(1);
-        std::sort(low.begin(), low.end(), std::greater<int>());
-        bool lowStraight = true;
-        for (int i = 0; i < 4; i++)
-            if (low[i] - low[i+1] != 1) {
-                lowStraight = false;
-                break;
-            }
-        return lowStraight;
+    // 捷径：相邻点数差为 1 或 2 都算连续
+    auto okGap = [&](int d) { return d == 1 || (mods.shortcut && d == 2); };
+
+    // 在降序点数表中寻找长度为 need 的连续窗口
+    for (int start = 0; start + need <= rs.size(); ++start) {
+        bool ok = true;
+        for (int i = start; i < start + need - 1; ++i)
+            if (!okGap(rs[i] - rs[i+1])) { ok = false; break; }
+        if (ok) return true;
     }
     return false;
 }
@@ -214,7 +222,7 @@ QString HandEvaluator::handTypeName(HandType type) {
     }
 }
 
-HandResult HandEvaluator::preview(const QVector<CardData> &cards)
+HandResult HandEvaluator::preview(const QVector<CardData> &cards, const HandMods &mods)
 {
     if (cards.isEmpty()) {
         HandResult r;
@@ -227,5 +235,5 @@ HandResult HandEvaluator::preview(const QVector<CardData> &cards)
         return r;
     }
     // 复用 evaluate 的牌型判定逻辑,只取基础部分
-    return evaluate(cards);
+    return evaluate(cards, mods);
 }

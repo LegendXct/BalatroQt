@@ -10,21 +10,21 @@ The Lua source of the original game lives in `balatro_original_code/` and is **r
 
 ## Build
 
-Qt 6.5+ is required (`Core Widgets OpenGL OpenGLWidgets`). The active build tree is `build/Desktop_Qt_6_10_0_MinGW_64_bit-Debug/` (Ninja, MinGW).
+Qt 6.5+ is required (`Core Widgets OpenGL OpenGLWidgets`). The active build tree is `build/Desktop_Qt_6_11_0_MinGW_64_bit-Debug/` (Ninja, MinGW).
 
-**Qt 安装位置**：`D:\Qt`（注意不是 `C:\Qt`）。命令行构建时需要先把以下目录加到 `PATH`：
+**Qt 安装位置**：`D:\Qt`（注意不是 `C:\Qt`）。命令行构建时需要先把以下目录加到 `PATH`，并在仓库根目录执行：
 
 ```powershell
-$env:PATH = 'D:\Qt\6.10.0\mingw_64\bin;D:\Qt\Tools\mingw1310_64\bin;D:\Qt\Tools\Ninja;D:\Qt\Tools\CMake_64\bin;' + $env:PATH
-cmake --build D:\QtProjects\BalatroQt\build\Desktop_Qt_6_10_0_MinGW_64_bit-Debug
+$env:PATH = 'D:\Qt\6.11.0\mingw_64\bin;D:\Qt\Tools\mingw1310_64\bin;D:\Qt\Tools\Ninja;D:\Qt\Tools\CMake_64\bin;' + $env:PATH
+cmake --build build/Desktop_Qt_6_11_0_MinGW_64_bit-Debug
 ```
 
 首次配置（已有 build 目录可跳过）：
 
 ```powershell
-cmake -S . -B build/Desktop_Qt_6_10_0_MinGW_64_bit-Debug -G Ninja
-cmake --build build/Desktop_Qt_6_10_0_MinGW_64_bit-Debug
-build\Desktop_Qt_6_10_0_MinGW_64_bit-Debug\BalatroQt.exe
+cmake -S . -B build/Desktop_Qt_6_11_0_MinGW_64_bit-Debug -G Ninja
+cmake --build build/Desktop_Qt_6_11_0_MinGW_64_bit-Debug
+build\Desktop_Qt_6_11_0_MinGW_64_bit-Debug\BalatroQt.exe
 ```
 
 `main.cpp` calls `showFullScreen()`; on a dev machine you may want to change that locally while iterating on UI.

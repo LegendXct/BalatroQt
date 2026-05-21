@@ -70,6 +70,9 @@ public:
     const QVector<Joker> &jokers() const {return mJokers;}
     bool hasJokerType(JokerType t) const;
     int gold() const {return mGold;}
+    // 信用卡：可透支 $20；全是6：所有概率分母减半
+    int spendableGold() const { return mGold + (hasJokerType(JokerType::CreditCard) ? 20 : 0); }
+    int probDenom(int n) const { return hasJokerType(JokerType::OopsAllSixes) ? qMax(1, n / 2) : n; }
     int pendingRoundPayout() const { return mPendingRoundPayout; }
     bool claimRoundPayout();
     int handsLeft() const {return mHandsLeft;}
@@ -109,6 +112,19 @@ public:
 
     const QHash<HandType, HandLevel> &handLevels() const { return mHandLevels; }
     void levelUpHand(HandType t, int times = 1);   // 行星牌用
+    bool handTypePlayedThisRound(HandType t) const { return mHandTypesPlayedThisRound.contains(static_cast<int>(t)); }
+    // 幻想性错觉：持有时所有牌（石头牌除外）都算人头牌
+    bool isFaceCard(const CardData &c) const {
+        if (c.enhancement == Enhancement::Stone) return false;
+        return hasJokerType(JokerType::Pareidolia)
+            || c.rank == Rank::Jack || c.rank == Rank::Queen || c.rank == Rank::King;
+    }
+    // Batch 3：每回合随机参数 / 状态查询，供小丑效果读取
+    bool noDiscardsUsedThisRound() const { return mDiscardLeft == mBlindStartingDiscards; }
+    Rank mailRank() const { return mMailRank; }
+    Suit ancientSuit() const { return mAncientSuit; }
+    Rank idolRank() const { return mIdolRank; }
+    Suit idolSuit() const { return mIdolSuit; }
 
     BossEffect bossEffect() const { return mBossEffect; }
     BossInfo currentBossInfo() const { return bossInfo(mBossEffect); }
@@ -213,6 +229,17 @@ private:
     HandResult mLastResult;
     Shop mShop;
     QHash<HandType, HandLevel> mHandLevels;
+    QSet<int> mHandTypesPlayedThisRound;   // 锋利卡牌：本回合已打出过的牌型
+    Suit mCastleSuit = Suit::Spades;       // 城堡：本回合计数的花色
+    int  mBlindStartingDiscards = Constants::INITIAL_DISCARDS;  // 延迟满足
+    Rank mMailRank = Rank::Two;            // 邮件回扣：本回合返钱的点数
+    Suit mAncientSuit = Suit::Spades;      // 远古小丑：本回合 ×1.5 的花色
+    Rank mIdolRank = Rank::Ace;            // 偶像：本回合 ×2 的点数
+    Suit mIdolSuit = Suit::Spades;         // 偶像：本回合 ×2 的花色
+    QSet<int> mPlanetsUsedThisRun;         // 卫星：本局用过的行星牌种类
+    bool mFirstDiscardThisRound = true;    // 焦痕小丑：本回合是否还没弃过牌
+    bool mChaosFreeRerollUsed = false;     // 混沌小丑：本次商店免费重摇是否已用
+    void cleanupDepletedJokers();          // 移除计数耗尽的小丑（爆米花/拉面/苏打水/海龟豆）
     BlindState mBlindStates[3] = {
         BlindState::Current, BlindState::Upcoming, BlindState::Upcoming
     };
@@ -288,6 +315,7 @@ private:
     bool mGrosMichelExtinct = false;
     ConsumableType mLastUsedConsumable = ConsumableType::Tarot_Fool;
     void notifyDiscardedCardsForYorick(int count);
+    void triggerBlindSelectJokers(BlindType type);   // Batch 4：选盲注时造牌型小丑
     void triggerPerkeoLeavingShop();
     void processEndOfRoundJokerExtinctions();
 
@@ -298,9 +326,10 @@ private:
     QVector<JokerType> ownedJokerTypes() const;
     QVector<ConsumableType> ownedConsumableTypes() const;
     bool hasJokerDuplicateBypass() const;
+    HandMods currentHandMods() const;   // Batch 6：由持有小丑生成牌型判定修正
     void syncShopJokerRules();
     void updateOwnedSellValues();
-    void scoreCard(const CardData &card, HandResult &result, int playedIdx);
+    void scoreCard(const CardData &card, HandResult &result, int playedIdx, bool firstFaceCard = false);
     void decayEndOfHandJokers();
 
     // 最佳出牌提示用的无副作用计分模拟器：返回该出牌（按 orderedIndices 顺序）的得分。

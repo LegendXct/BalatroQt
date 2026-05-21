@@ -146,6 +146,52 @@ static QVector<JokerType> allBuffoonJokers() {
         JokerType::SockAndBuskin,
         JokerType::Blueprint,       JokerType::Brainstorm,
         JokerType::DNA,             JokerType::Mime,
+        // Batch 1
+        JokerType::JokerStencil,    JokerType::SteelJoker,
+        JokerType::StoneJoker,      JokerType::BlueJoker,
+        JokerType::Erosion,         JokerType::BusinessCard,
+        JokerType::FacelessJoker,   JokerType::Cloud9,
+        JokerType::GoldenTicket,    JokerType::SeeingDouble,
+        // Batch 2
+        JokerType::SquareJoker,     JokerType::Runner,
+        JokerType::Castle,          JokerType::GreenJoker,
+        JokerType::Obelisk,         JokerType::RideTheBus,
+        JokerType::SpareTrousers,   JokerType::WeeJoker,
+        JokerType::HitTheRoad,      JokerType::GlassJoker,
+        JokerType::LuckyCat,        JokerType::Popcorn,
+        // Batch 3
+        JokerType::Juggler,         JokerType::Drunkard,
+        JokerType::MerryAndy,       JokerType::Troubadour,
+        JokerType::DelayedGratification, JokerType::ToTheMoon,
+        JokerType::ReservedParking, JokerType::MailInRebate,
+        JokerType::AncientJoker,    JokerType::TheIdol,
+        JokerType::SpaceJoker,      JokerType::Hack,
+        // Batch 4
+        JokerType::RiffRaff,        JokerType::MarbleJoker,
+        JokerType::Burglar,         JokerType::Cartomancer,
+        JokerType::Certificate,     JokerType::Madness,
+        JokerType::EightBall,       JokerType::Seance,
+        JokerType::Vagabond,        JokerType::Superposition,
+        // Batch 5
+        JokerType::FlashCard,       JokerType::Throwback,
+        JokerType::Campfire,        JokerType::FortuneTeller,
+        JokerType::LoyaltyCard,     JokerType::Egg,
+        JokerType::Rocket,          JokerType::Satellite,
+        JokerType::GiftCard,
+        // Batch 6
+        JokerType::Shortcut,        JokerType::SmearedJoker,
+        JokerType::Splash,          JokerType::Showman,
+        // Batch 7
+        JokerType::Dusk,            JokerType::CeremonialDagger,
+        JokerType::TurtleBean,      JokerType::Seltzer,
+        JokerType::BurntJoker,      JokerType::ChaosTheClown,
+        // Batch 8
+        JokerType::Pareidolia,      JokerType::Hallucination,
+        JokerType::Luchador,        JokerType::InvisibleJoker,
+        // Batch 9
+        JokerType::CreditCard,      JokerType::MrBones,
+        JokerType::DietCola,        JokerType::FourFingers,
+        JokerType::OopsAllSixes,
     };
 }
 

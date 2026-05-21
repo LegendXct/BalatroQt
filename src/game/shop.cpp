@@ -71,6 +71,78 @@ static int rawJokerCostForType(JokerType t)
     case JokerType::Yorick:
     case JokerType::Chicot:
     case JokerType::Perkeo:          raw = 20; break;
+    case JokerType::JokerStencil:    raw = 8;  break;
+    case JokerType::SteelJoker:      raw = 7;  break;
+    case JokerType::StoneJoker:      raw = 6;  break;
+    case JokerType::BlueJoker:       raw = 5;  break;
+    case JokerType::Erosion:         raw = 6;  break;
+    case JokerType::BusinessCard:    raw = 4;  break;
+    case JokerType::FacelessJoker:   raw = 4;  break;
+    case JokerType::Cloud9:          raw = 7;  break;
+    case JokerType::GoldenTicket:    raw = 5;  break;
+    case JokerType::SeeingDouble:    raw = 6;  break;
+    case JokerType::SquareJoker:     raw = 4;  break;
+    case JokerType::Runner:          raw = 5;  break;
+    case JokerType::Castle:          raw = 6;  break;
+    case JokerType::GreenJoker:      raw = 4;  break;
+    case JokerType::Obelisk:         raw = 8;  break;
+    case JokerType::RideTheBus:      raw = 6;  break;
+    case JokerType::SpareTrousers:   raw = 6;  break;
+    case JokerType::WeeJoker:        raw = 8;  break;
+    case JokerType::HitTheRoad:      raw = 8;  break;
+    case JokerType::GlassJoker:      raw = 6;  break;
+    case JokerType::LuckyCat:        raw = 6;  break;
+    case JokerType::Popcorn:         raw = 5;  break;
+    case JokerType::Juggler:         raw = 4;  break;
+    case JokerType::Drunkard:        raw = 4;  break;
+    case JokerType::MerryAndy:       raw = 7;  break;
+    case JokerType::Troubadour:      raw = 6;  break;
+    case JokerType::DelayedGratification: raw = 4; break;
+    case JokerType::ToTheMoon:       raw = 5;  break;
+    case JokerType::ReservedParking: raw = 6;  break;
+    case JokerType::MailInRebate:    raw = 4;  break;
+    case JokerType::AncientJoker:    raw = 8;  break;
+    case JokerType::TheIdol:         raw = 6;  break;
+    case JokerType::SpaceJoker:      raw = 5;  break;
+    case JokerType::Hack:            raw = 6;  break;
+    case JokerType::RiffRaff:        raw = 6;  break;
+    case JokerType::MarbleJoker:     raw = 6;  break;
+    case JokerType::Burglar:         raw = 6;  break;
+    case JokerType::Cartomancer:     raw = 6;  break;
+    case JokerType::Certificate:     raw = 6;  break;
+    case JokerType::Madness:         raw = 7;  break;
+    case JokerType::EightBall:       raw = 5;  break;
+    case JokerType::Seance:          raw = 6;  break;
+    case JokerType::Vagabond:        raw = 8;  break;
+    case JokerType::Superposition:   raw = 4;  break;
+    case JokerType::FlashCard:       raw = 5;  break;
+    case JokerType::Throwback:       raw = 6;  break;
+    case JokerType::Campfire:        raw = 9;  break;
+    case JokerType::FortuneTeller:   raw = 6;  break;
+    case JokerType::LoyaltyCard:     raw = 5;  break;
+    case JokerType::Egg:             raw = 4;  break;
+    case JokerType::Rocket:          raw = 6;  break;
+    case JokerType::Satellite:       raw = 6;  break;
+    case JokerType::GiftCard:        raw = 6;  break;
+    case JokerType::Shortcut:        raw = 7;  break;
+    case JokerType::SmearedJoker:    raw = 7;  break;
+    case JokerType::Splash:          raw = 3;  break;
+    case JokerType::Showman:         raw = 5;  break;
+    case JokerType::Dusk:            raw = 5;  break;
+    case JokerType::CeremonialDagger:raw = 6;  break;
+    case JokerType::TurtleBean:      raw = 6;  break;
+    case JokerType::Seltzer:         raw = 6;  break;
+    case JokerType::BurntJoker:      raw = 8;  break;
+    case JokerType::ChaosTheClown:   raw = 4;  break;
+    case JokerType::Pareidolia:      raw = 5;  break;
+    case JokerType::Hallucination:   raw = 4;  break;
+    case JokerType::Luchador:        raw = 5;  break;
+    case JokerType::InvisibleJoker:  raw = 8;  break;
+    case JokerType::CreditCard:      raw = 1;  break;
+    case JokerType::MrBones:         raw = 5;  break;
+    case JokerType::DietCola:        raw = 6;  break;
+    case JokerType::FourFingers:     raw = 7;  break;
+    case JokerType::OopsAllSixes:    raw = 4;  break;
     }
     return raw;
 }
@@ -653,6 +725,33 @@ QVector<JokerType> Shop::jokerPool() {
         JokerType::MidasMask, JokerType::Vampire, JokerType::Constellation,
         JokerType::Photograph, JokerType::HangingChad, JokerType::SockAndBuskin,
         JokerType::Blueprint, JokerType::Brainstorm, JokerType::DNA, JokerType::Mime,
+        JokerType::JokerStencil, JokerType::SteelJoker, JokerType::StoneJoker,
+        JokerType::BlueJoker, JokerType::Erosion, JokerType::BusinessCard,
+        JokerType::FacelessJoker, JokerType::Cloud9, JokerType::GoldenTicket,
+        JokerType::SeeingDouble,
+        JokerType::SquareJoker, JokerType::Runner, JokerType::Castle,
+        JokerType::GreenJoker, JokerType::Obelisk, JokerType::RideTheBus,
+        JokerType::SpareTrousers, JokerType::WeeJoker, JokerType::HitTheRoad,
+        JokerType::GlassJoker, JokerType::LuckyCat, JokerType::Popcorn,
+        JokerType::Juggler, JokerType::Drunkard, JokerType::MerryAndy,
+        JokerType::Troubadour, JokerType::DelayedGratification, JokerType::ToTheMoon,
+        JokerType::ReservedParking, JokerType::MailInRebate, JokerType::AncientJoker,
+        JokerType::TheIdol, JokerType::SpaceJoker, JokerType::Hack,
+        JokerType::RiffRaff, JokerType::MarbleJoker, JokerType::Burglar,
+        JokerType::Cartomancer, JokerType::Certificate, JokerType::Madness,
+        JokerType::EightBall, JokerType::Seance, JokerType::Vagabond,
+        JokerType::Superposition,
+        JokerType::FlashCard, JokerType::Throwback, JokerType::Campfire,
+        JokerType::FortuneTeller, JokerType::LoyaltyCard, JokerType::Egg,
+        JokerType::Rocket, JokerType::Satellite, JokerType::GiftCard,
+        JokerType::Shortcut, JokerType::SmearedJoker, JokerType::Splash,
+        JokerType::Showman,
+        JokerType::Dusk, JokerType::CeremonialDagger, JokerType::TurtleBean,
+        JokerType::Seltzer, JokerType::BurntJoker, JokerType::ChaosTheClown,
+        JokerType::Pareidolia, JokerType::Hallucination, JokerType::Luchador,
+        JokerType::InvisibleJoker,
+        JokerType::CreditCard, JokerType::MrBones, JokerType::DietCola,
+        JokerType::FourFingers, JokerType::OopsAllSixes,
     };
 }
 

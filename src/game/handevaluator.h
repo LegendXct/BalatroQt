@@ -63,15 +63,23 @@ struct HandResult {
     QVector<ScoreEvent> events;
 };
 
+// 牌型判定修正：由持有的小丑牌决定（涂抹小丑/捷径/水花等）
+struct HandMods {
+    bool smeared = false;     // 涂抹小丑：♥♦同色、♠♣同色
+    bool shortcut = false;    // 捷径：顺子允许 1 点间隔
+    bool splash = false;      // 水花：所有打出的牌都参与计分
+    bool fourFingers = false; // 四根手指：同花/顺子只需 4 张
+};
+
 class HandEvaluator
 {
-    static bool isStraight(const QVector<CardData> &sorted); // 判断顺子
-    static bool isFlush(const QVector<CardData> &cards); // 判断同花
+    static bool isStraight(const QVector<CardData> &sorted, const HandMods &mods); // 判断顺子
+    static bool isFlush(const QVector<CardData> &cards, const HandMods &mods); // 判断同花
     static QMap<Rank, QVector<CardData>> groupByRank(const QVector<CardData> &cards); // 计算各个点数的数量
 public:
-    static HandResult evaluate(const QVector<CardData> &cards);
+    static HandResult evaluate(const QVector<CardData> &cards, const HandMods &mods = {});
     static QString handTypeName(HandType type);
-    static HandResult preview(const QVector<CardData> &cards);
+    static HandResult preview(const QVector<CardData> &cards, const HandMods &mods = {});
 };
 
 #endif // HANDEVALUATOR_H

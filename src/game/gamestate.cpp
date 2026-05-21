@@ -33,6 +33,7 @@ QPair<int, int> GameState::handLevelDelta(HandType t) {
 }
 
 void GameState::levelUpHand(HandType t, int times) {
+    if (mDryRun) return;   // 最佳出牌提示模拟期间不得真正升级牌型
     for (Joker &j : mJokers) {
         if (!j.isDebuffed && j.type == JokerType::Constellation) j.counter += times;
     }
@@ -83,6 +84,8 @@ static bool jokerUsesCardRankOrSuit(JokerType type)
     case JokerType::Bloodstone:
     case JokerType::Photograph:
     case JokerType::Triboulet:
+    case JokerType::AncientJoker:
+    case JokerType::TheIdol:
         return true;
     default:
         return false;
@@ -170,6 +173,44 @@ static void applyResolvedJokerEffect(const Joker &j, TriggerContext &ctx)
         ctx.result.xmult *= (1.0 + 0.1 * qMax(0, j.counter));
         return;
     }
+    // Batch 2：计数器型小丑
+    switch (j.type) {
+    case JokerType::SquareJoker:
+    case JokerType::Runner:
+    case JokerType::Castle:
+    case JokerType::WeeJoker:
+        ctx.result.chips += qMax(0, j.counter);                       return;
+    case JokerType::GreenJoker:
+    case JokerType::SpareTrousers:
+    case JokerType::RideTheBus:
+    case JokerType::Popcorn:
+        ctx.result.mult += qMax(0, j.counter);                        return;
+    case JokerType::Obelisk:
+        ctx.result.xmult *= (1.0 + 0.2 * qMax(0, j.counter));         return;
+    case JokerType::HitTheRoad:
+        ctx.result.xmult *= (1.0 + 0.5 * qMax(0, j.counter));         return;
+    case JokerType::GlassJoker:
+        ctx.result.xmult *= (1.0 + 0.75 * qMax(0, j.counter));        return;
+    case JokerType::LuckyCat:
+        ctx.result.xmult *= (1.0 + 0.25 * qMax(0, j.counter));        return;
+    case JokerType::Ramen:
+        ctx.result.xmult *= qMax(1.0, j.counter / 100.0);            return;
+    case JokerType::Madness:
+        ctx.result.xmult *= (1.0 + qMax(0, j.counter) / 100.0);      return;
+    case JokerType::FlashCard:
+        ctx.result.mult += 2 * qMax(0, j.counter);                   return;
+    case JokerType::FortuneTeller:
+        ctx.result.mult += qMax(0, j.counter);                       return;
+    case JokerType::Throwback:
+    case JokerType::Campfire:
+        ctx.result.xmult *= (1.0 + 0.25 * qMax(0, j.counter));       return;
+    case JokerType::LoyaltyCard:
+        if (j.counter > 0 && j.counter % 6 == 0) ctx.result.xmult *= 4.0;
+        return;
+    case JokerType::CeremonialDagger:
+        ctx.result.mult += qMax(0, j.counter);                       return;
+    default: break;
+    }
     j.effect(ctx);
 }
 
@@ -242,9 +283,24 @@ QVector<ConsumableType> GameState::ownedConsumableTypes() const
 
 bool GameState::hasJokerDuplicateBypass() const
 {
-    // 原版 Showman/马戏团长允许重复小丑。当前项目还没有实现 Showman，
-    // 所以这里先恒为 false；以后加 JokerType::Showman 时，在这里返回 true。
-    return false;
+    // 马戏团长(Showman)：允许小丑/塔罗/星球/幻灵牌在商店与卡包中重复出现。
+    return hasJokerType(JokerType::Showman);
+}
+
+HandMods GameState::currentHandMods() const
+{
+    HandMods m;
+    for (const Joker &j : mJokers) {
+        if (j.isDebuffed) continue;
+        switch (j.type) {
+        case JokerType::SmearedJoker: m.smeared = true;  break;
+        case JokerType::Shortcut:     m.shortcut = true; break;
+        case JokerType::Splash:       m.splash = true;   break;
+        case JokerType::FourFingers:  m.fourFingers = true; break;
+        default: break;
+        }
+    }
+    return m;
 }
 
 void GameState::syncShopJokerRules()
@@ -316,7 +372,7 @@ void GameState::playCards(const QVector<int> &indices) {
     mDNACopiesCreatedThisPlay = 0;
     mPendingDNACopies.clear();
 
-    HandResult result = HandEvaluator::evaluate(played);
+    HandResult result = HandEvaluator::evaluate(played, currentHandMods());
     if (bossBlocksPlayedHand(result, played.size())) {
         // 原版会阻止非法出牌并给提示；当前 Qt 版先保证不会卡死：
         // 这手按 0 分处理并正常进入收牌/补牌流程。
@@ -396,8 +452,15 @@ void GameState::playCards(const QVector<int> &indices) {
     const int hikerTriggers  = countResolvedJokersOfType(mJokers, JokerType::Hiker);
     const int midasTriggers  = countResolvedJokersOfType(mJokers, JokerType::MidasMask);
     const int vampireTriggers = countResolvedJokersOfType(mJokers, JokerType::Vampire);
+    const int hackTriggers   = countResolvedJokersOfType(mJokers, JokerType::Hack);
+    const int duskTriggers   = (mHandsLeft == 1)
+                               ? countResolvedJokersOfType(mJokers, JokerType::Dusk) : 0;
+    int seltzerTriggers = 0;
+    for (const Joker &j : mJokers)
+        if (!j.isDebuffed && j.type == JokerType::Seltzer && j.counter > 0) ++seltzerTriggers;
 
     bool firstScoringCard = true;
+    bool faceCardScoredYet = false;   // 照片：标记本手是否已出现过计分人头牌
     for (int playedIdx : scoringPlayedIdx) {
         CardData card = played[playedIdx];
         if (card.isDebuffed) { firstScoringCard = false; continue; }
@@ -405,9 +468,17 @@ void GameState::playCards(const QVector<int> &indices) {
         const int redSealReps = (card.seal == Seal::Red) ? 1 : 0;
         int triggers = 1 + redSealReps;
         const bool hasRankAndSuit = card.enhancement != Enhancement::Stone;
-        const bool isFace = hasRankAndSuit && (card.rank == Rank::Jack || card.rank == Rank::Queen || card.rank == Rank::King);
+        const bool isFace = hasRankAndSuit && isFaceCard(card);   // 含幻想性错觉
+        const bool firstFaceCard = isFace && !faceCardScoredYet;
         if (isFace) triggers += sockRetriggers;
         if (firstScoringCard) triggers += chadRetriggers;
+        // Batch 3：黑客——重新触发 2/3/4/5
+        if (hasRankAndSuit) {
+            int rv = static_cast<int>(card.rank);
+            if (rv >= 2 && rv <= 5) triggers += hackTriggers;
+        }
+        // Batch 7：黄昏（最后一手）/ 苏打水 重新触发所有计分牌
+        triggers += duskTriggers + seltzerTriggers;
 
         int globalIdx = (playedIdx >= 0 && playedIdx < sorted.size()) ? sorted[playedIdx] : -1;
 
@@ -417,14 +488,21 @@ void GameState::playCards(const QVector<int> &indices) {
             card.permanentBonusChips = mHand[globalIdx].permanentBonusChips;
         }
 
+        // Batch 2：小小小丑——每张计分的 2 给自身永久 +8 筹码
+        if (hasRankAndSuit && card.rank == Rank::Two) {
+            for (Joker &wj : mJokers)
+                if (!wj.isDebuffed && wj.type == JokerType::WeeJoker) wj.counter += 8 * triggers;
+        }
+
         for (int t = 0; t < triggers; ++t) {
             if (t > 0 && t <= redSealReps) {
                 // 原版红色蜡封在真正重复计算前先显示“再触发”。
                 // Sock/Chad 等小丑带来的重复不伪装成红蜡封，只保留各自的计分事件。
                 result.events.append({ ScoreEventKind::RedSealRetrigger, playedIdx, -1, -1, 0, 1.0 });
             }
-            scoreCard(card, result, playedIdx);
+            scoreCard(card, result, playedIdx, firstFaceCard);
         }
+        if (isFace) faceCardScoredYet = true;
 
         if (midasTriggers > 0 && isFace && globalIdx >= 0 && globalIdx < mHand.size()) {
             mHand[globalIdx].enhancement = Enhancement::Gold;
@@ -439,10 +517,13 @@ void GameState::playCards(const QVector<int> &indices) {
         }
 
         if (card.enhancement == Enhancement::Glass
-            && QRandomGenerator::global()->bounded(4) == 0) {
+            && QRandomGenerator::global()->bounded(probDenom(4)) == 0) {
             shattered[playedIdx] = true;
             // 破碎发生在这张玻璃牌完成所有计分/重触发之后，和原版 shatter 队列一致。
             result.events.append({ ScoreEventKind::GlassShatter, playedIdx, -1, -1, 0, 1.0 });
+            // Batch 2：玻璃小丑——每张玻璃牌破碎 +X0.75 倍率
+            for (Joker &gj : mJokers)
+                if (!gj.isDebuffed && gj.type == JokerType::GlassJoker) gj.counter += 1;
         }
         firstScoringCard = false;
     }
@@ -460,10 +541,17 @@ void GameState::playCards(const QVector<int> &indices) {
     const int mimeRetriggers = countResolvedJokersOfType(mJokers, JokerType::Mime);
     const int baronTriggers = countResolvedJokersOfType(mJokers, JokerType::Baron);
     const int shootMoonTriggers = countResolvedJokersOfType(mJokers, JokerType::ShootTheMoon);
+    const int reservedParkingTriggers = countResolvedJokersOfType(mJokers, JokerType::ReservedParking);
     for (int hi = 0; hi < heldHand.size(); ++hi) {
         const CardData &c = heldHand[hi];
         int heldVisualIdx = hi; // UI 中 mHandCards 已经移除了打出的牌，heldHand 的顺序就是手牌显示顺序
         if (c.isDebuffed) continue;
+
+        // Batch 3：预留车位——手牌中每张人头牌 1/2 概率 +$1
+        if (reservedParkingTriggers > 0 && isFaceCard(c)) {
+            for (int rp = 0; rp < reservedParkingTriggers; ++rp)
+                if (QRandomGenerator::global()->bounded(probDenom(2)) == 0) addGold(1);
+        }
 
         // 原版手牌阶段先计算这张手牌是否真的有效果，然后红蜡封和 Mime 才能追加 repetition。
         // 因此红钢 K + 男爵 + 蓝图/头脑风暴/哑剧时，总次数 = 1 + 红蜡封次数 + 解析后的 Mime 次数；
@@ -497,11 +585,41 @@ void GameState::playCards(const QVector<int> &indices) {
         }
     }
 
+    // Batch 2：在小丑计分前更新「打出手牌」型计数器（对应原版 context.before）
+    {
+        bool faceScored = false;
+        for (const CardData &c : result.scoringCards)
+            if (!c.isDebuffed && isFaceCard(c)) { faceScored = true; break; }
+        int mostPlayed = 0;
+        for (auto it = mHandLevels.constBegin(); it != mHandLevels.constEnd(); ++it)
+            mostPlayed = qMax(mostPlayed, it.value().played);
+        const bool isMostPlayed = (mostPlayed > 0 && mHandLevels[result.type].played >= mostPlayed);
+        const HandType t = result.type;
+        const bool isStraight = (t == HandType::Straight || t == HandType::StraightFlush
+                                 || t == HandType::RoyalFlush);
+        const bool hasTwoPair = (t == HandType::TwoPair || t == HandType::FullHouse
+                                 || t == HandType::FlushHouse);
+        for (Joker &j : mJokers) {
+            if (j.isDebuffed) continue;
+            switch (j.type) {
+            case JokerType::SquareJoker:   if (played.size() == 4) j.counter += 4;  break;
+            case JokerType::Runner:        if (isStraight) j.counter += 15;          break;
+            case JokerType::GreenJoker:    j.counter += 1;                           break;
+            case JokerType::SpareTrousers: if (hasTwoPair) j.counter += 2;           break;
+            case JokerType::RideTheBus:    j.counter = faceScored ? 0 : j.counter + 1; break;
+            case JokerType::Obelisk:       j.counter = isMostPlayed ? 0 : j.counter + 1; break;
+            case JokerType::LoyaltyCard:   j.counter += 1; break;
+            default: break;
+            }
+        }
+    }
+
     {
         double chipsBefore = result.chips, multBefore = result.mult;
         double xmultBefore = result.xmult;
 
         TriggerContext ctx{ result, *this, heldHand, result.scoringCards, nullptr };
+        ctx.playedCards = &played;
         for (int ji = 0; ji < mJokers.size(); ++ji) {
             const Joker &j = mJokers[ji];
             if (j.isDebuffed) continue;
@@ -511,6 +629,7 @@ void GameState::playCards(const QVector<int> &indices) {
             if (effectJoker && !effectJoker->isDebuffed &&
                 (effectJoker->timing == TriggerTiming::Passive ||
                  effectJoker->timing == TriggerTiming::OnPlayedHand)) {
+                ctx.self = &mJokers[ji];
                 applyResolvedJokerEffect(*effectJoker, ctx);
             }
 
@@ -577,6 +696,11 @@ void GameState::finalizePlayedHand()
             mGold = 0;
     }
     mHandLevels[mLastResult.type].played++;
+    mHandTypesPlayedThisRound.insert(static_cast<int>(mLastResult.type));   // 锋利卡牌
+    // Batch 7：苏打水每出一手 -1，耗尽后销毁
+    for (Joker &j : mJokers)
+        if (j.type == JokerType::Seltzer) j.counter -= 1;
+    cleanupDepletedJokers();
 
     QVector<QPair<int,int>> idxPairs;
     for (int pidx = 0; pidx < mPendingPlayedIndices.size(); ++pidx)
@@ -708,9 +832,51 @@ void GameState::finishWinningRound()
             j.effect(rctx);
     }
 
-    processEndOfRoundJokerExtinctions();
+    // Batch 2：爆米花每回合结束 -4 倍率
+    for (Joker &j : mJokers)
+        if (j.type == JokerType::Popcorn) j.counter = qMax(0, j.counter - 4);
 
-    int interest = qMin(mGold / 5, mInterestCap / 5);
+    // Batch 5：回合结算经济型小丑
+    {
+        const bool bossDefeated = (mBlindType == BlindType::Boss);
+        for (Joker &j : mJokers) {
+            if (j.isDebuffed) continue;
+            switch (j.type) {
+            case JokerType::Egg:       j.sellValue += 3; break;
+            case JokerType::Rocket:
+                addGold(qMax(0, j.counter));
+                if (bossDefeated) j.counter += 2;
+                break;
+            case JokerType::Satellite:
+                addGold(static_cast<int>(mPlanetsUsedThisRun.size()));
+                break;
+            case JokerType::Campfire:
+                if (bossDefeated) j.counter = 0;
+                break;
+            case JokerType::TurtleBean:
+                j.counter -= 1;
+                break;
+            case JokerType::InvisibleJoker:
+                j.counter += 1;
+                break;
+            default: break;
+            }
+        }
+        int gifts = 0;
+        for (const Joker &j : mJokers)
+            if (!j.isDebuffed && j.type == JokerType::GiftCard) ++gifts;
+        if (gifts > 0) {
+            for (Joker &j : mJokers) j.sellValue += gifts;
+            for (Consumable &c : mConsumables) c.sellValue += gifts;
+        }
+    }
+
+    processEndOfRoundJokerExtinctions();
+    cleanupDepletedJokers();   // Batch 7：移除爆米花/海龟豆等耗尽的小丑
+
+    int interest = qMin(qMax(0, mGold) / 5, mInterestCap / 5);
+    // Batch 3：飞向月球——每 $5 额外 $1 利息
+    if (hasJokerType(JokerType::ToTheMoon)) interest += mGold / 5;
     mGold += interest;
 
     // 结算窗口弹出前不直接改变左侧金币。
@@ -721,6 +887,7 @@ void GameState::finishWinningRound()
     mSuppressGoldSignal = false;
 
     mPhase = GamePhase::Shop;
+    mChaosFreeRerollUsed = false;   // Batch 7：进商店重置混沌小丑免费重摇
     syncShopJokerRules();
     mShop.roll();
     if (mFirstShop) {
@@ -767,6 +934,36 @@ void GameState::discardCards(const QVector<int> &indices)
         if (j.isDebuffed) continue;
         if (j.timing == TriggerTiming::OnDiscard) j.effect(ctx);
     }
+
+    // Batch 2：弃牌型计数器小丑
+    for (Joker &j : mJokers) {
+        if (j.isDebuffed) continue;
+        switch (j.type) {
+        case JokerType::GreenJoker:
+            j.counter = qMax(0, j.counter - 1);
+            break;
+        case JokerType::HitTheRoad:
+            for (const CardData &c : discarded)
+                if (c.enhancement != Enhancement::Stone && c.rank == Rank::Jack) j.counter += 1;
+            break;
+        case JokerType::Castle:
+            for (const CardData &c : discarded)
+                if (c.enhancement != Enhancement::Stone && c.suit == mCastleSuit) j.counter += 3;
+            break;
+        case JokerType::Ramen:
+            j.counter = qMax(100, j.counter - discarded.size());   // ×倍率最低降到 ×1.00
+            break;
+        default: break;
+        }
+    }
+
+    // Batch 7：焦痕小丑——每回合第一次弃牌升级该牌型
+    if (mFirstDiscardThisRound && hasJokerType(JokerType::BurntJoker) && !discarded.isEmpty()) {
+        HandResult dr = HandEvaluator::evaluate(discarded, currentHandMods());
+        levelUpHand(dr.type);
+    }
+    mFirstDiscardThisRound = false;
+    cleanupDepletedJokers();   // 拉面降到 ×1.0 时销毁
 
     // Purple Seal：被弃的每张 → 生成随机塔罗
     for (const CardData &c : discarded) {
@@ -837,6 +1034,15 @@ bool GameState::canAddJokerWithEdition(Edition edition) const {
 void GameState::checkGameOver() {
     if (mPhase != GamePhase::Blind) return;       // ← 新增：不在打盲注阶段就不判断
     if (mHandsLeft <= 0 && mScore < mTargetScore) {
+        // 骨头先生：得分达到要求的 25% 时免于失败，本牌随后消失。
+        if (hasJokerType(JokerType::MrBones) && mScore * 4.0 >= mTargetScore) {
+            for (int i = 0; i < mJokers.size(); ++i)
+                if (mJokers[i].type == JokerType::MrBones) { mJokers.removeAt(i); break; }
+            syncShopJokerRules();
+            emit jokersChanged();
+            finishWinningRound();
+            return;
+        }
         mPhase = GamePhase::GameOver;
         emit gameOver(false);
     }
@@ -850,19 +1056,28 @@ int GameState::roundReward() const {
     case BlindType::Boss: base = 5; break;
     }
     int handBonus = mHandsLeft * Constants::HAND_GOLD;
-    int interest = qMin(mGold / 5, mInterestCap / 5);
+    int interest = qMin(qMax(0, mGold) / 5, mInterestCap / 5);
+    if (hasJokerType(JokerType::ToTheMoon)) interest += mGold / 5;
     return base + handBonus + interest;
 }
 
 void GameState::rerollShop() {
     if (mPhase != GamePhase::Shop) return;
     int cost = mShop.rerollCost();
-    if (mGold < cost) return;
+    // Batch 7：混沌小丑——每次进商店首次重摇免费
+    const bool freeReroll = (!mChaosFreeRerollUsed && hasJokerType(JokerType::ChaosTheClown));
+    if (freeReroll) cost = 0;
+    if (spendableGold() < cost) return;
+    if (freeReroll) mChaosFreeRerollUsed = true;
 
     mGold -= cost;
     syncShopJokerRules();
     mShop.onReroll();
     mShop.rerollShopOnly();   // ← 只 reroll 商品区,不动 booster
+
+    // Batch 5：闪卡——每次重摇 +2 倍率
+    for (Joker &j : mJokers)
+        if (!j.isDebuffed && j.type == JokerType::FlashCard) j.counter += 1;
 
     emit goldChanged();
     emit shopChanged();
@@ -895,6 +1110,7 @@ void GameState::applyBossPostPlay() {
 }
 
 bool GameState::addConsumable(ConsumableType t) {
+    if (mDryRun) return false;          // 出牌提示模拟期间不得真正造牌
     if (!canAddConsumable()) return false;
     mConsumables.append(createConsumable(t));
     emit consumablesChanged();
@@ -939,6 +1155,15 @@ bool GameState::useConsumable(int idx, const QVector<int> &selectedHandIdx) {
     UseContext ctx{ *this, sel };
     c.effect(ctx);
 
+    // Batch 5：算命师统计塔罗使用、卫星统计行星种类
+    ConsumableKind usedKind = kindOf(c.type);
+    if (usedKind == ConsumableKind::Tarot) {
+        for (Joker &j : mJokers)
+            if (!j.isDebuffed && j.type == JokerType::FortuneTeller) j.counter += 1;
+    } else if (usedKind == ConsumableKind::Planet) {
+        mPlanetsUsedThisRun.insert(static_cast<int>(c.type));
+    }
+
     if (canRecordForFool(c.type)) {
         mLastUsedConsumable = c.type;
         mHasLastUsedConsumable = true;
@@ -953,6 +1178,9 @@ bool GameState::sellConsumable(int idx) {
     int v = mConsumables[idx].sellValue;
     mConsumables.removeAt(idx);
     mGold += v;
+    // Batch 5：篝火——每卖出 1 张牌 +X0.25
+    for (Joker &j : mJokers)
+        if (!j.isDebuffed && j.type == JokerType::Campfire) j.counter += 1;
     emit consumablesChanged();
     emit goldChanged();
     return true;
@@ -960,9 +1188,29 @@ bool GameState::sellConsumable(int idx) {
 
 bool GameState::sellJoker(int idx) {
     if (idx < 0 || idx >= mJokers.size()) return false;
+    const JokerType soldType = mJokers[idx].type;
+    const int soldCounter = mJokers[idx].counter;
     int v = qMax(1, mJokers[idx].sellValue);
     mJokers.removeAt(idx);
     mGold += v;
+    // Batch 5：篝火——每卖出 1 张牌 +X0.25
+    for (Joker &j : mJokers)
+        if (!j.isDebuffed && j.type == JokerType::Campfire) j.counter += 1;
+    // Batch 8：摔跤手——出售时禁用当前 Boss
+    if (soldType == JokerType::Luchador && mBossEffect != BossEffect::None) {
+        mBossEffect = BossEffect::None;
+        applyBossDebuffs();
+        emit handChanged();
+    }
+    // Batch 8：隐形小丑——经过 2 回合后出售，复制 1 张随机小丑
+    if (soldType == JokerType::InvisibleJoker && soldCounter >= 2
+        && !mJokers.isEmpty() && canAddJoker()) {
+        Joker copy = mJokers[QRandomGenerator::global()->bounded(mJokers.size())];
+        mJokers.append(copy);
+    }
+    // Batch 9：无糖可乐——出售时获得 1 个双倍标签
+    if (soldType == JokerType::DietCola)
+        mActiveTags.append(TagType::Double);
     // 翠绿之叶(Verdant Leaf)：卖出任意小丑即解除全牌禁用。
     if (mVerdantLeafActive && mBossEffect == BossEffect::VerdantLeaf) {
         mVerdantLeafActive = false;
@@ -1020,7 +1268,7 @@ void GameState::collectRoundCardsToDeck() {
 
 bool GameState::buyShopOffer(int idx) {
     if (mPhase != GamePhase::Shop) return false;
-    if (!mShop.canBuyShop(idx, mGold)) return false;
+    if (!mShop.canBuyShop(idx, spendableGold())) return false;
     const ShopOffer &o = mShop.shopOffers()[idx];
 
     if (o.kind == OfferKind::Joker) {
@@ -1071,7 +1319,7 @@ bool GameState::canBuyAndUseShopConsumable(int idx) const
     if (o.sold) return false;
     if (o.kind != OfferKind::Tarot && o.kind != OfferKind::Planet && o.kind != OfferKind::Spectral)
         return false;
-    if (mGold < o.cost) return false;
+    if (spendableGold() < o.cost) return false;
     Consumable c = createConsumable(o.consumable);
     // 需要选牌的消耗品（如 Magician/Empress/Sun/Moon 等）在商店没有手牌可选，禁用直接使用。
     if (c.needsSelection > 0) return false;
@@ -1088,7 +1336,7 @@ bool GameState::buyAndUseShopConsumable(int idx, const QVector<int> &selectedHan
     if (o.sold) return false;
     if (o.kind != OfferKind::Tarot && o.kind != OfferKind::Planet && o.kind != OfferKind::Spectral)
         return false;
-    if (mGold < o.cost) return false;
+    if (spendableGold() < o.cost) return false;
 
     // 先临时把消耗牌"塞进"消耗槽（即使槽满也能买并立即使用，原版 BUY AND USE 行为）。
     ShopOffer t = mShop.takeShopOffer(idx);
@@ -1229,7 +1477,15 @@ int GameState::consumableSlots() const {
 int GameState::handSize() const {
     int size = Constants::HAND_SIZE + mExtraHandSize + mOneRoundHandSizeBonus;
     for (const Joker &j : mJokers) {
-        if (!j.isDebuffed && j.type == JokerType::Stuntman) size -= 2;
+        if (j.isDebuffed) continue;
+        switch (j.type) {
+        case JokerType::Stuntman:  size -= 2; break;
+        case JokerType::Juggler:   size += 1; break;
+        case JokerType::MerryAndy: size -= 1; break;
+        case JokerType::Troubadour:size += 2; break;
+        case JokerType::TurtleBean:size += qMax(0, j.counter); break;
+        default: break;
+        }
     }
     if (mPhase == GamePhase::Blind && mBlindType == BlindType::Boss &&
         mBossEffect == BossEffect::TheManacle && !hasJokerType(JokerType::Chicot)) size -= 1;
@@ -1284,7 +1540,7 @@ double GameState::simulatePlayScore(const QVector<int> &orderedIndices)
         playedSet.insert(i);
     }
 
-    HandResult result = HandEvaluator::evaluate(played);
+    HandResult result = HandEvaluator::evaluate(played, currentHandMods());
 
     // 牌型等级加成（只读 mHandLevels）
     int lvLevel = 1, lvChips = 0, lvMult = 0;
@@ -1333,9 +1589,15 @@ double GameState::simulatePlayScore(const QVector<int> &orderedIndices)
     const int sockRetriggers = countResolvedJokersOfType(mJokers, JokerType::SockAndBuskin);
     const int chadRetriggers = 2 * countResolvedJokersOfType(mJokers, JokerType::HangingChad);
     const int hikerTriggers  = countResolvedJokersOfType(mJokers, JokerType::Hiker);
+    const int hackTriggers   = countResolvedJokersOfType(mJokers, JokerType::Hack);
+    const int duskTriggers   = (mHandsLeft == 1)
+                               ? countResolvedJokersOfType(mJokers, JokerType::Dusk) : 0;
+    int seltzerTriggers = 0;
+    for (const Joker &j : mJokers)
+        if (!j.isDebuffed && j.type == JokerType::Seltzer && j.counter > 0) ++seltzerTriggers;
 
     // 单张计分牌的算分（镜像 scoreCard，去掉事件/RNG，随机效果取期望值）
-    auto simScoreCard = [this, &result](const CardData &card) {
+    auto simScoreCard = [this, &result](const CardData &card, bool firstFaceCard) {
         if (card.enhancement != Enhancement::Stone) {
             int v = card.chipValue() + qMax(0, card.permanentBonusChips);
             if (v > 0) result.chips += v;
@@ -1364,6 +1626,8 @@ double GameState::simulatePlayScore(const QVector<int> &orderedIndices)
                 continue;
             }
             TriggerContext ctx{ result, *this, mHand, result.scoringCards, &card };
+            ctx.isFirstFaceCard = firstFaceCard;
+            ctx.self = &mJokers[ji];
             applyResolvedJokerEffect(*ej, ctx);
         }
     };
@@ -1371,6 +1635,7 @@ double GameState::simulatePlayScore(const QVector<int> &orderedIndices)
     mDryRun = true;
 
     bool firstScoringCard = true;
+    bool faceCardScoredYet = false;
     for (int playedIdx : scoringPlayedIdx) {
         CardData card = played[playedIdx];
         if (card.isDebuffed) { firstScoringCard = false; continue; }
@@ -1378,14 +1643,20 @@ double GameState::simulatePlayScore(const QVector<int> &orderedIndices)
         const int redSealReps = (card.seal == Seal::Red) ? 1 : 0;
         int triggers = 1 + redSealReps;
         const bool hasRankAndSuit = card.enhancement != Enhancement::Stone;
-        const bool isFace = hasRankAndSuit &&
-            (card.rank == Rank::Jack || card.rank == Rank::Queen || card.rank == Rank::King);
+        const bool isFace = hasRankAndSuit && isFaceCard(card);   // 含幻想性错觉
+        const bool firstFaceCard = isFace && !faceCardScoredYet;
         if (isFace) triggers += sockRetriggers;
         if (firstScoringCard) triggers += chadRetriggers;
+        if (hasRankAndSuit) {
+            int rv = static_cast<int>(card.rank);
+            if (rv >= 2 && rv <= 5) triggers += hackTriggers;
+        }
+        triggers += duskTriggers + seltzerTriggers;
 
         if (hikerTriggers > 0) card.permanentBonusChips += 5 * hikerTriggers;
 
-        for (int t = 0; t < triggers; ++t) simScoreCard(card);
+        for (int t = 0; t < triggers; ++t) simScoreCard(card, firstFaceCard);
+        if (isFace) faceCardScoredYet = true;
         firstScoringCard = false;
     }
 
@@ -1416,6 +1687,7 @@ double GameState::simulatePlayScore(const QVector<int> &orderedIndices)
     // OnPlayedHand / Passive 小丑遍历 + 小丑版本
     {
         TriggerContext ctx{ result, *this, heldHand, result.scoringCards, nullptr };
+        ctx.playedCards = &played;
         for (int ji = 0; ji < mJokers.size(); ++ji) {
             const Joker &j = mJokers[ji];
             if (j.isDebuffed) continue;
@@ -1424,7 +1696,7 @@ double GameState::simulatePlayScore(const QVector<int> &orderedIndices)
                 (ej->timing == TriggerTiming::Passive ||
                  ej->timing == TriggerTiming::OnPlayedHand)) {
                 if (ej->type == JokerType::Misprint) result.mult += 11.5;  // 期望值：0~23 均值
-                else applyResolvedJokerEffect(*ej, ctx);
+                else { ctx.self = &mJokers[ji]; applyResolvedJokerEffect(*ej, ctx); }
             }
             switch (j.edition) {
             case Edition::Foil:        result.chips += 50;  break;
@@ -1466,7 +1738,7 @@ QVector<int> GameState::findBestPlay()
             if (mask & (1u << b)) { combo.append(b); comboCards.append(mHand[b]); }
 
         // 牌型与"哪些牌计分"只取决于集合，先评估一次
-        HandResult hr = HandEvaluator::evaluate(comboCards);
+        HandResult hr = HandEvaluator::evaluate(comboCards, currentHandMods());
         QVector<int> scoringPos;            // combo 内位置
         QSet<int> usedPos;
         for (const CardData &sc : hr.scoringCards) {
@@ -1516,7 +1788,7 @@ void GameState::bringHandCardsToFront(const QVector<int> &indices)
     emit handChanged();
 }
 
-void GameState::scoreCard(const CardData &card, HandResult &result, int playedIdx)
+void GameState::scoreCard(const CardData &card, HandResult &result, int playedIdx, bool firstFaceCard)
 {
     // 1) chip:Stone 不加点数 chip
     if (card.enhancement != Enhancement::Stone) {
@@ -1545,16 +1817,24 @@ void GameState::scoreCard(const CardData &card, HandResult &result, int playedId
         result.chips += 50;
         result.events.append({ ScoreEventKind::ScoringCardChip, playedIdx, -1, -1, 50, 1.0 });
         break;
-    case Enhancement::Lucky:
-        if (QRandomGenerator::global()->bounded(5) == 0) {
+    case Enhancement::Lucky: {
+        bool luckyTriggered = false;
+        if (QRandomGenerator::global()->bounded(probDenom(5)) == 0) {
             result.mult += 20;
             result.events.append({ ScoreEventKind::EnhancementMult, playedIdx, -1, -1, 20, 1.0 });
+            luckyTriggered = true;
         }
-        if (QRandomGenerator::global()->bounded(15) == 0) {
+        if (QRandomGenerator::global()->bounded(probDenom(15)) == 0) {
             addGold(20);
             result.events.append({ ScoreEventKind::DollarGain, playedIdx, -1, -1, 20, 1.0 });
+            luckyTriggered = true;
         }
+        // Batch 2：幸运猫——每次幸运牌触发 +X0.25 倍率
+        if (luckyTriggered)
+            for (Joker &lj : mJokers)
+                if (!lj.isDebuffed && lj.type == JokerType::LuckyCat) lj.counter += 1;
         break;
+    }
     default: break;
     }
 
@@ -1591,6 +1871,8 @@ void GameState::scoreCard(const CardData &card, HandResult &result, int playedId
         if (card.enhancement == Enhancement::Stone && jokerUsesCardRankOrSuit(effectJoker->type)) continue;
 
         TriggerContext ctx{ result, *this, mHand, result.scoringCards, &card };
+        ctx.isFirstFaceCard = firstFaceCard;
+        ctx.self = &mJokers[ji];
         applyResolvedJokerEffect(*effectJoker, ctx);
 
         if (result.chips != chipsBefore) {
@@ -1649,6 +1931,12 @@ bool GameState::buyPack(int idx, PackContent &out)
     out = generatePackContent(t.pack, t.packSize, hasVoucher(VoucherType::OmenGlobe), hasVoucher(VoucherType::Telescope),
                               ConsumableType::Planet_Pluto,
                               ownedJokerTypes(), hasJokerDuplicateBypass(), mGrosMichelExtinct);
+
+    // Batch 8：幻觉——打开卡包时 1/2 概率创建塔罗牌
+    for (const Joker &j : mJokers)
+        if (!j.isDebuffed && j.type == JokerType::Hallucination
+            && QRandomGenerator::global()->bounded(2) == 0)
+            addConsumable(randomTarotType());
 
     emit goldChanged();
     emit shopChanged();
@@ -2086,12 +2374,35 @@ void GameState::startBlind(BlindType type)
     mScore = 0;
     mPendingRoundPayout = 0;
     mSuppressGoldSignal = false;
-    mHandsLeft = qMax(1, Constants::INITIAL_HANDS + mExtraHandsPerRound);
+    // Batch 3：吟游诗人每回合 -1 出牌
+    int handsJokerDelta = 0;
+    for (const Joker &j : mJokers)
+        if (!j.isDebuffed && j.type == JokerType::Troubadour) handsJokerDelta -= 1;
+    mHandsLeft = qMax(1, Constants::INITIAL_HANDS + mExtraHandsPerRound + handsJokerDelta);
     mBlindStartingHands = mHandsLeft;
+    mHandTypesPlayedThisRound.clear();   // 锋利卡牌：新回合清空已打牌型
+    // Batch 2：上路每回合清零；城堡每回合随机选一个计数花色
+    mCastleSuit = static_cast<Suit>(QRandomGenerator::global()->bounded(4));
+    // Batch 3：邮件回扣 / 远古小丑 / 偶像每回合随机指定点数·花色
+    mMailRank   = static_cast<Rank>(2 + QRandomGenerator::global()->bounded(13));
+    mAncientSuit = static_cast<Suit>(QRandomGenerator::global()->bounded(4));
+    mIdolRank   = static_cast<Rank>(2 + QRandomGenerator::global()->bounded(13));
+    mIdolSuit   = static_cast<Suit>(QRandomGenerator::global()->bounded(4));
+    for (Joker &j : mJokers)
+        if (j.type == JokerType::HitTheRoad) j.counter = 0;
+    mFirstDiscardThisRound = true;   // 焦痕小丑：新回合重置首次弃牌标记
     mDNAUsedThisBlind = false;
     mDNAEligibleThisPlay = false;
     mDNACopiesCreatedThisPlay = 0;
-    mDiscardLeft = qMax(0, Constants::INITIAL_DISCARDS + mExtraDiscardsPerRound);
+    // Batch 3：酒鬼 +1 弃牌、欢乐安迪 +3 弃牌
+    int discardJokerDelta = 0;
+    for (const Joker &j : mJokers) {
+        if (j.isDebuffed) continue;
+        if (j.type == JokerType::Drunkard)  discardJokerDelta += 1;
+        if (j.type == JokerType::MerryAndy) discardJokerDelta += 3;
+    }
+    mDiscardLeft = qMax(0, Constants::INITIAL_DISCARDS + mExtraDiscardsPerRound + discardJokerDelta);
+    mBlindStartingDiscards = mDiscardLeft;   // 延迟满足：判断本回合是否用过弃牌
 
     mCrimsonHeartDisabled = -1;
     mVerdantLeafActive = false;
@@ -2126,6 +2437,7 @@ void GameState::startBlind(BlindType type)
     mDeck.returnCards(mHand);
     mHand.clear();
     mDeck.reset();
+    triggerBlindSelectJokers(type);   // Batch 4：乌合之众/弹珠/窃贼/占卜师/证书/疯狂
     dealCards();
 
     // 房屋(The House)：开局第一手牌全部背面朝下。
@@ -2139,6 +2451,111 @@ void GameState::startBlind(BlindType type)
 
     emit handChanged();
     emit blindStarted();
+}
+
+void GameState::triggerBlindSelectJokers(BlindType type)
+{
+    // 普通(rarity 1)小丑池，供乌合之众创建
+    static const QVector<JokerType> commonPool = {
+        JokerType::Joker, JokerType::GreedyJoker, JokerType::LustyJoker,
+        JokerType::WrathfulJoker, JokerType::GluttonousJoker, JokerType::JollyJoker,
+        JokerType::ZanyJoker, JokerType::MadJoker, JokerType::CrazyJoker,
+        JokerType::DrollJoker, JokerType::SlyJoker, JokerType::WilyJoker,
+        JokerType::CleverJoker, JokerType::DeviousJoker, JokerType::CraftyJoker,
+        JokerType::HalfJoker, JokerType::Banner, JokerType::MysticSummit,
+        JokerType::RaisedFist, JokerType::Misprint, JokerType::ScaryFace,
+        JokerType::SmileyFace, JokerType::EvenSteven, JokerType::OddTodd,
+        JokerType::Scholar, JokerType::BlueJoker, JokerType::GreenJoker,
+    };
+    bool jokersDirty = false;
+
+    // mJokers 会在循环中被修改，先对当前小丑类型做快照
+    QVector<JokerType> present;
+    for (const Joker &j : mJokers)
+        if (!j.isDebuffed) present.append(j.type);
+
+    for (JokerType jt : present) {
+        switch (jt) {
+        case JokerType::RiffRaff:
+            for (int k = 0; k < 2 && canAddJoker(); ++k) {
+                mJokers.append(createJoker(
+                    commonPool[QRandomGenerator::global()->bounded(commonPool.size())]));
+                jokersDirty = true;
+            }
+            break;
+        case JokerType::MarbleJoker: {
+            CardData c;
+            c.suit = Suit::Spades; c.rank = Rank::Ace;
+            c.enhancement = Enhancement::Stone;
+            c.assignNewUid();
+            mDeck.addCard(c);
+            break;
+        }
+        case JokerType::Burglar:
+            mHandsLeft += 3;
+            mBlindStartingHands += 3;
+            mDiscardLeft = 0;
+            break;
+        case JokerType::Cartomancer:
+            addConsumable(randomTarotType());
+            break;
+        case JokerType::Certificate: {
+            CardData c;
+            c.suit = static_cast<Suit>(QRandomGenerator::global()->bounded(4));
+            c.rank = static_cast<Rank>(2 + QRandomGenerator::global()->bounded(13));
+            c.seal = static_cast<Seal>(1 + QRandomGenerator::global()->bounded(4));
+            c.assignNewUid();
+            mDeck.addCard(c);
+            break;
+        }
+        default: break;
+        }
+    }
+
+    // 疯狂：仅小/大盲注触发，+X0.5 并摧毁一张随机的非疯狂小丑
+    if (type != BlindType::Boss) {
+        bool hasMadness = false;
+        for (Joker &j : mJokers)
+            if (!j.isDebuffed && j.type == JokerType::Madness) {
+                j.counter += 50;
+                hasMadness = true;
+            }
+        if (hasMadness) {
+            QVector<int> victims;
+            for (int i = 0; i < mJokers.size(); ++i)
+                if (mJokers[i].type != JokerType::Madness) victims.append(i);
+            if (!victims.isEmpty()) {
+                mJokers.removeAt(victims[QRandomGenerator::global()->bounded(victims.size())]);
+                jokersDirty = true;
+            }
+        }
+    }
+
+    // 祭祀匕首：摧毁右侧小丑，永久获得其出售价值 ×2 的倍率
+    for (int i = 0; i < mJokers.size(); ++i) {
+        if (mJokers[i].isDebuffed || mJokers[i].type != JokerType::CeremonialDagger) continue;
+        if (i + 1 < mJokers.size()) {
+            mJokers[i].counter += 2 * qMax(0, mJokers[i + 1].sellValue);
+            mJokers.removeAt(i + 1);
+            jokersDirty = true;
+        }
+    }
+
+    if (jokersDirty) { syncShopJokerRules(); emit jokersChanged(); }
+}
+
+void GameState::cleanupDepletedJokers()
+{
+    bool changed = false;
+    for (int i = mJokers.size() - 1; i >= 0; --i) {
+        const Joker &j = mJokers[i];
+        bool destroy = (j.type == JokerType::Popcorn    && j.counter <= 0)
+                    || (j.type == JokerType::Ramen      && j.counter <= 100)
+                    || (j.type == JokerType::Seltzer    && j.counter <= 0)
+                    || (j.type == JokerType::TurtleBean && j.counter <= 0);
+        if (destroy) { mJokers.removeAt(i); changed = true; }
+    }
+    if (changed) { syncShopJokerRules(); emit jokersChanged(); emit shopChanged(); }
 }
 
 void GameState::refreshCeruleanForced()
@@ -2206,6 +2623,10 @@ void GameState::skipCurrentBlind()
     mBlindStates[mBlindIdx] = BlindState::Skipped;
     mBlindIdx++;
     mBlindStates[mBlindIdx] = BlindState::Current;
+
+    // Batch 5：复古——每跳过 1 个盲注 +X0.25
+    for (Joker &j : mJokers)
+        if (!j.isDebuffed && j.type == JokerType::Throwback) j.counter += 1;
 
     mJustSkipped = true;        // ← 标记"这次进入是因跳过"
     enterBlindSelect();          // 同步发 blindSelectEntered → onBlindSelectEntered 会读 justSkipped()
@@ -2358,7 +2779,7 @@ bool GameState::canRerollBoss() const
 {
     if (mPhase != GamePhase::BlindSelect || mBlindIdx > 2) return false;
     if (!hasVoucher(VoucherType::DirectorsCut) && !hasVoucher(VoucherType::Retcon)) return false;
-    if (mGold < 10) return false;
+    if (spendableGold() < 10) return false;
     if (hasVoucher(VoucherType::Retcon)) return true;
     return mBossRerollsUsedThisAnte == 0;
 }
@@ -2484,7 +2905,8 @@ bool GameState::addRandomRareJoker()
         JokerType::DriversLicense, JokerType::Hologram, JokerType::Vampire,
         JokerType::Constellation, JokerType::MidasMask, JokerType::CardSharp,
         JokerType::SockAndBuskin, JokerType::Photograph, JokerType::TheDuo, JokerType::TheTrio,
-        JokerType::TheFamily, JokerType::TheOrder, JokerType::TheTribe
+        JokerType::TheFamily, JokerType::TheOrder, JokerType::TheTribe,
+        JokerType::Obelisk, JokerType::Vagabond, JokerType::Campfire, JokerType::AncientJoker
     };
     if (!hasJokerDuplicateBypass()) {
         QVector<JokerType> owned = ownedJokerTypes();
@@ -2609,7 +3031,7 @@ HandResult GameState::previewSelection(const QVector<int> &indices) const
         if (i >= 0 && i < mHand.size())
             selected.append(mHand[i]);
     }
-    HandResult r = HandEvaluator::preview(selected);
+    HandResult r = HandEvaluator::preview(selected, currentHandMods());
     // 加上牌型升级加成(这部分玩家应该看到)
     auto it = mHandLevels.find(r.type);
     if (it != mHandLevels.end()) {
