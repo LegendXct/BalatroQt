@@ -11,6 +11,8 @@ class CardItem : public QGraphicsObject
     Q_OBJECT
     Q_PROPERTY(QPointF pos READ pos WRITE setPos)
     Q_PROPERTY(qreal opacity READ opacity WRITE setOpacity)
+    // 翻牌动画专用：仅 X 方向缩放，对应原版 card.lua 的 pinch.x（绕 Y 轴翻牌效果）。
+    Q_PROPERTY(qreal flipXScale READ flipXScale WRITE setFlipXScale)
 public:
     // 图集采样单元：8BitDeck.png/Enhancers.png 每格固定 142×190，不能改。
     static constexpr int SRC_W = 142;
@@ -58,6 +60,8 @@ public:
     void setStrictHoverShape(bool s) { mStrictHoverShape = s; }
     // 触发对齐 card.lua Card:hover() 的极小抖动（旋转 +/-0.7°，scale ~2% 弹动）。
     void triggerHoverJitter();
+    qreal flipXScale() const { return mFlipXScale; }
+    void setFlipXScale(qreal s) { mFlipXScale = s; applyTransform(); }
 signals:
     void clicked(CardItem *card);
     void dragMoved(CardItem *card, QPointF scenePos);
@@ -85,6 +89,13 @@ private:
     double mHoverTiltX  = 0.0;        // 绕 X 轴倾斜(度,-25 ~ +25)
     double mHoverTiltY  = 0.0;        // 绕 Y 轴倾斜
     double mJitterRot = 0.0;          // 悬浮抖动当前叠加的 Z 旋转(度)，仅短暂存在
+    // 拖拽时基于水平速度的瞬时倾斜（度），对齐原版 moveable.lua move_r()：
+    //   des_r = T.r + 0.015 * vel.x / dt
+    // 拖动方向越快、卡片倾斜越大；释放时用 QVariantAnimation 平滑回 0。
+    double mDragTilt = 0.0;
+    QPointF mLastDragScenePos;
+    qint64  mLastDragTimeMs = 0;
+    qreal  mFlipXScale = 1.0;         // 翻牌时的 X 方向缩放(1→0→1)，对齐原版 pinch.x
     void applyTransform();
 
     QRect whiteBaseSrcRect() const; // 白色底片

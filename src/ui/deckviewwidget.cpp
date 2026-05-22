@@ -1,4 +1,6 @@
 #include "deckviewwidget.h"
+#include "balatroinfopanel.h"
+#include "cardtooltipformat.h"
 #include "../card/consumableitem.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -69,123 +71,20 @@ QString deckHoverDesc(const CardData &d)
     return QStringLiteral("+%1筹码").arg(chips);
 }
 
-void drawDeckHoverTag(QPainter *painter, const CardData &d, const QRectF &cardRect, const QFont &baseFont)
-{
-    const QString title = deckHoverTitle(d);
-    const QString desc = deckHoverDesc(d);
-
-    painter->save();
-    painter->setRenderHint(QPainter::Antialiasing, true);
-    painter->setRenderHint(QPainter::TextAntialiasing, false);
-
-    QFont titleFont = baseFont;
-    titleFont.setPixelSize(13);
-    titleFont.setBold(true);
-    QFont descFont = baseFont;
-    descFont.setPixelSize(13);
-    descFont.setBold(true);
-
-    QFontMetrics titleFm(titleFont);
-    QFontMetrics descFm(descFont);
-    const int w = qMax(58, qMax(titleFm.horizontalAdvance(title), descFm.horizontalAdvance(desc)) + 18);
-    const int titleH = 23;
-    const int descH = 23;
-    const qreal x = cardRect.center().x() - w / 2.0;
-    const qreal y = 1.0;
-
-    QRectF outer(x, y, w, titleH + descH + 3);
-    QPainterPath shadowPath;
-    shadowPath.addRoundedRect(outer.adjusted(1.8, 2.2, 1.8, 2.2), 6, 6);
-    painter->fillPath(shadowPath, QColor(0, 0, 0, 70));
-
-    QRectF titleRect(x, y, w, titleH + 1);
-    QRectF descRect(x, y + titleH - 1, w, descH + 2);
-    QColor bg(248, 255, 250);
-    QColor edge(34, 45, 48);
-
-    QPainterPath titlePath;
-    titlePath.addRoundedRect(titleRect, 6, 6);
-    painter->fillPath(titlePath, bg);
-    painter->setPen(QPen(edge, 1.6));
-    painter->drawPath(titlePath);
-
-    QPainterPath descPath;
-    descPath.addRoundedRect(descRect, 6, 6);
-    painter->fillPath(descPath, bg);
-    painter->setPen(QPen(edge, 1.6));
-    painter->drawPath(descPath);
-    painter->fillRect(QRectF(x + 2, y + titleH - 2, w - 4, 4), bg);
-    painter->setPen(QPen(edge, 1.4));
-    painter->drawLine(QPointF(x + 2, y + titleH), QPointF(x + w - 2, y + titleH));
-
-    painter->setFont(titleFont);
-    painter->setPen(QColor(31, 45, 48));
-    painter->drawText(titleRect, Qt::AlignCenter, title);
-    painter->setFont(descFont);
-    painter->setPen(QColor(42, 132, 205));
-    painter->drawText(descRect, Qt::AlignCenter, desc);
-    painter->restore();
-}
+// 注意：不要在 anonymous namespace 内 forward-declare DeckViewWidget——会遮蔽 deckviewwidget.h
+// 里的真正类型，造成 mDeckView->showHoverInfo() 找不到方法。直接用 ::DeckViewWidget 即可。
 
 class DeckCardPreviewLabel : public QLabel
 {
 public:
-    DeckCardPreviewLabel(const CardData &card, const QPixmap &pixmap, const QFont &font, qreal angleDeg, QWidget *parent = nullptr)
-        : QLabel(parent), mCard(card), mPixmap(pixmap), mFont(font), mAngleDeg(angleDeg)
-    {
-        setMouseTracking(true);
-        setAttribute(Qt::WA_TranslucentBackground, true);
-        setStyleSheet("background:transparent; border:none;");
-        setCursor(Qt::PointingHandCursor);
-    }
+    DeckCardPreviewLabel(const CardData &card, const QPixmap &pixmap, const QFont &font,
+                         qreal angleDeg, ::DeckViewWidget *deckView, QWidget *parent = nullptr);
+
+    const CardData &cardData() const { return mCard; }
 
 protected:
-    bool event(QEvent *event) override
-    {
-        if (event->type() == QEvent::Enter) {
-            mHovered = true;
-            raise();
-            update();
-        } else if (event->type() == QEvent::Leave) {
-            mHovered = false;
-            update();
-        }
-        return QLabel::event(event);
-    }
-
-    void paintEvent(QPaintEvent *) override
-    {
-        QPainter painter(this);
-        painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
-        painter.setRenderHint(QPainter::Antialiasing, true);
-
-        const int cardX = (width() - mPixmap.width()) / 2;
-        const int cardY = (height() - mPixmap.height()) / 2 + (mHovered ? -2 : 0);
-        QRectF cardRect(cardX, cardY, mPixmap.width(), mPixmap.height());
-
-        painter.save();
-        painter.translate(cardRect.center());
-        painter.rotate(mAngleDeg);
-        QRectF localRect(-mPixmap.width() / 2.0, -mPixmap.height() / 2.0,
-                         mPixmap.width(), mPixmap.height());
-        painter.drawPixmap(localRect.topLeft(), mPixmap);
-
-        if (mHovered) {
-            QColor blue(31, 183, 255, 245);
-            QColor glow = blue;
-            glow.setAlpha(90);
-            painter.setBrush(Qt::NoBrush);
-            painter.setPen(QPen(glow, 3.2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-            painter.drawRoundedRect(localRect.adjusted(-1.1, -1.1, 1.1, 1.1), 7, 7);
-            painter.setPen(QPen(blue, 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-            painter.drawRoundedRect(localRect.adjusted(1.4, 1.4, -1.4, -1.4), 6, 6);
-        }
-        painter.restore();
-
-        if (mHovered) {
-            drawDeckHoverTag(&painter, mCard, cardRect, mFont);
-        }
-    }
+    bool event(QEvent *event) override;
+    void paintEvent(QPaintEvent *) override;
 
 private:
     CardData mCard;
@@ -193,7 +92,72 @@ private:
     QFont mFont;
     qreal mAngleDeg = 0.0;
     bool mHovered = false;
+    ::DeckViewWidget *mDeckView = nullptr;
 };
+} // namespace
+
+// ── DeckCardPreviewLabel 实现 ───────────────────────────────────
+namespace {
+DeckCardPreviewLabel::DeckCardPreviewLabel(const CardData &card, const QPixmap &pixmap,
+                                           const QFont &font, qreal angleDeg,
+                                           ::DeckViewWidget *deckView, QWidget *parent)
+    : QLabel(parent), mCard(card), mPixmap(pixmap), mFont(font),
+      mAngleDeg(angleDeg), mDeckView(deckView)
+{
+    setMouseTracking(true);
+    setAttribute(Qt::WA_TranslucentBackground, true);
+    setStyleSheet("background:transparent; border:none;");
+    setCursor(Qt::PointingHandCursor);
+}
+
+bool DeckCardPreviewLabel::event(QEvent *event)
+{
+    if (event->type() == QEvent::Enter) {
+        mHovered = true;
+        // 注意：不再 raise()——之前会把悬浮的卡片抬到当前行最上层，破坏从左到右
+        // 自然的 z 序，让被悬停的牌看起来"跳出"行外。保持创建顺序的层级即可。
+        update();
+        if (mDeckView) mDeckView->showHoverInfo(this, mCard);
+    } else if (event->type() == QEvent::Leave) {
+        mHovered = false;
+        update();
+        if (mDeckView) mDeckView->hideHoverInfo();
+    }
+    return QLabel::event(event);
+}
+
+void DeckCardPreviewLabel::paintEvent(QPaintEvent *)
+{
+    QPainter painter(this);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+    painter.setRenderHint(QPainter::Antialiasing, true);
+
+    const int cardX = (width() - mPixmap.width()) / 2;
+    const int cardY = (height() - mPixmap.height()) / 2 + (mHovered ? -2 : 0);
+    QRectF cardRect(cardX, cardY, mPixmap.width(), mPixmap.height());
+
+    painter.save();
+    painter.translate(cardRect.center());
+    painter.rotate(mAngleDeg);
+    QRectF localRect(-mPixmap.width() / 2.0, -mPixmap.height() / 2.0,
+                     mPixmap.width(), mPixmap.height());
+    painter.drawPixmap(localRect.topLeft(), mPixmap);
+
+    if (mHovered) {
+        QColor blue(31, 183, 255, 245);
+        QColor glow = blue;
+        glow.setAlpha(90);
+        painter.setBrush(Qt::NoBrush);
+        painter.setPen(QPen(glow, 3.2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.drawRoundedRect(localRect.adjusted(-1.1, -1.1, 1.1, 1.1), 7, 7);
+        painter.setPen(QPen(blue, 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
+        painter.drawRoundedRect(localRect.adjusted(1.4, 1.4, -1.4, -1.4), 6, 6);
+    }
+    painter.restore();
+    // hover info 由 DeckViewWidget::showHoverInfo() 统一弹出，对齐主场景 BalatroInfoPanel 样式。
+}
+
+// 牌组查看里的卡描述与主场景共用 CardTooltipFormat（cardtooltipformat.h）。
 } // namespace
 
 DeckViewWidget::DeckViewWidget(const QFont &cnFont, const QFont &pixelFont,
@@ -204,6 +168,55 @@ DeckViewWidget::DeckViewWidget(const QFont &cnFont, const QFont &pixelFont,
     setStyleSheet("background: rgba(0, 0, 0, 190);");
     hide();
     buildUi();
+}
+
+void DeckViewWidget::showHoverInfo(QWidget *anchor, const CardData &card)
+{
+    if (!anchor) return;
+    if (!mHoverTooltip) {
+        mHoverTooltip = new BalatroInfoPanel(mCNFont, this);
+        mHoverTooltip->hide();
+        mHoverTooltip->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    }
+
+    QVector<BalatroInfoPanel::Badge> badges;
+    switch (card.edition) {
+    case Edition::Foil:        badges.append({QStringLiteral("镀膜"), BalatroInfoPanel::editionPillColor()}); break;
+    case Edition::Holographic: badges.append({QStringLiteral("全息"), BalatroInfoPanel::editionPillColor()}); break;
+    case Edition::Polychrome:  badges.append({QStringLiteral("多彩"), BalatroInfoPanel::editionPillColor()}); break;
+    case Edition::Negative:    badges.append({QStringLiteral("负片"), BalatroInfoPanel::editionPillColor()}); break;
+    default: break;
+    }
+    switch (card.seal) {
+    case Seal::Gold:   badges.append({QStringLiteral("金印章"), BalatroInfoPanel::sealPillColor(0)}); break;
+    case Seal::Red:    badges.append({QStringLiteral("红印章"), BalatroInfoPanel::sealPillColor(1)}); break;
+    case Seal::Blue:   badges.append({QStringLiteral("蓝印章"), BalatroInfoPanel::sealPillColor(2)}); break;
+    case Seal::Purple: badges.append({QStringLiteral("紫印章"), BalatroInfoPanel::sealPillColor(3)}); break;
+    default: break;
+    }
+    if (card.isDebuffed)
+        badges.append({QStringLiteral("被禁用"), QColor("#9b3a3a")});
+
+    // 牌组里的卡都是 playing card——名字也用白盒。
+    mHoverTooltip->setContent(CardTooltipFormat::cardTitleHtml(card),
+                              CardTooltipFormat::cardBodyHtml(card), badges, 160,
+                              /*nameHasWhiteBox=*/true);
+
+    // 锚到卡片正上方：把 anchor 的全局位置转换到本 widget 坐标。
+    QPoint topLeftInThis = anchor->mapTo(this, QPoint(0, 0));
+    int x = topLeftInThis.x() + (anchor->width() - mHoverTooltip->width()) / 2;
+    int y = topLeftInThis.y() - mHoverTooltip->height() - 6;
+    if (x < 6) x = 6;
+    if (x + mHoverTooltip->width() > width() - 6) x = width() - mHoverTooltip->width() - 6;
+    if (y < 6) y = topLeftInThis.y() + anchor->height() + 6;
+    mHoverTooltip->move(x, y);
+    mHoverTooltip->raise();
+    mHoverTooltip->show();
+}
+
+void DeckViewWidget::hideHoverInfo()
+{
+    if (mHoverTooltip) mHoverTooltip->hide();
 }
 
 void DeckViewWidget::buildUi()
@@ -333,6 +346,8 @@ void DeckViewWidget::showFull()
 
 void DeckViewWidget::closeView()
 {
+    // 关闭前先把 hover 浮窗收掉，避免它在主场景上空闲挂着。
+    hideHoverInfo();
     hide();
     emit closed();
 }
@@ -451,7 +466,8 @@ void DeckViewWidget::refreshGrid()
 
         for (int i = 0; i < rowCards.size(); ++i) {
             const qreal angle = qBound(-5.0, (i - (rowCards.size() - 1) / 2.0) * 0.75, 5.0);
-            auto *img = new DeckCardPreviewLabel(rowCards[i], renderCard(rowCards[i], cardSize), mCNFont, angle, row);
+            auto *img = new DeckCardPreviewLabel(rowCards[i], renderCard(rowCards[i], cardSize),
+                                                 mCNFont, angle, this, row);
             img->setFixedSize(previewW, previewH);
             img->setGeometry(left + i * step - 10, 0, previewW, previewH);
             img->raise();

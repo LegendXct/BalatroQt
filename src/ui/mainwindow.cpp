@@ -42,6 +42,8 @@
 #include <cmath>
 #include <limits>
 #include "../utils/shadereffects.h"
+#include "balatroinfopanel.h"
+#include "cardtooltipformat.h"
 
 namespace {
 constexpr int DESIGN_WINDOW_W = 1920;
@@ -296,6 +298,27 @@ static QString handLevelColor(int level)
     return QString::fromLatin1(palette[level]);
 }
 
+// 各牌型的 1 级基础筹码/倍率。和 RunInfo 面板里的同名 lambda 一致——
+// 提到这里是给牌型升级动画用，避免再写一份。
+static QPair<int,int> baseChipsMultFor(HandType t) {
+    switch (t) {
+    case HandType::HighCard:      return {Constants::BASE_HIGH_CARD_CHIPS,      Constants::BASE_HIGH_CARD_MULT};
+    case HandType::Pair:          return {Constants::BASE_PAIR_CHIPS,           Constants::BASE_PAIR_MULT};
+    case HandType::TwoPair:       return {Constants::BASE_TWO_PAIR_CHIPS,       Constants::BASE_TWO_PAIR_MULT};
+    case HandType::ThreeOfAKind:  return {Constants::BASE_THREE_CHIPS,          Constants::BASE_THREE_MULT};
+    case HandType::Straight:      return {Constants::BASE_STRAIGHT_CHIPS,       Constants::BASE_STRAIGHT_MULT};
+    case HandType::Flush:         return {Constants::BASE_FLUSH_CHIPS,          Constants::BASE_FLUSH_MULT};
+    case HandType::FullHouse:     return {Constants::BASE_FULL_HOUSE_CHIPS,     Constants::BASE_FULL_HOUSE_MULT};
+    case HandType::FourOfAKind:   return {Constants::BASE_FOUR_CHIPS,           Constants::BASE_FOUR_MULT};
+    case HandType::StraightFlush: return {Constants::BASE_STRAIGHT_FLUSH_CHIPS, Constants::BASE_STRAIGHT_FLUSH_MULT};
+    case HandType::RoyalFlush:    return {Constants::BASE_ROYAL_FLUSH_CHIPS,    Constants::BASE_ROYAL_FLUSH_MULT};
+    case HandType::FiveOfAKind:   return {Constants::BASE_FIVE_CHIPS,           Constants::BASE_FIVE_MULT};
+    case HandType::FlushHouse:    return {Constants::BASE_FLUSH_HOUSE_CHIPS,    Constants::BASE_FLUSH_HOUSE_MULT};
+    case HandType::FlushFive:     return {Constants::BASE_FLUSH_FIVE_CHIPS,     Constants::BASE_FLUSH_FIVE_MULT};
+    }
+    return {0, 0};
+}
+
 static QString enhancementName(Enhancement e) {
     switch (e) {
     case Enhancement::Bonus: return "奖励牌";
@@ -390,6 +413,9 @@ static QString cardTooltipTitle(const CardData &c) {
     if (c.enhancement != Enhancement::None) title += " · " + enhancementName(c.enhancement);
     return title;
 }
+
+// 所有 hover 浮窗共享同一份 helper——见 cardtooltipformat.h。
+namespace BalatroTooltip = CardTooltipFormat;
 
 static QString cardTooltipBody(const CardData &c) {
     QStringList lines;
@@ -603,54 +629,69 @@ void MainWindow::setupLeftPanel() {
     mContextArea->addWidget(mCtxBlindSelect);
 
     // 页面 1: Blind
+    // 布局参考原版 G.UIT 的 HUD_blind：顶部色带显示盲注名（DYN_UI.MAIN），
+    // 下方深色区域承载筹码图 + “至少得分/奖励”信息（DYN_UI.DARK）。
     mCtxBlind = new QWidget;
     mCtxBlind->setAttribute(Qt::WA_StyledBackground, true);
     mCtxBlind->setStyleSheet("background:#334044; border:none; border-radius:16px;");
     {
-        auto *hbl = new QHBoxLayout(mCtxBlind);
-        hbl->setContentsMargins(dp(10), dp(8), dp(10), dp(8));
-        hbl->setSpacing(dp(10));
+        auto *vMain = new QVBoxLayout(mCtxBlind);
+        vMain->setContentsMargins(0, 0, 0, 0);
+        vMain->setSpacing(0);
 
-        mCtxBlindChipImg = new AnimatedBlindChip(mCtxBlind);
-        mCtxBlindChipImg->setDisplaySize(dp(92));
-        hbl->addWidget(mCtxBlindChipImg);
-
-        auto *vbl = new QVBoxLayout;
-        vbl->setContentsMargins(0, 0, 0, 0);
-        vbl->setSpacing(dp(2));
-
+        // 顶部色带 —— 盲注名居中，圆角与外层一致。
         mLblBlind = new QLabel("小盲注", mCtxBlind);
-        QFont nbf = mCNFont; nbf.setPixelSize(uiPx(17)); nbf.setBold(true);
+        QFont nbf = mCNFont; nbf.setPixelSize(uiPx(20)); nbf.setBold(true);
         mLblBlind->setFont(nbf);
         mLblBlind->setAlignment(Qt::AlignCenter);
         mLblBlind->setStyleSheet(
             "color:white; background:#1679b4;"
-            "border-radius:6px; padding:3px 8px;");
-        mLblBlind->setFixedHeight(dp(42));
-        vbl->addWidget(mLblBlind);
+            "border-top-left-radius:10px; border-top-right-radius:10px;"
+            "padding:6px 10px;");
+        mLblBlind->setFixedHeight(dp(48));
+        vMain->addWidget(mLblBlind);
 
-        QLabel *tt = new QLabel("至少得分", mCtxBlind);
+        // 下方主体 —— 左 chip，右 至少得分 / 奖励。
+        QWidget *body = new QWidget(mCtxBlind);
+        body->setStyleSheet("background:transparent;");
+        auto *hbl = new QHBoxLayout(body);
+        hbl->setContentsMargins(dp(10), dp(10), dp(10), dp(10));
+        hbl->setSpacing(dp(10));
+
+        mCtxBlindChipImg = new AnimatedBlindChip(body);
+        mCtxBlindChipImg->setDisplaySize(dp(92));
+        hbl->addWidget(mCtxBlindChipImg, 0, Qt::AlignVCenter);
+
+        auto *vbl = new QVBoxLayout;
+        vbl->setContentsMargins(0, 0, 0, 0);
+        vbl->setSpacing(dp(2));
+        vbl->addStretch(1);
+
+        QLabel *tt = new QLabel("至少得分", body);
         QFont ttf = mCNFont; ttf.setPixelSize(uiPx(13));
         tt->setFont(ttf);
         tt->setStyleSheet("color:white; background:transparent;");
         tt->setAlignment(Qt::AlignCenter);
         vbl->addWidget(tt);
 
-        mLblTarget = new QLabel("✳ 300", mCtxBlind);
+        mLblTarget = new QLabel("✳ 300", body);
         QFont tf = mPixelFont; tf.setPixelSize(uiPx(28));
         mLblTarget->setFont(tf);
         mLblTarget->setStyleSheet("color:#fe5f55; background:transparent;");
         mLblTarget->setAlignment(Qt::AlignCenter);
         vbl->addWidget(mLblTarget);
 
-        mLblReward = new QLabel("奖励 $$$", mCtxBlind);
+        mLblReward = new QLabel("奖励 $$$", body);
         QFont rf = mCNFont; rf.setPixelSize(uiPx(14));
         mLblReward->setFont(rf);
         mLblReward->setStyleSheet("color:#f3b958; background:transparent;");
         mLblReward->setAlignment(Qt::AlignCenter);
         vbl->addWidget(mLblReward);
 
+        vbl->addStretch(1);
         hbl->addLayout(vbl, 1);
+
+        vMain->addWidget(body, 1);
     }
     mContextArea->addWidget(mCtxBlind);
 
@@ -1849,6 +1890,11 @@ void MainWindow::setupConnections() {
     connect(mGameState, &GameState::jokersChanged, this, &MainWindow::refreshJokerSlots);
 
     connect(mGameState, &GameState::consumablesChanged, this, &MainWindow::refreshConsumableSlots);
+    // 牌型升级动画的"上一次状态"快照：先吃掉当前等级，后续 emit 才会算成升级。
+    mPrevHandLevels = mGameState->handLevels();
+    mHandLevelInitialized = true;
+    connect(mGameState, &GameState::handLevelsChanged, this, &MainWindow::onHandLevelsChanged);
+
     connect(mGameState, &GameState::shopChanged, this, [this]() {
         refreshCounters();
         refreshGold();
@@ -1933,11 +1979,10 @@ void MainWindow::refreshHand() {
                     this, &MainWindow::onHandCardDragReleased);
             connect(match, &CardItem::hoverChanged,
                     this, [this](CardItem *c, bool hovered) {
-                        Q_UNUSED(c);
-                        // 不再把悬停卡牌 z 抬到 720——原版手牌 z 顺序固定从左到右递增，
-                        // 临时置顶会让左侧手牌的扇形叠压关系突变，看起来"跳一下"。
-                        // CardItem 自绘的浮动提示已经显示在更高 z 的层级上，不需要整张卡牌抬高。
-                        hideCardInfo();
+                        // 与原版 generate_card_ui 一致：任何手牌悬浮都显示信息——
+                        // 普通牌也要看"+10 筹码"这种基础描述。
+                        if (!hovered) { hideHoverTooltip(); return; }
+                        if (c) showCardHoverTooltip(c);
                     });
         } else {
             match->setCardData(hc);
@@ -2133,7 +2178,10 @@ void MainWindow::refreshCounters() {
         (mGameState->ante() - 1) * 3 + mGameState->blindIdx() + 1));
 
     auto applyBlindStyle = [this](const QString &color) {
-        mLblBlind->setStyleSheet(QString("color:white; background:%1; border-radius:6px; padding:3px;")
+        mLblBlind->setStyleSheet(QString(
+            "color:white; background:%1;"
+            "border-top-left-radius:10px; border-top-right-radius:10px;"
+            "padding:6px 10px;")
                                      .arg(color));
     };
     switch (mGameState->blindType()) {
@@ -2572,6 +2620,172 @@ void MainWindow::showCardInfo(CardItem *card)
 void MainWindow::hideCardInfo()
 {
     if (mCardInfoProxy) mCardInfoProxy->hide();
+}
+
+// ──────────────────────────────────────────────────────────────
+// 统一的悬浮描述：替代旧的 mCardInfoPanel / mJokerInfoPanel(hover)，
+// 风格按 BalatroInfoPanel 实现，对齐原版 generate_card_ui 配色。
+// ──────────────────────────────────────────────────────────────
+void MainWindow::ensureHoverTooltip()
+{
+    if (mHoverTooltip) return;
+    // 直接作为 mPlayPage 子 widget——绕过 QGraphicsProxyWidget 在带 drop-shadow effect 时的
+    // 渲染坑（之前主场景 hover 一直不显示，根因就是这个）。
+    mHoverTooltip = new BalatroInfoPanel(mCNFont, mPlayPage ? mPlayPage : this);
+    mHoverTooltip->hide();
+    mHoverTooltip->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+}
+
+void MainWindow::showHoverTooltipNearScene(QGraphicsObject *anchor, double anchorWidth)
+{
+    if (!mHoverTooltip || !anchor || !mView) return;
+    mHoverTooltip->adjustSize();
+
+    // 场景坐标 → mView viewport → mPlayPage widget 坐标。
+    const QPointF sceneTopLeft = anchor->scenePos();
+    QPoint viewPt = mView->mapFromScene(sceneTopLeft);
+    QWidget *parent = mHoverTooltip->parentWidget();
+    QPoint pageTopLeft = parent ? mView->mapTo(parent, viewPt) : viewPt;
+
+    // 锚点宽度也要从场景坐标换算到 widget 像素。
+    double sx = mView->transform().m11();
+    if (sx <= 0.0) sx = 1.0;
+    const int anchorPxW = qMax(1, int(anchorWidth * sx));
+    const int anchorPxH = qMax(1, int(anchor->boundingRect().height() * sx));
+
+    int x = pageTopLeft.x() + (anchorPxW - mHoverTooltip->width()) / 2;
+    int y = pageTopLeft.y() - mHoverTooltip->height() - 8;
+    const int maxX = parent ? parent->width()  - mHoverTooltip->width()  - 6 : x;
+    const int maxY = parent ? parent->height() - mHoverTooltip->height() - 6 : y;
+    if (x < 6) x = 6;
+    if (x > maxX) x = qMax(6, maxX);
+    if (y < 6) y = pageTopLeft.y() + anchorPxH + 8;
+    if (y > maxY) y = qMax(6, maxY);
+
+    mHoverTooltip->move(x, y);
+    mHoverTooltip->raise();
+    mHoverTooltip->show();
+}
+
+void MainWindow::showCardHoverTooltip(CardItem *card)
+{
+    if (!card) return;
+    ensureHoverTooltip();
+    const CardData &c = card->cardData();
+
+    QVector<BalatroInfoPanel::Badge> badges;
+    switch (c.edition) {
+    case Edition::Foil:        badges.append({QStringLiteral("镀膜"), BalatroInfoPanel::editionPillColor()}); break;
+    case Edition::Holographic: badges.append({QStringLiteral("全息"), BalatroInfoPanel::editionPillColor()}); break;
+    case Edition::Polychrome:  badges.append({QStringLiteral("多彩"), BalatroInfoPanel::editionPillColor()}); break;
+    default: break;
+    }
+    switch (c.seal) {
+    case Seal::Gold:   badges.append({QStringLiteral("金印章"), BalatroInfoPanel::sealPillColor(0)}); break;
+    case Seal::Red:    badges.append({QStringLiteral("红印章"), BalatroInfoPanel::sealPillColor(1)}); break;
+    case Seal::Blue:   badges.append({QStringLiteral("蓝印章"), BalatroInfoPanel::sealPillColor(2)}); break;
+    case Seal::Purple: badges.append({QStringLiteral("紫印章"), BalatroInfoPanel::sealPillColor(3)}); break;
+    default: break;
+    }
+    if (c.isDebuffed) badges.append({QStringLiteral("被禁用"), QColor("#9b3a3a")});
+
+    // 原版 info_tip_from_rows minw = 1.5 lua 单位 ≈ 90 px；多行描述里实际宽度通常 ~140 px。
+    // 这里给 BalatroInfoPanel 一个稍宽的 160px，既容下 "1/15 概率 $20" 又不会把卡描述撑得很宽。
+    // 原版：playing card 的名字会被包在一个白色圆角盒里——传 nameHasWhiteBox=true。
+    mHoverTooltip->setContent(BalatroTooltip::cardTitleHtml(c),
+                              BalatroTooltip::cardBodyHtml(c),
+                              badges, 160, /*nameHasWhiteBox=*/true);
+    showHoverTooltipNearScene(card, CardItem::WIDTH);
+}
+
+void MainWindow::showJokerHoverTooltip(int idx)
+{
+    const auto &js = mGameState->jokers();
+    if (idx < 0 || idx >= js.size() || idx >= mJokerItems.size()) return;
+    ensureHoverTooltip();
+    const Joker &j = js[idx];
+
+    QString desc = j.description;
+    if (j.type == JokerType::Yorick) {
+        desc += QString("\n当前：X%1 倍率\n还需要弃牌 [%2/23]")
+                    .arg(mGameState->yorickXMult(), 0, 'f', 1)
+                    .arg(mGameState->yorickDiscardsRemaining());
+    } else if (j.type == JokerType::Caino) {
+        desc += QString("\n当前：X%1 倍率")
+                    .arg(mGameState->cainoXMult(), 0, 'f', 1);
+    } else if (j.type == JokerType::DriversLicense) {
+        int enhanced = 0;
+        for (const CardData &c : mGameState->fullDeckCards())
+            if (c.enhancement != Enhancement::None) ++enhanced;
+        desc += QString("\n当前增强牌 [%1/16] %2")
+                    .arg(enhanced)
+                    .arg(enhanced >= 16 ? QStringLiteral("已生效：X3") : QStringLiteral("未生效"));
+    } else if (j.type == JokerType::IceCream) {
+        desc += QString("\n当前：+%1 筹码\n每次出牌后 -5 筹码").arg(qMax(0, j.counter));
+    } else if (j.type == JokerType::DNA) {
+        desc += QString("\n状态：%1")
+                    .arg(mGameState->dnaCanTriggerThisPlay()
+                           ? QStringLiteral("本次出 1 张可触发")
+                           : QStringLiteral("仅本盲注第一次出牌且只出 1 张时触发"));
+    } else if (j.type == JokerType::Blueprint) {
+        if (idx + 1 < js.size())
+            desc += QString("\n当前指向右侧：%1").arg(js[idx + 1].name);
+        else
+            desc += QStringLiteral("\n右侧没有可复制小丑");
+    } else if (j.type == JokerType::Brainstorm) {
+        if (!js.isEmpty() && idx != 0)
+            desc += QString("\n当前指向最左侧：%1").arg(js.first().name);
+        else
+            desc += QStringLiteral("\n当前没有可复制小丑");
+    }
+
+    QVector<BalatroInfoPanel::Badge> badges;
+    badges.append({QStringLiteral("小丑牌"), BalatroInfoPanel::jokerCommonColor()});
+    switch (j.edition) {
+    case Edition::Foil:        badges.append({QStringLiteral("镀膜"), BalatroInfoPanel::editionPillColor()}); break;
+    case Edition::Holographic: badges.append({QStringLiteral("全息"), BalatroInfoPanel::editionPillColor()}); break;
+    case Edition::Polychrome:  badges.append({QStringLiteral("多彩"), BalatroInfoPanel::editionPillColor()}); break;
+    case Edition::Negative:    badges.append({QStringLiteral("负片"), BalatroInfoPanel::editionPillColor()}); break;
+    default: break;
+    }
+    badges.append({QStringLiteral("$%1").arg(qMax(1, j.sellValue)),
+                   QColor("#f3b958")});   // 售价 pill, MONEY 黄
+
+    // 小丑名字直接是白字落在暗底上（原版 name_from_rows 传 nil），描述才有白盒。
+    // 宽度参考原版 desc_from_rows minw=2 lua 单位（≈卡宽），相比之前 210 收到 175 更接近原版比例。
+    mHoverTooltip->setContent(j.name, BalatroTooltip::fromLuaMarkup(desc), badges, 175,
+                              /*nameHasWhiteBox=*/false);
+    showHoverTooltipNearScene(mJokerItems[idx], CARD_W);
+}
+
+void MainWindow::showConsumableHoverTooltip(int idx)
+{
+    const auto &cs = mGameState->consumables();
+    if (idx < 0 || idx >= cs.size() || idx >= mConsumableItems.size()) return;
+    ensureHoverTooltip();
+    const Consumable &c = cs[idx];
+
+    QVector<BalatroInfoPanel::Badge> badges;
+    switch (kindOf(c.type)) {
+    case ConsumableKind::Tarot:
+        badges.append({QStringLiteral("塔罗牌"), BalatroInfoPanel::tarotPillColor()}); break;
+    case ConsumableKind::Planet:
+        badges.append({QStringLiteral("行星牌"), BalatroInfoPanel::planetPillColor()}); break;
+    case ConsumableKind::Spectral:
+        badges.append({QStringLiteral("幻灵牌"), BalatroInfoPanel::spectralPillColor()}); break;
+    }
+    if (c.negative)
+        badges.append({QStringLiteral("负片"), BalatroInfoPanel::editionPillColor()});
+
+    // 消耗牌（塔罗/行星/幻灵）：原版 name_from_rows 也传 nil（无白盒），描述才用白盒。
+    mHoverTooltip->setContent(c.name, BalatroTooltip::fromLuaMarkup(c.description),
+                              badges, 175, /*nameHasWhiteBox=*/false);
+    showHoverTooltipNearScene(mConsumableItems[idx], ConsumableItem::WIDTH);
+}
+
+void MainWindow::hideHoverTooltip()
+{
+    if (mHoverTooltip) mHoverTooltip->hide();
 }
 
 
@@ -3071,8 +3285,11 @@ void MainWindow::refreshJokerSlots()
         connect(ji, &JokerItem::dragReleased, this, &MainWindow::onJokerDragReleased);
         connect(ji, &JokerItem::hoverChanged, this, [this, ji](JokerItem *, bool hovered) {
             int idx = mJokerItems.indexOf(ji);
-            if (hovered && idx >= 0) showJokerInfo(idx, false);
-            else if (!hovered && mSelectedJokerIdx < 0) hideJokerInfo();
+            // 悬停走统一风格的 BalatroInfoPanel；点击展开的"售出"模式仍走旧的 mJokerInfoPanel
+            // 因为它带按钮，需要鼠标可点（普通 hover 浮窗对鼠标透明）。
+            if (mSelectedJokerIdx >= 0) return;
+            if (hovered && idx >= 0) showJokerHoverTooltip(idx);
+            else                     hideHoverTooltip();
         });
 
         if (flyInNewJoker) {
@@ -3639,6 +3856,14 @@ void MainWindow::refreshConsumableSlots()
                 this, &MainWindow::onConsumableDragMoved);
         connect(ci, &ConsumableItem::dragReleased,
                 this, &MainWindow::onConsumableDragReleased);
+        connect(ci, &ConsumableItem::hoverChanged,
+                this, [this, ci](ConsumableItem *, bool hovered) {
+            // 悬停时弹出 BalatroInfoPanel——点击展开的"使用/出售"小操作面板仍是 mConsumableActionPanel。
+            if (mSelectedConsumableIdx >= 0) return;
+            int idx = mConsumableItems.indexOf(ci);
+            if (hovered && idx >= 0) showConsumableHoverTooltip(idx);
+            else                     hideHoverTooltip();
+        });
 
         if (flyInNewConsumable) {
             if (i == cs.size() - 1) {
@@ -4229,8 +4454,11 @@ void MainWindow::onBlindStarted()
     refreshJokerSlots();
     refreshConsumableSlots();
     clearPlayedCards();
-    mLblChips->setText("0");
-    mLblMult ->setText("0");
+    // 必须用 setLabelScaledText 重置字号——上一局如果分数很大，setLabelScaledText 会把字号
+    // 自适应缩到很小（见函数实现），直接 setText("0") 不会还原字号，"0" 就会比初始小一圈，
+    // 看上去像是 0 的位置偏了（实际上是字小了，靠 Left/Right 对齐后视觉位置不一样）。
+    setLabelScaledText(mLblChips, "0", uiPx(42));
+    setLabelScaledText(mLblMult,  "0", uiPx(42));
     mDisplayedChips = 0;
     mDisplayedMult  = 0;
     mScoringInProgress = false;
@@ -4395,6 +4623,7 @@ void MainWindow::resetTransientOverlaysForNewRun()
     hideGameOverOverlay();
     hideJokerInfo();
     hideCardInfo();
+    hideHoverTooltip();
     hideConsumableAction();
     clearFloatingScores();
     clearObtainedTags();
@@ -4414,6 +4643,13 @@ void MainWindow::setContextPage(int page)
     if (page < 0 || page >= mContextArea->count()) return;
     const int cur = mContextArea->currentIndex();
     if (cur == page) return;
+
+    // 切页前主动收起 hover 浮窗——否则 Qt 在 leave 事件之前就把旧 widget 隐藏，
+    // 浮窗会"残留"显示到下一界面（用户反馈：进商店后看到上一界面的卡牌描述）。
+    hideHoverTooltip();
+    hideCardInfo();
+    if (mJokerInfoProxy) mJokerInfoProxy->hide();
+    if (mConsumableActionProxy) mConsumableActionProxy->hide();
 
     QWidget *oldW = mContextArea->currentWidget();
     QWidget *newW = mContextArea->widget(page);
@@ -4884,13 +5120,272 @@ void MainWindow::clearFloatingScores()
     mFloatingScores.clear();
 }
 
+// 原版 common_events.lua:464 level_up_hand：升级后侧边栏分三拍演出
+//   1) 基础倍率刷新 + 抖动
+//   2) 基础筹码刷新 + 抖动
+//   3) 等级数刷新（换颜色）+ 抖动
+// 期间 hand_text_area 被借用展示被升级的那一手的名字 / 基础值，结束后再清空。
+// 这里只有在玩家主动使用行星牌 / 黑洞这类不在计分流程中的升级时才播；
+// SpaceJoker / 绯红之心 / The Arm 这类在 onHandPlayed 流程中触发的升级，
+// 让位给计分动画，跳过演出（mScoringInProgress 守卫）。
+void MainWindow::onHandLevelsChanged()
+{
+    const auto &nowLevels = mGameState->handLevels();
+
+    // 第一次回调（构造后兜底）：只刷新快照，不播动画。
+    if (!mHandLevelInitialized) {
+        mPrevHandLevels = nowLevels;
+        mHandLevelInitialized = true;
+        return;
+    }
+
+    // 取出"等级提高"的牌型。多手同时升级（黑洞 / 同道之星）时只演第一手，
+    // 避免连续 13 次 ~3s 演出把节奏拖死；剩下的牌型 handLevels() 已经写入，下次玩家选它时会正确显示。
+    HandType upgraded = HandType::HighCard;
+    bool found = false;
+    HandLevel prevLv{};
+    for (auto it = nowLevels.constBegin(); it != nowLevels.constEnd(); ++it) {
+        HandType t = it.key();
+        HandLevel before = mPrevHandLevels.value(t);
+        if (it.value().level > before.level) {
+            upgraded = t;
+            prevLv = before;
+            found = true;
+            break;
+        }
+    }
+    mPrevHandLevels = nowLevels;
+    if (!found) return;
+    if (mScoringInProgress) return;   // 计分流程中（SpaceJoker / The Arm）让位给得分演出
+    if (mHandLevelAnimating) return;  // 上一次升级动画还在跑，新一次仅刷新快照即可
+
+    HandLevel newLv = nowLevels.value(upgraded);
+    auto base = baseChipsMultFor(upgraded);
+    int prevChips = base.first  + prevLv.chipsBonus;
+    int prevMult  = base.second + prevLv.multBonus;
+    int newChips  = base.first  + newLv.chipsBonus;
+    int newMult   = base.second + newLv.multBonus;
+
+    playHandLevelUpAnimation(upgraded, prevLv.level, newLv.level,
+                             prevChips, newChips, prevMult, newMult);
+}
+
+void MainWindow::playHandLevelUpAnimation(HandType t, int prevLevel, int newLevel,
+                                          int prevChips, int newChips,
+                                          int prevMult, int newMult)
+{
+    if (!mLblHandName || !mLblHandLevel || !mLblChips || !mLblMult) return;
+
+    mHandLevelAnimating = true;
+    const int token = ++mHandLevelAnimToken;
+
+    const QString name = HandEvaluator::handTypeName(t);
+
+    // 第 0 步：先把侧边栏切到"被升级牌型"的旧值，对应原版 card.lua:1265 / tag.lua:193
+    // 在 level_up_hand 之前那一次 update_hand_text(handname/chips/mult/level=旧值)。
+    mLblHandName ->setText(name);
+    mLblHandLevel->setText(QString("等级%1").arg(prevLevel));
+    mLblHandLevel->setStyleSheet(
+        QString("color:%1; background:transparent;").arg(handLevelColor(prevLevel)));
+    setLabelScaledText(mLblChips, formatScoreNumber(prevChips), uiPx(42));
+    setLabelScaledText(mLblMult,  formatScoreNumber(prevMult),  uiPx(42));
+
+    // 原版 common_events.lua:464 level_up_hand 的三拍：mult / chips / level。
+    // 拍间隔从原版 0.9s 压到 ~0.3s——每个色块 500ms 走完，相邻两拍只剩 ~200ms gap，
+    // 让 chips 的色块还在淡出时 mult 的色块就开始弹出，画面紧凑但节奏依然清楚。
+    const int tBeatMult  = 80;
+    const int tBeatChips = 360;
+    const int tBeatLevel = 660;
+    const int tEnd       = 1180;
+
+    const int deltaMult  = newMult  - prevMult;
+    const int deltaChips = newChips - prevChips;
+
+    // 第 1 拍：写入新基础倍率，同帧把整个 mult 框盖上"+m"色块。
+    // 色块本身就是弹性 pop-in（spawnLabelDelta 内 0.62→1.14→1.0 过冲），淡出时露出已写好的新数字。
+    scheduleGame(tBeatMult, [this, token, newMult, deltaMult]() {
+        if (token != mHandLevelAnimToken) return;
+        setLabelScaledText(mLblMult, formatScoreNumber(newMult), uiPx(42));
+        if (deltaMult != 0) {
+            // 原版 common_events.lua:539  cover_colour = mix_colours(G.C.MULT, col, 0.1)
+            // 注意 mix_colours(C1,C2,proportionC1) 第三参数是 C1 占比——只有 0.1，所以底色其实是 90% 的 col。
+            // col：升级（delta>0）= G.C.GREEN，降级（<0）= G.C.RED。
+            // globals.lua:354/361/360：MULT=(254,95,85) GREEN=(75,194,146) RED=(254,95,85)
+            //   positive: 0.1·(254,95,85)+0.9·(75,194,146) = (93,184,140)  → #5db88c
+            //   negative: 0.1·(254,95,85)+0.9·(254,95,85)  = (254,95,85)   → #fe5f55
+            const QColor cover = (deltaMult > 0) ? QColor("#5db88c") : QColor("#fe5f55");
+            spawnLabelDelta(mLblMult,
+                            (deltaMult > 0 ? QStringLiteral("+%1") : QStringLiteral("%1"))
+                                .arg(deltaMult),
+                            cover);
+        } else {
+            // 没有 delta（罕见）就退回直接 juice 数字，避免没有任何视觉反馈。
+            juiceLabelPulse(mLblMult, 1.22, 280);
+        }
+    });
+
+    // 第 2 拍：同上，作用在 chips 上。
+    scheduleGame(tBeatChips, [this, token, newChips, deltaChips]() {
+        if (token != mHandLevelAnimToken) return;
+        setLabelScaledText(mLblChips, formatScoreNumber(newChips), uiPx(42));
+        if (deltaChips != 0) {
+            // 原版 common_events.lua:517  cover_colour = mix_colours(G.C.CHIPS, col, 0.1)
+            // CHIPS=(0,157,255) GREEN=(75,194,146) RED=(254,95,85)
+            //   positive: 0.1·(0,157,255)+0.9·(75,194,146) = (68,190,157)  → #44be9d
+            //   negative: 0.1·(0,157,255)+0.9·(254,95,85)  = (229,101,102) → #e56566
+            const QColor cover = (deltaChips > 0) ? QColor("#44be9d") : QColor("#e56566");
+            spawnLabelDelta(mLblChips,
+                            (deltaChips > 0 ? QStringLiteral("+%1") : QStringLiteral("%1"))
+                                .arg(deltaChips),
+                            cover);
+        } else {
+            juiceLabelPulse(mLblChips, 1.22, 280);
+        }
+    });
+
+    // 第 3 拍：等级 +N，换 HAND_LEVELS 调色板色 + 字号弹性脉冲（原版只 juice_up，不弹 "+N"）。
+    scheduleGame(tBeatLevel, [this, token, newLevel]() {
+        if (token != mHandLevelAnimToken) return;
+        mLblHandLevel->setText(QString("等级%1").arg(newLevel));
+        mLblHandLevel->setStyleSheet(
+            QString("color:%1; background:transparent;").arg(handLevelColor(newLevel)));
+        juiceLabelPulse(mLblHandLevel, 1.40, 360);
+    });
+
+    // 结束：解除冻结、还原成当前选牌的 preview（或清空）。
+    scheduleGame(tEnd, [this, token]() {
+        if (token != mHandLevelAnimToken) return;
+        mHandLevelAnimating = false;
+        updateHandPreview();
+    });
+}
+
+void MainWindow::spawnLabelDelta(QLabel *anchor, const QString &text, const QColor &bgColor)
+{
+    if (!anchor || !anchor->parentWidget()) return;
+    QWidget *parent = anchor->parentWidget();
+    auto *cover = new QLabel(text, parent);
+    cover->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    // 关键：alignment 必须跟 anchor 一致——anchor 是 Right/VCenter（chips）或 Left/VCenter（mult），
+    // cover 用同样的 alignment 才能让 "+N" 文本和底下的数字落到同一条竖直边线上，避免视觉割裂。
+    cover->setAlignment(anchor->alignment());
+    const int basePx = qMax(10, anchor->font().pixelSize());
+    QFont initial = mPixelFont;
+    initial.setBold(true);
+    initial.setPixelSize(qMax(8, int(basePx * 0.62)));   // 起点：缩到 62%，准备弹出
+    cover->setFont(initial);
+    // 关键改动：去掉边框、padding/圆角和 anchor 完全一致，让 cover 看起来就是"chips/mult 框本身
+    // 短暂换了个底色"——对应原版 attention_text({cover = G.hand_text_area.chips.parent, cover_colour = …})，
+    // 它直接把 chip 框的 parent 整块盖住、染上微调色，而不是一个独立的"+N 标签"。
+    cover->setStyleSheet(QString(
+        "background:%1; color:white; border-radius:8px; padding:4px 12px;"
+    ).arg(bgColor.name()));
+    cover->setGeometry(anchor->geometry());
+    cover->show();
+    cover->raise();
+
+    auto *eff = new QGraphicsOpacityEffect(cover);
+    eff->setOpacity(0.0);
+    cover->setGraphicsEffect(eff);
+
+    // 整体加速：弹入 160ms + 悬停 200ms + 淡出 140ms = 500ms 走完一拍。
+    // 上一版 980ms 太磨；现在的拍间隔（~300ms）刚好让上一个色块还在淡出时，下一个就弹出。
+    const int popDur  = 160;
+    const int holdDur = 200;
+    const int fadeDur = 140;
+
+    auto *pop = new QVariantAnimation(cover);
+    pop->setDuration(popDur);
+    pop->setStartValue(0.0);
+    pop->setEndValue(1.0);
+    connect(pop, &QVariantAnimation::valueChanged, cover, [cover, eff, basePx](const QVariant &v) {
+        if (!cover) return;
+        const double t = v.toDouble();
+        // 分段：0..0.55 ease-out 冲到 1.14；0.55..1.0 ease-out 回到 1.0
+        double s;
+        if (t < 0.55) {
+            const double k = t / 0.55;
+            s = 0.62 + (1.14 - 0.62) * (1.0 - std::pow(1.0 - k, 3.0));
+        } else {
+            const double k = (t - 0.55) / 0.45;
+            s = 1.14 - 0.14 * (k * (2.0 - k));   // 1.14 → 1.0
+        }
+        QFont f = cover->font();
+        f.setPixelSize(qMax(8, int(basePx * s)));
+        cover->setFont(f);
+        // 透明度：前 30% 就拉满，色块来得突然——配合弹性缩放才像"砸"上去。
+        eff->setOpacity(std::min(1.0, t / 0.30));
+    });
+
+    auto *hold = new QPauseAnimation(holdDur, cover);
+    auto *fadeOut = new QPropertyAnimation(eff, "opacity", cover);
+    fadeOut->setDuration(fadeDur);
+    fadeOut->setStartValue(1.0);
+    fadeOut->setEndValue(0.0);
+
+    auto *seq = new QSequentialAnimationGroup(cover);
+    seq->addAnimation(pop);
+    seq->addAnimation(hold);
+    seq->addAnimation(fadeOut);
+    connect(seq, &QSequentialAnimationGroup::finished, cover, [cover]() {
+        cover->deleteLater();
+    });
+    seq->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+// 原版 Moveable:juice_up 是 scale 脉冲——快速冲到峰值，再带阻尼振荡回弹。
+// 用 damped 余弦驱动字号：t=0 立刻冲到峰值，之后 cos × e^(-decay·t) 振荡衰减到 0。
+// 视觉上不再是平滑的正弦呼吸，而是"弹一下、再小幅回弹"的弹性感。
+void MainWindow::juiceLabelPulse(QLabel *lbl, double scaleUp, int durationMs)
+{
+    if (!lbl) return;
+    QFont baseFont = lbl->font();
+    const int basePx = qMax(8, baseFont.pixelSize());
+
+    auto *anim = new QVariantAnimation(lbl);
+    anim->setDuration(durationMs);
+    anim->setStartValue(0.0);
+    anim->setEndValue(1.0);
+    connect(anim, &QVariantAnimation::valueChanged, lbl, [lbl, basePx, scaleUp](const QVariant &v) {
+        if (!lbl) return;
+        const double t = v.toDouble();
+        // 阶段 1：0..0.16 内用 ease-out 把脉冲值从 0 拉到 1（峰值）。
+        // 阶段 2：0.16..1.0 内用 damped 余弦从 1 衰减到 0，期间一次反向回弹。
+        double impulse;
+        if (t < 0.16) {
+            const double k = t / 0.16;
+            impulse = 1.0 - std::pow(1.0 - k, 3.0);
+        } else {
+            const double k = (t - 0.16) / 0.84;
+            impulse = std::cos(k * 6.28318 * 1.25) * std::exp(-3.0 * k);
+        }
+        const double s = 1.0 + (scaleUp - 1.0) * impulse;
+        QFont f = lbl->font();
+        f.setPixelSize(qMax(8, int(basePx * s)));
+        lbl->setFont(f);
+    });
+    connect(anim, &QVariantAnimation::finished, lbl, [lbl, basePx]() {
+        if (!lbl) return;
+        QFont f = lbl->font();
+        f.setPixelSize(basePx);
+        lbl->setFont(f);
+    });
+    anim->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
 void MainWindow::updateHandPreview()
 {
+    // 牌型升级动画期间，侧边栏被借用来展示"被升级的那一手"的演出步骤，
+    // 不能让选牌/出牌等触发的 preview 把演出值踩掉。动画结束后会再调一次本函数恢复正常。
+    if (mHandLevelAnimating) return;
+
     if (mSelected.isEmpty()) {
         mLblHandName ->setText("");
         mLblHandLevel->setText("");
-        mLblChips->setText("0");
-        mLblMult ->setText("0");
+        // 同 onBlindStarted 的注释：必须经过 setLabelScaledText 把字号还原回 uiPx(42)，
+        // 否则上一帧若是大数字，"0" 会沿用缩小后的字号，看起来偏位。
+        setLabelScaledText(mLblChips, "0", uiPx(42));
+        setLabelScaledText(mLblMult,  "0", uiPx(42));
         return;
     }
     HandResult r = mGameState->previewSelection(mSelected);

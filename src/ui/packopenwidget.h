@@ -15,6 +15,7 @@ class QGraphicsScene;
 class QGraphicsView;
 class QGraphicsPixmapItem;
 class CardItem;
+class BalatroInfoPanel;
 
 class PackOpenWidget : public QWidget
 {
@@ -43,6 +44,7 @@ signals:
 
 protected:
     void resizeEvent(QResizeEvent *e) override;
+    bool eventFilter(QObject *obj, QEvent *e) override;
 
 private slots:
     void onChoose(int idx);
@@ -51,6 +53,7 @@ private slots:
     void onPackCardClicked(CardItem *card);
     void onPackCardDragMoved(CardItem *card, QPointF scenePos);
     void onPackCardDragReleased(CardItem *card, QPointF scenePos);
+    void onPackCardHoverChanged(CardItem *card, bool hovered);
 
 private:
     QFont mCNFont, mPixelFont;
@@ -88,10 +91,23 @@ private:
         QWidget *card = nullptr;
         QLabel  *imageLbl = nullptr;
         QLabel  *nameLbl = nullptr;
-        QLabel  *descLbl = nullptr;
         QPushButton *takeBtn = nullptr;
+        QRect imageRestRect;     // 未聚焦时 imageLbl 的几何
+        QRect imageLiftRect;     // 聚焦时 imageLbl 上移后的几何
+        QRect nameRestRect;
+        QRect nameLiftRect;
     };
     QVector<OptUi> mOptUi;
+    // 当前被点击聚焦的选项（对齐原版：点击牌 -> 牌上移 -> 弹出"选择/使用"按钮）。
+    int mFocusedOptIdx = -1;
+    void setOptionFocused(int idx, bool focused, bool animate);
+
+    // 描述浮窗：手牌 / 选项卡 hover 时出现，遵循原版 generate_card_ui 样式。
+    BalatroInfoPanel *mInfoTooltip = nullptr;
+    void showOptionTooltip(int idx);
+    void showHandCardTooltip(CardItem *card);
+    void hideTooltip();
+    int  mHoveredOptIdx = -1;
 
     struct InvUi {
         QWidget *card = nullptr;

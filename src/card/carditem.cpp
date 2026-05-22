@@ -53,113 +53,6 @@ int cardShaderCacheFrame()
     return int(BalatroShaders::shaderTime() * 15.0);
 }
 
-QString rankLabel(Rank r)
-{
-    switch (r) {
-    case Rank::Two: return "2";
-    case Rank::Three: return "3";
-    case Rank::Four: return "4";
-    case Rank::Five: return "5";
-    case Rank::Six: return "6";
-    case Rank::Seven: return "7";
-    case Rank::Eight: return "8";
-    case Rank::Nine: return "9";
-    case Rank::Ten: return "10";
-    case Rank::Jack: return "J";
-    case Rank::Queen: return "Q";
-    case Rank::King: return "K";
-    case Rank::Ace: return "A";
-    }
-    return "?";
-}
-
-QString suitLabel(Suit s)
-{
-    switch (s) {
-    case Suit::Spades: return QStringLiteral("黑桃");
-    case Suit::Hearts: return QStringLiteral("红桃");
-    case Suit::Diamonds: return QStringLiteral("方块");
-    case Suit::Clubs: return QStringLiteral("梅花");
-    }
-    return QString();
-}
-
-QString hoverTitleForCard(const CardData &d)
-{
-    if (d.enhancement == Enhancement::Stone)
-        return QStringLiteral("石头牌");
-    return suitLabel(d.suit) + rankLabel(d.rank);
-}
-
-QString hoverDescForCard(const CardData &d)
-{
-    int chips = d.chipValue() + d.permanentBonusChips;
-    if (d.enhancement == Enhancement::Bonus) chips += 30;
-    if (d.enhancement == Enhancement::Stone) chips = 50 + d.permanentBonusChips;
-    return QStringLiteral("+%1筹码").arg(chips);
-}
-
-void drawBalatroHoverTag(QPainter *painter, const CardData &d)
-{
-    const QString title = hoverTitleForCard(d);
-    const QString desc = hoverDescForCard(d);
-
-    painter->save();
-    painter->setRenderHint(QPainter::Antialiasing, true);
-    painter->setRenderHint(QPainter::TextAntialiasing, false);
-
-    const QString hoverFamily = qApp ? qApp->font().family() : QStringLiteral("Arial");
-    QFont titleFont(hoverFamily);
-    titleFont.setPixelSize(18);
-    titleFont.setBold(true);
-    QFont descFont(hoverFamily);
-    descFont.setPixelSize(17);
-    descFont.setBold(true);
-
-    QFontMetrics titleFm(titleFont);
-    QFontMetrics descFm(descFont);
-    const int w = qMax(76, qMax(titleFm.horizontalAdvance(title), descFm.horizontalAdvance(desc)) + 24);
-    const int titleH = 32;
-    const int descH = 31;
-    const int x = int(CardItem::WIDTH / 2 - w / 2);
-    const int y = -70;
-
-    QRectF outer(x, y, w, titleH + descH + 4);
-    QPainterPath shadowPath;
-    shadowPath.addRoundedRect(outer.adjusted(2, 3, 2, 3), 8, 8);
-    painter->fillPath(shadowPath, QColor(0, 0, 0, 70));
-
-    QRectF titleRect(x, y, w, titleH + 2);
-    QRectF descRect(x, y + titleH - 1, w, descH + 3);
-
-    QPainterPath titlePath;
-    titlePath.addRoundedRect(titleRect, 7, 7);
-    painter->fillPath(titlePath, QColor(248, 255, 250));
-    painter->setPen(QPen(QColor(34, 45, 48), 2.2));
-    painter->drawPath(titlePath);
-
-    QPainterPath descPath;
-    descPath.addRoundedRect(descRect, 7, 7);
-    painter->fillPath(descPath, QColor(248, 255, 250));
-    painter->setPen(QPen(QColor(34, 45, 48), 2.2));
-    painter->drawPath(descPath);
-
-    // 遮掉两个圆角框交界处的中间描边，让它更像正版的上下拼接标签。
-    painter->fillRect(QRectF(x + 3, y + titleH - 3, w - 6, 6), QColor(248, 255, 250));
-    painter->setPen(QPen(QColor(34, 45, 48), 2.0));
-    painter->drawLine(QPointF(x + 3, y + titleH), QPointF(x + w - 3, y + titleH));
-
-    painter->setFont(titleFont);
-    painter->setPen(QColor(31, 45, 48));
-    painter->drawText(titleRect.adjusted(2, 0, -2, 0), Qt::AlignCenter, title);
-
-    painter->setFont(descFont);
-    painter->setPen(QColor(42, 132, 205));
-    painter->drawText(descRect.adjusted(2, 0, -2, 0), Qt::AlignCenter, desc);
-
-    painter->restore();
-}
-
 // 手牌排序拖拽的启动距离。原来 8px 太敏感，点击时横向轻微抖动就会被判为拖动；
 // 阈值与卡牌高度成比例（约 11.5% × HEIGHT），卡牌放大后阈值同步增大才不会"点一下就以为在拖"。
 constexpr qreal kCardDragStartDistance = 26.0;
@@ -235,9 +128,10 @@ void CardItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidge
         painter->restore();
     }
 
-    if (mHovered && mData.faceUp) {
-        drawBalatroHoverTag(painter, mData);
-    }
+    // 注意：原本这里会调用 drawBalatroHoverTag 在牌头上方绘制一张白色卡名+筹码标签。
+    // 这跟 MainWindow / PackOpenWidget / DeckViewWidget 里那只统一风格的 BalatroInfoPanel
+    // 浮窗冲突——同一张牌悬浮时会出现"上方一只浅色小标签 + 暗色 BalatroInfoPanel"两张 info。
+    // 这里直接去掉内嵌绘制，hover 信息统一交给上层的 BalatroInfoPanel。
 }
 
 QRect CardItem::whiteBaseSrcRect() const {
@@ -414,7 +308,9 @@ void CardItem::moveTo(const QPointF &target, int durationMs) {
 }
 
 void CardItem::flip() {
-    auto *shrink = new QPropertyAnimation(this, "scale", this);
+    // 对齐原版 card.lua Card:flip()：触发 pinch.x，使牌宽收缩到 0（绕 Y 轴翻面效果），
+    // 然后在 sprite 翻面后再扩张回 1。仅缩 X，不缩 Y，避免出现垂直方向的塌缩。
+    auto *shrink = new QPropertyAnimation(this, "flipXScale", this);
     shrink->setDuration(120);
     shrink->setStartValue(1.0);
     shrink->setEndValue(0.0);
@@ -423,7 +319,7 @@ void CardItem::flip() {
     connect(shrink, &QPropertyAnimation::finished, this, [this]() {
         mData.faceUp = !mData.faceUp;
         update();
-        auto *expand = new QPropertyAnimation(this, "scale", this);
+        auto *expand = new QPropertyAnimation(this, "flipXScale", this);
         expand->setDuration(120);
         expand->setStartValue(0.0);
         expand->setEndValue(1.0);
@@ -439,6 +335,8 @@ void CardItem::mousePressEvent(QGraphicsSceneMouseEvent *event) {
         mPressed = true;
         mDragging = false;
         mPressScenePos = event->scenePos();
+        mLastDragScenePos = event->scenePos();
+        mLastDragTimeMs = QDateTime::currentMSecsSinceEpoch();
         event->accept();
     }
     else QGraphicsObject::mousePressEvent(event);
@@ -454,10 +352,30 @@ void CardItem::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
         && QLineF(event->scenePos(), mPressScenePos).length() > kCardDragStartDistance) {
         mDragging = true;
         setZValue(600);
+        // 开始拖拽前重置速度采样，避免长按时的"前一刻"位置被算成大速度突然倾斜。
+        mLastDragScenePos = event->scenePos();
+        mLastDragTimeMs = QDateTime::currentMSecsSinceEpoch();
     }
 
     if (mDragging) {
+        // 对齐原版 Moveable:move_r() 的 des_r = T.r + 0.015 * vel.x / dt 公式：
+        //   vel.x = 当帧水平位移（lua 单位/帧），dt = 1/60。
+        //   在 Qt 里把它折算成"水平速度（px/s）→ 度"。
+        const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+        const qint64 dtMs = qMax<qint64>(1, nowMs - mLastDragTimeMs);
+        const double dx = event->scenePos().x() - mLastDragScenePos.x();
+        const double vxPerSec = dx * 1000.0 / double(dtMs);
+        // 系数 0.045 deg / (px/s)：移动 ~600 px/s 时约 27 度，更明显的"惯性甩动"手感。
+        double desTilt = vxPerSec * 0.045;
+        if (desTilt > 30.0) desTilt = 30.0;
+        if (desTilt < -30.0) desTilt = -30.0;
+        // 指数平滑系数也偏向 des 多一点，让倾斜跟随手感更紧。
+        mDragTilt = mDragTilt * 0.50 + desTilt * 0.50;
+        mLastDragScenePos = event->scenePos();
+        mLastDragTimeMs = nowMs;
+
         setPos(event->scenePos() - QPointF(WIDTH / 2.0, HEIGHT / 2.0));
+        applyTransform();
         emit dragMoved(this, event->scenePos());
         event->accept();
         return;
@@ -471,6 +389,23 @@ void CardItem::mouseReleaseEvent(QGraphicsSceneMouseEvent *event)
         mPressed = false;
         if (mDragging) {
             mDragging = false;
+            // 释放后平滑把拖拽倾斜衰减回 0——对齐原版 velocity.r → 0 的回弹。
+            if (qFuzzyIsNull(mDragTilt)) {
+                mDragTilt = 0.0;
+                applyTransform();
+            } else {
+                auto *decay = new QVariantAnimation(this);
+                decay->setDuration(220);
+                decay->setStartValue(mDragTilt);
+                decay->setEndValue(0.0);
+                decay->setEasingCurve(QEasingCurve::OutCubic);
+                connect(decay, &QVariantAnimation::valueChanged, this,
+                        [this](const QVariant &v) {
+                    mDragTilt = v.toDouble();
+                    applyTransform();
+                });
+                decay->start(QAbstractAnimation::DeleteWhenStopped);
+            }
             emit dragReleased(this, event->scenePos());
         } else {
             emit clicked(this);
@@ -537,8 +472,13 @@ void CardItem::applyTransform()
         );
     t = persp * t;
 
-    // 应用 Z 轴扇形旋转 + 悬浮抖动叠加
-    t.rotateRadians(zRot + qDegreesToRadians(mJitterRot));
+    // 应用 Z 轴扇形旋转 + 悬浮抖动 + 拖拽速度倾斜叠加。
+    t.rotateRadians(zRot + qDegreesToRadians(mJitterRot + mDragTilt));
+
+    // 翻牌时的水平 pinch（仅 X 缩放），围绕中心 → 模拟绕 Y 轴翻面，对齐原版 pinch.x。
+    if (mFlipXScale != 1.0) {
+        t.scale(mFlipXScale, 1.0);
+    }
 
     t.translate(-cx, -cy);
     setTransform(t);

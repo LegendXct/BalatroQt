@@ -3,6 +3,8 @@
 #include "../card/jokeritem.h"
 #include "../card/consumableitem.h"
 #include "../utils/shadereffects.h"
+#include "balatroinfopanel.h"
+#include "cardtooltipformat.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QResizeEvent>
@@ -13,6 +15,7 @@
 #include <QGraphicsView>
 #include <QStringList>
 #include <QTimer>
+#include <QEvent>
 #include <QPropertyAnimation>
 #include <QParallelAnimationGroup>
 #include <QSequentialAnimationGroup>
@@ -100,9 +103,12 @@ void PackOpenWidget::buildUi()
     mHandView->setAttribute(Qt::WA_TranslucentBackground);
     mHandView->viewport()->setAttribute(Qt::WA_TranslucentBackground);
     mHandView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    // 收窄手牌区高度，给下方放大后的塔罗牌选项卡腾出空间。
-    mHandView->setMinimumHeight(230);
-    mHandView->setMaximumHeight(230);
+    // 开包临时手牌相对主场景应该再小一档——主场景手牌已经接近卡片原生尺寸，
+    // 但开包面板上方还有标题/选项卡，原生尺寸在小窗口里显得过大。
+    // 这里用 view scale = 0.78，把视觉尺寸压到主场景的约 78%。
+    // 高度同步压成 240（原 320 × 0.78 ≈ 250，向下取一点给整体面板更多余量）。
+    mHandView->setMinimumHeight(240);
+    mHandView->setMaximumHeight(240);
     mHandView->setMouseTracking(true);
     root->addWidget(mHandView);
 
@@ -125,51 +131,59 @@ void PackOpenWidget::buildUi()
     for (int i = 0; i < 5; ++i) {
         OptUi ou;
         ou.card = new QWidget(optionsBox);
-        // 卡片图采样比例 142×190 ≈ 1:1.34；卡牌整体放大约 20%，文字相应放大，
-        // 让开包界面里的牌和说明文字更清晰可读。纵向间距收紧，整张卡更紧凑。
-        ou.card->setFixedSize(196, 392);
+        // 卡下方原本有一行 nameLbl 文本（"黑桃J / 太空人 / 木星"）——按用户反馈去掉，
+        // 卡片整体下移，让默认状态看起来更贴近原版 booster 包内"卡居中略偏下"的布局。
+        ou.card->setFixedSize(184, 280);
         ou.card->setStyleSheet("background:transparent; border:none;");
+        ou.card->setAttribute(Qt::WA_Hover, true);
+        ou.card->installEventFilter(this);
 
-        auto *vbl = new QVBoxLayout(ou.card);
-        vbl->setContentsMargins(4, 2, 4, 2);
-        vbl->setSpacing(1);
+        // 用绝对定位：默认状态 card 图垂直略偏下（restImageY > 居中），
+        // 点击聚焦时整体上移让出底部空间给"选择/使用"小按钮——对齐原版
+        // card_focus_button 的 align="bm" 视觉。
+        constexpr int kImageW = 168, kImageH = 226;
+        constexpr int kBtnH   = 28;
+        constexpr int kBtnW   = 96;
+        // restImageY：让卡更靠下，剩余 (280-226)/2 = 27 的间距对半分给上下不太对——
+        // 这里把卡贴到接近底部（留 6 px），上面留出 48 px 给 info 浮窗 hover 锚定。
+        const int restImageY = ou.card->height() - kImageH - 6;
+        // liftImageY：上移 30 px 让出底部空间给按钮。
+        const int liftImageY = qMax(2, restImageY - 30);
 
         ou.imageLbl = new QLabel(ou.card);
-        ou.imageLbl->setFixedSize(168, 226);
         ou.imageLbl->setAlignment(Qt::AlignCenter);
         ou.imageLbl->setStyleSheet("background:transparent;");
-        vbl->addWidget(ou.imageLbl, 0, Qt::AlignCenter);
+        ou.imageLbl->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+        ou.card->setCursor(Qt::PointingHandCursor);
+        ou.imageRestRect = QRect((ou.card->width() - kImageW) / 2, restImageY, kImageW, kImageH);
+        ou.imageLiftRect = QRect((ou.card->width() - kImageW) / 2, liftImageY, kImageW, kImageH);
+        ou.imageLbl->setGeometry(ou.imageRestRect);
 
+        // nameLbl 保留但永远 hide()——原本的字号 / 几何字段都不再使用，
+        // 留着是为了让 OptUi 的字段保持原结构，省掉 refresh 处的 if 判空。
         ou.nameLbl = new QLabel("", ou.card);
-        QFont nf = mCNFont; nf.setPixelSize(22); nf.setBold(true);
-        ou.nameLbl->setFont(nf);
-        ou.nameLbl->setStyleSheet("color:white; background:transparent;");
-        ou.nameLbl->setAlignment(Qt::AlignCenter);
-        ou.nameLbl->setWordWrap(true);
-        ou.nameLbl->setFixedHeight(46);
-        vbl->addWidget(ou.nameLbl);
-
-        ou.descLbl = new QLabel("", ou.card);
-        QFont df = mCNFont; df.setPixelSize(17);
-        ou.descLbl->setFont(df);
-        ou.descLbl->setStyleSheet("color:#aab2ba; background:transparent;");
-        ou.descLbl->setAlignment(Qt::AlignCenter);
-        ou.descLbl->setWordWrap(true);
-        ou.descLbl->setFixedHeight(58);
-        vbl->addWidget(ou.descLbl);
+        ou.nameLbl->hide();
+        ou.nameRestRect = QRect();
+        ou.nameLiftRect = QRect();
 
         ou.takeBtn = new QPushButton("选择", ou.card);
-        ou.takeBtn->setFixedHeight(44);
-        QFont bf = mCNFont; bf.setPixelSize(20);
+        QFont bf = mCNFont; bf.setPixelSize(14); bf.setBold(true);
         ou.takeBtn->setFont(bf);
         ou.takeBtn->setCursor(Qt::PointingHandCursor);
+        // 对齐原版 card_focus_button：colour=G.C.BLACK #374244 + shadow=true（仅下沿暗色 emboss）
+        // + r=0.08 圆角。去掉以前四边描边的写法。
         ou.takeBtn->setStyleSheet(
-            "QPushButton { background:#3060c0; color:white; border:none; border-radius:6px; }"
-            "QPushButton:hover { background:#4070d0; }"
-            "QPushButton:disabled { background:#333; color:#777; }"
+            "QPushButton { background:#374244; color:white;"
+            "  border: 1px solid #2a3133;"
+            "  border-bottom: 3px solid #1d2627;"
+            "  border-radius: 6px; padding: 3px 12px 1px 12px; }"
+            "QPushButton:hover { background:#4f6367; border-bottom-color:#2a3133; }"
+            "QPushButton:disabled { background:#2a3133; color:#777; border-color:#1d2627; }"
             );
+        ou.takeBtn->setGeometry((ou.card->width() - kBtnW) / 2,
+                                liftImageY + kImageH + 6, kBtnW, kBtnH);
+        ou.takeBtn->hide();
         connect(ou.takeBtn, &QPushButton::clicked, this, [this, i]() { onChoose(i); });
-        vbl->addWidget(ou.takeBtn);
 
         optionsLayout->addWidget(ou.card);
         mOptUi.append(ou);
@@ -247,7 +261,8 @@ void PackOpenWidget::buildUi()
     // 用左右等长的 stretch 把"包名 + 剩余次数"夹在水平正中；跳过按钮挂在右侧但不影响中心对齐。
     auto *bottomBar = new QWidget(mPanel);
     bottomBar->setStyleSheet("background:transparent;");
-    bottomBar->setFixedHeight(64);
+    // 之前 64 太矮——包名 + "选择 N/M 剩余 X 次"挤在一起。给到 88 让两行有呼吸。
+    bottomBar->setFixedHeight(88);
     auto *bottomLayout = new QHBoxLayout(bottomBar);
     bottomLayout->setContentsMargins(0, 0, 0, 0);
     bottomLayout->setSpacing(10);
@@ -258,8 +273,9 @@ void PackOpenWidget::buildUi()
     auto *titleCol = new QWidget(bottomBar);
     titleCol->setStyleSheet("background:rgba(20,25,30,120); border-radius:12px;");
     auto *titleLayout = new QVBoxLayout(titleCol);
-    titleLayout->setContentsMargins(14, 5, 14, 5);
-    titleLayout->setSpacing(2);
+    // padding 拉大让两行字距离舒展些，对齐原版底部 "Open this pack" + "Select 1 of 5" 的视觉重量。
+    titleLayout->setContentsMargins(20, 10, 20, 10);
+    titleLayout->setSpacing(4);
     titleLayout->addWidget(mLblTitle);
     titleLayout->addWidget(mLblChoose);
     bottomLayout->addWidget(titleCol, 0, Qt::AlignCenter);
@@ -295,6 +311,10 @@ void PackOpenWidget::open(const PackContent &content,
     mSelectedHand.clear();
     mFinishing = false;
     mLastDragTo = -1;
+    if (mFocusedOptIdx >= 0) {
+        setOptionFocused(mFocusedOptIdx, false, false);
+        mFocusedOptIdx = -1;
+    }
 
     show();
     raise();
@@ -361,30 +381,280 @@ int PackOpenWidget::optionCount() const
 
 void PackOpenWidget::refreshHandUi()
 {
-    // 清除旧 CardItem
-    for (CardItem *c : mPackHandItems) {
-        mHandScene->removeItem(c);
-        c->deleteLater();
+    if (!packUsesHandSelection()) {
+        // 该包不使用临时手牌（如小丑包 / 行星包），清掉残留 CardItem 即可。
+        for (CardItem *c : mPackHandItems) {
+            mHandScene->removeItem(c);
+            c->deleteLater();
+        }
+        mPackHandItems.clear();
+        return;
     }
-    mPackHandItems.clear();
 
-    if (!packUsesHandSelection()) return;
+    // 按 uid 匹配已有 CardItem：让"塔罗/幻灵打增强"走 flip 翻面动画而不是 destroy+recreate；
+    // 之前每次 setPackHand 都会把整列 CardItem 删掉重建，看起来就是"闪一下然后从远处飞回来"。
+    // 主场景 mainwindow.cpp::refreshHand() 也走同一种 uid 匹配，这里和它对齐。
+    QHash<int, CardItem*> existingByUid;
+    for (CardItem *c : mPackHandItems)
+        existingByUid.insert(c->cardData().uid, c);
 
-    // 创建新 CardItem
+    QVector<CardItem*> reordered;
+    QVector<CardItem*>  toFlip;
+    QVector<CardData>   flipNewData;
+
     for (int i = 0; i < mPackHand.size(); ++i) {
-        auto *card = new CardItem(mPackHand[i]);
-        mHandScene->addItem(card);
-        mPackHandItems.append(card);
+        const CardData &nc = mPackHand[i];
+        auto it = existingByUid.find(nc.uid);
+        if (it != existingByUid.end()) {
+            CardItem *item = it.value();
+            existingByUid.erase(it);
 
-        connect(card, &CardItem::clicked,
-                this, &PackOpenWidget::onPackCardClicked);
-        connect(card, &CardItem::dragMoved,
-                this, &PackOpenWidget::onPackCardDragMoved);
-        connect(card, &CardItem::dragReleased,
-                this, &PackOpenWidget::onPackCardDragReleased);
+            // 视觉相关字段任一变化都触发 flip。
+            const CardData &oc = item->cardData();
+            const bool visualChanged = (oc.enhancement != nc.enhancement)
+                                    || (oc.edition     != nc.edition)
+                                    || (oc.seal        != nc.seal)
+                                    || (oc.suit        != nc.suit)
+                                    || (oc.rank        != nc.rank)
+                                    || (oc.isDebuffed  != nc.isDebuffed)
+                                    || (oc.permanentBonusChips != nc.permanentBonusChips);
+            if (visualChanged) {
+                toFlip.append(item);
+                flipNewData.append(nc);
+            }
+            reordered.append(item);
+        } else {
+            auto *card = new CardItem(nc);
+            mHandScene->addItem(card);
+            connect(card, &CardItem::clicked,
+                    this, &PackOpenWidget::onPackCardClicked);
+            connect(card, &CardItem::dragMoved,
+                    this, &PackOpenWidget::onPackCardDragMoved);
+            connect(card, &CardItem::dragReleased,
+                    this, &PackOpenWidget::onPackCardDragReleased);
+            connect(card, &CardItem::hoverChanged,
+                    this, &PackOpenWidget::onPackCardHoverChanged);
+            reordered.append(card);
+        }
+    }
+
+    // 旧手牌里现在没有的 uid（被摧毁的牌 / 倒吊人 / Death 等）：从场景里移除。
+    for (auto it = existingByUid.begin(); it != existingByUid.end(); ++it) {
+        mHandScene->removeItem(it.value());
+        it.value()->deleteLater();
+    }
+    mPackHandItems = reordered;
+
+    // 触发翻面：CardItem::flip() 内部 scale 1→0→1 总时长 240ms，
+    // 中点（≈120ms）切换 CardData——和 mainwindow.cpp 主场景的塔罗 / 幻灵翻面节奏一致。
+    for (int k = 0; k < toFlip.size(); ++k) {
+        CardItem *target = toFlip[k];
+        const CardData newData = flipNewData[k];
+        target->flip();
+        QPointer<CardItem> guard(target);
+        QTimer::singleShot(120, this, [guard, newData]() {
+            if (guard) guard->setCardData(newData);
+        });
     }
 
     layoutPackHand();
+}
+
+void PackOpenWidget::onPackCardHoverChanged(CardItem *card, bool hovered)
+{
+    if (hovered) showHandCardTooltip(card);
+    else hideTooltip();
+}
+
+bool PackOpenWidget::eventFilter(QObject *obj, QEvent *e)
+{
+    // 选项卡（QWidget）上 Enter/Leave 进出时显隐描述浮窗；点击则切换聚焦态。
+    if (e->type() == QEvent::Enter || e->type() == QEvent::Leave
+        || e->type() == QEvent::MouseButtonPress) {
+        for (int i = 0; i < mOptUi.size(); ++i) {
+            if (mOptUi[i].card == obj) {
+                if (e->type() == QEvent::Enter) showOptionTooltip(i);
+                else if (e->type() == QEvent::Leave) hideTooltip();
+                else if (e->type() == QEvent::MouseButtonPress) {
+                    if (i < optionCount() && !optionAlreadyChosen(i) && !mFinishing) {
+                        if (mFocusedOptIdx == i) {
+                            setOptionFocused(i, false, true);
+                            mFocusedOptIdx = -1;
+                        } else {
+                            if (mFocusedOptIdx >= 0)
+                                setOptionFocused(mFocusedOptIdx, false, true);
+                            mFocusedOptIdx = i;
+                            setOptionFocused(i, true, true);
+                        }
+                    }
+                }
+                break;
+            }
+        }
+    }
+    return QWidget::eventFilter(obj, e);
+}
+
+void PackOpenWidget::setOptionFocused(int idx, bool focused, bool animate)
+{
+    if (idx < 0 || idx >= mOptUi.size()) return;
+    OptUi &ou = mOptUi[idx];
+    if (!ou.card) return;
+
+    auto animateLabel = [animate](QLabel *lbl, const QRect &target) {
+        if (!lbl) return;
+        if (!animate) { lbl->setGeometry(target); return; }
+        auto *anim = new QPropertyAnimation(lbl, "geometry", lbl);
+        anim->setDuration(160);
+        anim->setStartValue(lbl->geometry());
+        anim->setEndValue(target);
+        anim->setEasingCurve(QEasingCurve::OutCubic);
+        anim->start(QAbstractAnimation::DeleteWhenStopped);
+    };
+
+    animateLabel(ou.imageLbl, focused ? ou.imageLiftRect : ou.imageRestRect);
+    // nameLbl 现在常 hide()——不再动画它的位置，省掉一段 animation。
+
+    if (focused) {
+        // 只在仍可选时才弹按钮；不可选状态下保持按钮隐藏，避免误点。
+        bool enabled = !mFinishing
+                       && mChoicesUsed < mContent.choicesAllowed
+                       && optionAvailableFor(idx);
+        ou.takeBtn->setEnabled(enabled);
+        ou.takeBtn->setText((mContent.kind == PackKind::Arcana
+                              || mContent.kind == PackKind::Spectral
+                              || mContent.kind == PackKind::Celestial)
+                                ? QStringLiteral("使用")
+                                : QStringLiteral("选择"));
+        ou.takeBtn->show();
+        ou.takeBtn->raise();
+    } else {
+        ou.takeBtn->hide();
+    }
+}
+
+void PackOpenWidget::showOptionTooltip(int idx)
+{
+    if (idx < 0 || idx >= optionCount()) return;
+    if (idx >= mOptUi.size() || !mOptUi[idx].card) return;
+    mHoveredOptIdx = idx;
+
+    if (!mInfoTooltip) {
+        mInfoTooltip = new BalatroInfoPanel(mCNFont, this);
+        mInfoTooltip->hide();
+        mInfoTooltip->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    }
+
+    QVector<BalatroInfoPanel::Badge> badges;
+    QString name = optionName(idx);
+    QString body = optionDesc(idx);
+
+    switch (mContent.kind) {
+    case PackKind::Arcana:
+        badges.append({QStringLiteral("塔罗牌"), BalatroInfoPanel::tarotPillColor()});
+        break;
+    case PackKind::Celestial:
+        badges.append({QStringLiteral("行星牌"), BalatroInfoPanel::planetPillColor()});
+        break;
+    case PackKind::Spectral:
+        badges.append({QStringLiteral("幻灵牌"), BalatroInfoPanel::spectralPillColor()});
+        break;
+    case PackKind::Buffoon:
+        badges.append({QStringLiteral("小丑牌"), BalatroInfoPanel::jokerCommonColor()});
+        break;
+    case PackKind::Standard:
+        if (idx < mContent.standardCards.size()) {
+            const CardData &c = mContent.standardCards[idx];
+            switch (c.edition) {
+            case Edition::Foil:        badges.append({QStringLiteral("镀膜"), BalatroInfoPanel::editionPillColor()}); break;
+            case Edition::Holographic: badges.append({QStringLiteral("全息"), BalatroInfoPanel::editionPillColor()}); break;
+            case Edition::Polychrome:  badges.append({QStringLiteral("多彩"), BalatroInfoPanel::editionPillColor()}); break;
+            default: break;
+            }
+            switch (c.seal) {
+            case Seal::Gold:   badges.append({QStringLiteral("金印章"), BalatroInfoPanel::sealPillColor(0)}); break;
+            case Seal::Red:    badges.append({QStringLiteral("红印章"), BalatroInfoPanel::sealPillColor(1)}); break;
+            case Seal::Blue:   badges.append({QStringLiteral("蓝印章"), BalatroInfoPanel::sealPillColor(2)}); break;
+            case Seal::Purple: badges.append({QStringLiteral("紫印章"), BalatroInfoPanel::sealPillColor(3)}); break;
+            default: break;
+            }
+        }
+        break;
+    }
+
+    // 仅 Standard pack（扑克牌）才把名字包白盒，其它包都按原版只在描述上加白盒。
+    const bool playingCardStyle = (mContent.kind == PackKind::Standard);
+    // Standard pack 的牌跟主场景手牌同尺寸 160 px；其它消耗类/小丑稍宽一档 175。
+    int tooltipW = playingCardStyle ? 160 : 175;
+    mInfoTooltip->setContent(name, body, badges, tooltipW, playingCardStyle);
+
+    // 定位到选项卡顶部上方居中。坐标需要从 ou.card 的 parent 转到本 widget。
+    QWidget *card = mOptUi[idx].card;
+    QPoint topLeftInThis = card->mapTo(this, QPoint(0, 0));
+    int x = topLeftInThis.x() + (card->width() - mInfoTooltip->width()) / 2;
+    int y = topLeftInThis.y() - mInfoTooltip->height() - 8;
+    // 越界保护
+    if (x < 6) x = 6;
+    if (x + mInfoTooltip->width() > width() - 6) x = width() - mInfoTooltip->width() - 6;
+    if (y < 6) y = topLeftInThis.y() + card->height() + 8;
+    mInfoTooltip->move(x, y);
+    mInfoTooltip->raise();
+    mInfoTooltip->show();
+}
+
+void PackOpenWidget::showHandCardTooltip(CardItem *card)
+{
+    if (!card || !mHandView) return;
+    int idx = mPackHandItems.indexOf(card);
+    if (idx < 0 || idx >= mPackHand.size()) return;
+
+    if (!mInfoTooltip) {
+        mInfoTooltip = new BalatroInfoPanel(mCNFont, this);
+        mInfoTooltip->hide();
+        mInfoTooltip->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    }
+
+    const CardData &c = mPackHand[idx];
+
+    QVector<BalatroInfoPanel::Badge> badges;
+    switch (c.edition) {
+    case Edition::Foil:        badges.append({QStringLiteral("镀膜"), BalatroInfoPanel::editionPillColor()}); break;
+    case Edition::Holographic: badges.append({QStringLiteral("全息"), BalatroInfoPanel::editionPillColor()}); break;
+    case Edition::Polychrome:  badges.append({QStringLiteral("多彩"), BalatroInfoPanel::editionPillColor()}); break;
+    default: break;
+    }
+    switch (c.seal) {
+    case Seal::Gold:   badges.append({QStringLiteral("金印章"), BalatroInfoPanel::sealPillColor(0)}); break;
+    case Seal::Red:    badges.append({QStringLiteral("红印章"), BalatroInfoPanel::sealPillColor(1)}); break;
+    case Seal::Blue:   badges.append({QStringLiteral("蓝印章"), BalatroInfoPanel::sealPillColor(2)}); break;
+    case Seal::Purple: badges.append({QStringLiteral("紫印章"), BalatroInfoPanel::sealPillColor(3)}); break;
+    default: break;
+    }
+
+    // 与主场景 / 牌组查看 hover 共用同一份 helper——确保塔罗/幻灵包临时手牌
+    // 上的牌与主场景手牌呈现完全一致。
+    mInfoTooltip->setContent(CardTooltipFormat::cardTitleHtml(c),
+                             CardTooltipFormat::cardBodyHtml(c),
+                             badges, 160, /*nameHasWhiteBox=*/true);
+
+    // 锚到卡片头部正上方：把 scene 坐标映射到 view，再映射到本 widget。
+    QPointF scenePos = card->scenePos();
+    QPoint viewPt = mHandView->mapFromScene(scenePos);
+    QPoint topLeftInThis = mHandView->mapTo(this, viewPt);
+    int x = topLeftInThis.x() + (CardItem::WIDTH - mInfoTooltip->width()) / 2;
+    int y = topLeftInThis.y() - mInfoTooltip->height() - 6;
+    if (x < 6) x = 6;
+    if (x + mInfoTooltip->width() > width() - 6) x = width() - mInfoTooltip->width() - 6;
+    if (y < 6) y = topLeftInThis.y() + CardItem::HEIGHT + 6;
+    mInfoTooltip->move(x, y);
+    mInfoTooltip->raise();
+    mInfoTooltip->show();
+}
+
+void PackOpenWidget::hideTooltip()
+{
+    if (mInfoTooltip) mInfoTooltip->hide();
+    mHoveredOptIdx = -1;
 }
 
 void PackOpenWidget::layoutPackHand(int skipIdx, bool instant)
@@ -394,18 +664,15 @@ void PackOpenWidget::layoutPackHand(int skipIdx, bool instant)
     int n = mPackHandItems.size();
     if (n == 0) return;
 
-    int viewportH = qMax(1, mHandView->viewport()->height());
-    // 让卡牌按视口高度自动缩放：留出 hover 抬升（26% 卡高）+ 顶部 hover 标签 (~78px) + 上下边距。
-    // 单卡完整呈现需要：CardItem::HEIGHT * 1.26 + 78 + 16。把 view 整体 zoom 到这个比例。
-    const double neededH = CardItem::HEIGHT * 1.26 + 78.0 + 16.0;
-    const double scale = qBound(0.55, double(viewportH) / neededH, 1.0);
+    // 视图整体缩放：开包临时手牌在视觉上比主场景再小一档，避免开包面板里的卡片
+    // 看起来"太大"挤压下方的选项区。布局计算仍在场景坐标里做，sceneRect 取 viewport / scale。
+    constexpr double kPackHandViewScale = 0.78;
     mHandView->resetTransform();
-    mHandView->scale(scale, scale);
-
-    // 场景区在缩放下：以 scene 坐标计算，view 自动按 scale 收缩到 viewport 区域。
-    // 用 viewport / scale 反推 scene 中可见区域大小。
-    int areaW = qMax(1, int(mHandView->viewport()->width()  / scale));
-    int areaH = qMax(1, int(mHandView->viewport()->height() / scale));
+    mHandView->scale(kPackHandViewScale, kPackHandViewScale);
+    int viewW = qMax(1, mHandView->viewport()->width());
+    int viewH = qMax(1, mHandView->viewport()->height());
+    int areaW = int(viewW / kPackHandViewScale);
+    int areaH = int(viewH / kPackHandViewScale);
     mHandScene->setSceneRect(0, 0, areaW, areaH);
 
     int available = areaW - 80;
@@ -469,9 +736,9 @@ void PackOpenWidget::onPackCardDragMoved(CardItem *card, QPointF scenePos)
     int n = mPackHandItems.size();
     if (n <= 1) return;
 
-    // 拖拽时 view 的缩放已由 layoutPackHand 设置好；这里直接用同样的 scale 反算。
-    const double dragScale = mHandView->transform().m11() != 0.0 ? mHandView->transform().m11() : 1.0;
-    int areaW = qMax(1, int(mHandView->viewport()->width() / dragScale));
+    // 拖拽布局需要在场景坐标系算，因此沿用 layoutPackHand 的缩放后逻辑宽。
+    constexpr double kPackHandViewScale = 0.78;
+    int areaW = int(qMax(1, mHandView->viewport()->width()) / kPackHandViewScale);
     int available = areaW - 80;
     int step = (n > 1) ? (available - CardItem::WIDTH) / (n - 1) : 0;
     step = qMin(step, CardItem::WIDTH - 30);
@@ -497,7 +764,7 @@ void PackOpenWidget::onPackCardDragMoved(CardItem *card, QPointF scenePos)
     visual.removeAt(from);
     visual.insert(to, card);
 
-    int areaH = qMax(1, int(mHandView->viewport()->height() / dragScale));
+    int areaH = int(qMax(1, mHandView->viewport()->height()) / kPackHandViewScale);
     int baseY = qMax(int(CardItem::HEIGHT * 0.30), areaH - CardItem::HEIGHT - 16);
 
     for (int vi = 0; vi < visual.size(); ++vi) {
@@ -525,8 +792,8 @@ void PackOpenWidget::onPackCardDragReleased(CardItem *card, QPointF scenePos)
     int n = mPackHandItems.size();
     if (n <= 1) { layoutPackHand(); return; }
 
-    const double dragScale = mHandView->transform().m11() != 0.0 ? mHandView->transform().m11() : 1.0;
-    int areaW = qMax(1, int(mHandView->viewport()->width() / dragScale));
+    constexpr double kPackHandViewScale = 0.78;
+    int areaW = int(qMax(1, mHandView->viewport()->width()) / kPackHandViewScale);
     int available = areaW - 80;
     int step = (n > 1) ? (available - CardItem::WIDTH) / (n - 1) : 0;
     step = qMin(step, CardItem::WIDTH - 30);
@@ -562,18 +829,30 @@ void PackOpenWidget::refreshOptionUi()
         bool chosen = optionAlreadyChosen(i);
         // 原版开包时，被选择的那张牌本体飞走，原位置变空。
         // 之前 refreshAll() 会把 onChoose() 里 hide() 掉的源卡重新 show()，
-        // 导致“小丑包/标准包原地留一张，另一个贴图飞走”的双贴图问题。
-        if (chosen) { ou.card->hide(); continue; }
+        // 导致"小丑包/标准包原地留一张，另一个贴图飞走"的双贴图问题。
+        if (chosen) {
+            ou.card->hide();
+            if (mFocusedOptIdx == i) mFocusedOptIdx = -1;
+            continue;
+        }
 
         ou.card->show();
         ou.imageLbl->setPixmap(renderOption(i));
         ou.nameLbl->setText(optionName(i));
-        ou.descLbl->setText(optionDesc(i));
+        // 描述不再直接显示在卡上——hover 时通过 BalatroInfoPanel 浮窗给出，对齐原版样式。
 
-        ou.takeBtn->setText(mContent.kind == PackKind::Arcana || mContent.kind == PackKind::Spectral ? "使用" : "选择");
+        // 默认按钮隐藏（只在被点击聚焦时弹出）；如果当前是聚焦选项，根据可用性刷新按钮。
+        const bool isFocused = (mFocusedOptIdx == i);
+        ou.takeBtn->setText((mContent.kind == PackKind::Arcana
+                              || mContent.kind == PackKind::Spectral
+                              || mContent.kind == PackKind::Celestial)
+                                ? QStringLiteral("使用")
+                                : QStringLiteral("选择"));
         ou.takeBtn->setEnabled(!mFinishing
                                && mChoicesUsed < mContent.choicesAllowed
                                && optionAvailableFor(i));
+        ou.takeBtn->setVisible(isFocused);
+        if (isFocused) ou.takeBtn->raise();
     }
 }
 
@@ -828,6 +1107,11 @@ void PackOpenWidget::onChoose(int idx)
         // 小丑包选择时也少一次视觉卡顿。
         if (mOptUi[idx].card) mOptUi[idx].card->hide();
     }
+    // 已被选择的卡片不再保持聚焦态，其它卡片在 refreshOptionUi() 后保持当前聚焦不动。
+    if (mFocusedOptIdx == idx) {
+        setOptionFocused(idx, false, false);
+        mFocusedOptIdx = -1;
+    }
 
     mChosenOptions.append(idx);
     ++mChoicesUsed;
@@ -885,6 +1169,7 @@ void PackOpenWidget::onSkip()
 void PackOpenWidget::finishAndClose()
 {
     mFinishing = true;
+    hideTooltip();
     // 先通知 MainWindow 把商店 / 盲注选择界面抬起来，再隐藏开包层。
     // 之前先 hide() 会露出一帧底层暗背景，小丑包选择后看起来像黑屏卡顿。
     emit packFinished();
@@ -965,8 +1250,10 @@ void PackOpenWidget::animateCardsIn()
     fadeOnly(mBtnSkip, 240);
 
     // 手牌区：CardItem 从 mPanel 中心位置朝各自目标飞，并伴随 opacity 渐入。
-    int areaW = mHandView ? mHandView->viewport()->width()  : 800;
-    int areaH = mHandView ? mHandView->viewport()->height() : 240;
+    // 与 layoutPackHand 一样，这里需要把 viewport 像素换算成场景逻辑坐标。
+    constexpr double kPackHandViewScale = 0.78;
+    int areaW = mHandView ? int(mHandView->viewport()->width()  / kPackHandViewScale) : 1024;
+    int areaH = mHandView ? int(mHandView->viewport()->height() / kPackHandViewScale) : 308;
     QPointF burstFrom(areaW / 2.0, areaH * 0.5 - 200.0);
     for (int i = 0; i < mPackHandItems.size(); ++i) {
         CardItem *c = mPackHandItems[i];

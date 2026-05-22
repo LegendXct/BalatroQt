@@ -35,6 +35,7 @@ signals:
     void pressed(ConsumableItem *self, Qt::MouseButton button);
     void dragMoved(ConsumableItem *self, QPointF scenePos);
     void dragReleased(ConsumableItem *self, QPointF scenePos);
+    void hoverChanged(ConsumableItem *self, bool hovered);
 
 protected:
     void mousePressEvent(QGraphicsSceneMouseEvent *e) override;

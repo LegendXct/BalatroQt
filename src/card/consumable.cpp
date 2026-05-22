@@ -229,109 +229,173 @@ Consumable createConsumable(ConsumableType type) {
     c.sellValue = (c.kind == ConsumableKind::Spectral) ? 2 : 1;
 
     switch (type) {
+    // 注：description 用 {C:xxx}...{} markup，BalatroInfoPanel 的 fromLuaMarkup 会
+    // 转成对应彩色 HTML（chips=蓝 / mult=红 / money=金 / green=绿色概率 / tarot/planet=对应集合色 等）。
+    // 凡是"把选定手牌变为某增强牌"的塔罗，把对应增强效果直接附在描述末尾，方便玩家
+    // 不切到帮助页就知道效果。
     case ConsumableType::Tarot_Fool:
-        c.name = "愚者"; c.description = "生成上一张使用过的塔罗/星球牌（不包括愚者和幻灵牌）";
+        c.name = "愚者";
+        c.description = "重新生成本盘上一次使用的\n"
+                        "{C:tarot}塔罗牌{} 或 {C:planet}星球牌{}\n"
+                        "{C:inactive}（不包括愚者本身）";
         c.effect = [](UseContext &ctx) { ctx.state.addFoolCopyConsumable(); };
         break;
     case ConsumableType::Tarot_Magician:
-        c.name = "魔术师"; c.description = "把最多 2 张选中手牌变为 Lucky 增强";
+        c.name = "魔术师";
+        c.description = "至多 {C:attention}2{} 张选定手牌\n"
+                        "变为 {C:attention}幸运牌\n"
+                        "{C:green}1/5{} 概率 {C:mult}+20{} 倍率\n"
+                        "{C:green}1/15{} 概率 {C:money}$20";
         c.needsSelection = 1; c.maxSelection = 2;
         c.effect = [](UseContext &ctx) { enhanceSelected(ctx, Enhancement::Lucky, 2); };
         break;
     case ConsumableType::Tarot_HighPriestess:
-        c.name = "女祭司"; c.description = "生成最多 2 张随机星球牌";
+        c.name = "女祭司";
+        c.description = "生成至多 {C:attention}2{} 张\n"
+                        "随机 {C:planet}星球牌\n"
+                        "{C:inactive}（需要消耗槽位）";
         c.effect = [](UseContext &ctx) { addPlanets(ctx, 2); };
         break;
     case ConsumableType::Tarot_Empress:
-        c.name = "皇后";   c.description = "把最多 2 张选中手牌变为 Mult 增强";
+        c.name = "皇后";
+        c.description = "至多 {C:attention}2{} 张选定手牌\n"
+                        "变为 {C:attention}倍率牌\n"
+                        "{C:mult}+4{} 倍率";
         c.needsSelection = 1; c.maxSelection = 2;
         c.effect = [](UseContext &ctx) { enhanceSelected(ctx, Enhancement::Mult, 2); };
         break;
     case ConsumableType::Tarot_Emperor:
-        c.name = "皇帝"; c.description = "生成最多 2 张随机塔罗牌";
+        c.name = "皇帝";
+        c.description = "生成至多 {C:attention}2{} 张\n"
+                        "随机 {C:tarot}塔罗牌\n"
+                        "{C:inactive}（需要消耗槽位）";
         c.effect = [](UseContext &ctx) { addTarots(ctx, 2); };
         break;
     case ConsumableType::Tarot_Hierophant:
-        c.name = "教皇";   c.description = "把最多 2 张选中手牌变为 Bonus 增强";
+        c.name = "教皇";
+        c.description = "至多 {C:attention}2{} 张选定手牌\n"
+                        "变为 {C:attention}奖励牌\n"
+                        "{C:chips}+30{} 筹码";
         c.needsSelection = 1; c.maxSelection = 2;
         c.effect = [](UseContext &ctx) { enhanceSelected(ctx, Enhancement::Bonus, 2); };
         break;
     case ConsumableType::Tarot_Chariot:
-        c.name = "战车";   c.description = "把 1 张选中手牌变为 Steel 增强";
+        c.name = "战车";
+        c.description = "{C:attention}1{} 张选定手牌\n"
+                        "变为 {C:attention}钢铁牌\n"
+                        "{X:mult,C:white}X1.5{} 倍率（手牌持有时）";
         c.needsSelection = 1; c.maxSelection = 1;
         c.effect = [](UseContext &ctx) { enhanceSelected(ctx, Enhancement::Steel, 1); };
         break;
     case ConsumableType::Tarot_Lovers:
-        c.name = "恋人";   c.description = "把 1 张选中手牌变为 Wild 增强";
+        c.name = "恋人";
+        c.description = "{C:attention}1{} 张选定手牌\n"
+                        "变为 {C:attention}万能牌\n"
+                        "可视作任意花色";
         c.needsSelection = 1; c.maxSelection = 1;
         c.effect = [](UseContext &ctx) { enhanceSelected(ctx, Enhancement::Wild, 1); };
         break;
     case ConsumableType::Tarot_Justice:
-        c.name = "正义"; c.description = "把 1 张选中手牌变为 Glass 增强";
+        c.name = "正义";
+        c.description = "{C:attention}1{} 张选定手牌\n"
+                        "变为 {C:attention}玻璃牌\n"
+                        "{X:mult,C:white}X2{} 倍率\n"
+                        "{C:green}1/4{} 概率摧毁此牌";
         c.needsSelection = 1; c.maxSelection = 1;
         c.effect = [](UseContext &ctx) { enhanceSelected(ctx, Enhancement::Glass, 1); };
         break;
     case ConsumableType::Tarot_Tower:
-        c.name = "塔";     c.description = "把 1 张选中手牌变为 Stone 增强";
+        c.name = "塔";
+        c.description = "{C:attention}1{} 张选定手牌\n"
+                        "变为 {C:attention}石头牌\n"
+                        "{C:chips}+50{} 筹码 · 无点数花色";
         c.needsSelection = 1; c.maxSelection = 1;
         c.effect = [](UseContext &ctx) { enhanceSelected(ctx, Enhancement::Stone, 1); };
         break;
     case ConsumableType::Tarot_HangedMan:
-        c.name = "倒吊人"; c.description = "摧毁最多 2 张选中手牌";
+        c.name = "倒吊人";
+        c.description = "摧毁至多 {C:attention}2{} 张\n"
+                        "选定手牌";
         c.needsSelection = 1; c.maxSelection = 2;
         c.effect = [](UseContext &ctx) { destroySelectedGainGold(ctx, 2, 0); };
         break;
     case ConsumableType::Tarot_Hermit:
-        c.name = "隐者";   c.description = "金币翻倍（最多 +20）";
+        c.name = "隐者";
+        c.description = "金币翻倍\n"
+                        "{C:inactive}最多 {C:money}+$20";
         c.effect = [](UseContext &ctx) {
             int gain = qMin(ctx.state.gold(), 20);
             ctx.state.addGold(gain);
         };
         break;
     case ConsumableType::Tarot_Wheel:
-        c.name = "命运之轮"; c.description = "1/4 概率给随机无版本小丑添加闪箔/镭射/多彩";
+        c.name = "命运之轮";
+        c.description = "{C:green}1/4{} 概率给随机小丑\n"
+                        "添加 {C:dark_edition}闪箔{} / {C:dark_edition}镭射{} / {C:dark_edition}多彩";
         c.effect = [](UseContext &ctx) { wheelOfFortune(ctx); };
         break;
     case ConsumableType::Tarot_Strength:
-        c.name = "力量"; c.description = "最多 2 张选中手牌点数 +1";
+        c.name = "力量";
+        c.description = "至多 {C:attention}2{} 张选定手牌\n"
+                        "点数 {C:attention}+1";
         c.needsSelection = 1; c.maxSelection = 2;
         c.effect = [](UseContext &ctx) { rankUpSelected(ctx, 2); };
         break;
     case ConsumableType::Tarot_Death:
-        c.name = "死神"; c.description = "选 2 张牌：左侧牌复制右侧牌";
+        c.name = "死神";
+        c.description = "选定 {C:attention}2{} 张：\n"
+                        "{C:attention}靠左{} 那张变为 {C:attention}靠右{} 那张\n"
+                        "{C:inactive}（拖动可调位置）";
         c.needsSelection = 2; c.maxSelection = 2;
         c.effect = [](UseContext &ctx) { deathConvertSelected(ctx); };
         break;
     case ConsumableType::Tarot_Temperance:
-        c.name = "节制"; c.description = "获得当前小丑总售价的金币，最多 +$50";
+        c.name = "节制";
+        c.description = "获得当前所有小丑\n"
+                        "售价之和的金币\n"
+                        "{C:inactive}最多 {C:money}+$50";
         c.effect = [](UseContext &ctx) { temperanceGain(ctx); };
         break;
     case ConsumableType::Tarot_Devil:
-        c.name = "恶魔"; c.description = "把 1 张选中手牌变为 Gold 增强";
+        c.name = "恶魔";
+        c.description = "{C:attention}1{} 张选定手牌\n"
+                        "变为 {C:attention}黄金牌\n"
+                        "回合末仍在手 {C:money}+$3";
         c.needsSelection = 1; c.maxSelection = 1;
         c.effect = [](UseContext &ctx) { enhanceSelected(ctx, Enhancement::Gold, 1); };
         break;
     case ConsumableType::Tarot_Star:
-        c.name = "星星"; c.description = "把最多 3 张选中手牌变为方块";
+        c.name = "星星";
+        c.description = "至多 {C:attention}3{} 张选定手牌\n"
+                        "花色变为 {C:diamonds}方块";
         c.needsSelection = 1; c.maxSelection = 3;
         c.effect = [](UseContext &ctx) { suitSelected(ctx, Suit::Diamonds, 3); };
         break;
     case ConsumableType::Tarot_Moon:
-        c.name = "月亮"; c.description = "把最多 3 张选中手牌变为梅花";
+        c.name = "月亮";
+        c.description = "至多 {C:attention}3{} 张选定手牌\n"
+                        "花色变为 {C:clubs}梅花";
         c.needsSelection = 1; c.maxSelection = 3;
         c.effect = [](UseContext &ctx) { suitSelected(ctx, Suit::Clubs, 3); };
         break;
     case ConsumableType::Tarot_Sun:
-        c.name = "太阳"; c.description = "把最多 3 张选中手牌变为红心";
+        c.name = "太阳";
+        c.description = "至多 {C:attention}3{} 张选定手牌\n"
+                        "花色变为 {C:hearts}红桃";
         c.needsSelection = 1; c.maxSelection = 3;
         c.effect = [](UseContext &ctx) { suitSelected(ctx, Suit::Hearts, 3); };
         break;
     case ConsumableType::Tarot_Judgement:
-        c.name = "审判"; c.description = "生成 1 张随机小丑";
+        c.name = "审判";
+        c.description = "生成 {C:attention}1{} 张\n"
+                        "随机 {C:attention}小丑牌\n"
+                        "{C:inactive}（需要小丑槽位）";
         c.effect = [](UseContext &ctx) { ctx.state.addRandomRareJoker(); };
         break;
     case ConsumableType::Tarot_World:
-        c.name = "世界"; c.description = "把最多 3 张选中手牌变为黑桃";
+        c.name = "世界";
+        c.description = "至多 {C:attention}3{} 张选定手牌\n"
+                        "花色变为 {C:spades}黑桃";
         c.needsSelection = 1; c.maxSelection = 3;
         c.effect = [](UseContext &ctx) { suitSelected(ctx, Suit::Spades, 3); };
         break;

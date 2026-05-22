@@ -168,8 +168,8 @@ ConsumableItem::ConsumableItem(const Consumable &c, QGraphicsItem *parent)
 {
     setAcceptHoverEvents(true);
     setCursor(Qt::PointingHandCursor);
-    setToolTip(QString("%1\n%2\n左键: 使用    右键: 卖出 (+$%3)")
-                   .arg(mC.name, mC.description).arg(mC.sellValue));
+    // 不再用 Qt 原生 QToolTip——它会和 MainWindow::mHoverTooltip (BalatroInfoPanel)
+    // 同时弹出，造成"暗色 info + 浅色系统 tooltip"重叠。统一由场景级浮窗处理。
 
     if (consumableNeedsShaderTick(mC)) {
         ensureConsumableShaderTimer();
@@ -272,6 +272,7 @@ void ConsumableItem::hoverEnterEvent(QGraphicsSceneHoverEvent *e)
     setTransformOriginPoint(WIDTH / 2.0, HEIGHT / 2.0);
     animateScale(1.08, 100);
     update();
+    emit hoverChanged(this, true);
     QGraphicsObject::hoverEnterEvent(e);
 }
 
@@ -292,6 +293,7 @@ void ConsumableItem::hoverLeaveEvent(QGraphicsSceneHoverEvent *e)
     applyHoverTransform();
     animateScale(1.0, 110);
     update();
+    emit hoverChanged(this, false);
     QGraphicsObject::hoverLeaveEvent(e);
 }
 

@@ -185,6 +185,22 @@ private:
     QLabel *mLblHandName  = nullptr;   // 牌型名(高牌/对子/...)
     QLabel *mLblHandLevel = nullptr;   // "lv.X"
 
+    // 牌型升级动画（行星牌 / 黑洞 / 同道之星等）：复刻原版 level_up_hand
+    // 的侧边栏分步演出（基础倍率→基础筹码→等级颜色，逐步抖动 + 变色）。
+    QHash<HandType, HandLevel> mPrevHandLevels;     // 上一次 handLevelsChanged 时的快照
+    bool mHandLevelInitialized = false;
+    bool mHandLevelAnimating   = false;             // 动画期间冻结 updateHandPreview()
+    int  mHandLevelAnimToken   = 0;                 // 防止过期回调踩到新一次动画
+    void onHandLevelsChanged();
+    void playHandLevelUpAnimation(HandType t, int prevLevel, int newLevel,
+                                  int prevChips, int newChips,
+                                  int prevMult, int newMult);
+    // 让一个 QLabel 做一次"juice_up"风格的字号脉冲（先放大再回弹），不依赖 layout 位置改动。
+    void juiceLabelPulse(QLabel *lbl, double scaleUp = 1.18, int durationMs = 360);
+    // 在某个 QLabel 上方短暂浮出一个"+N"色块，对应原版 attention_text(cover=…)。
+    // 用透明子 QLabel 覆盖在 anchor 标签所在矩形之上，淡入 → 悬停 → 淡出后自动销毁。
+    void spawnLabelDelta(QLabel *anchor, const QString &text, const QColor &bgColor);
+
     QVector<FloatingScore*> mFloatingScores;
 
     void setContextPage(int page);
@@ -289,6 +305,18 @@ private:
     QWidget *mCardInfoPanel = nullptr;
     QLabel *mCardInfoName = nullptr;
     QLabel *mCardInfoDesc = nullptr;
+
+    // 统一的"原版样式描述浮窗"：手牌（playing card）、小丑、消耗牌悬浮时都用这个。
+    // 关键：必须是 mPlayPage 的子 QWidget，不要塞进 QGraphicsScene——
+    // BalatroInfoPanel 自身带 QGraphicsDropShadowEffect，再套一层 QGraphicsProxyWidget
+    // 在某些驱动上会渲染成空白/0×0，导致 hover 完全不显示（商店里的浮窗是子 widget 所以正常）。
+    class BalatroInfoPanel *mHoverTooltip = nullptr;
+    void ensureHoverTooltip();
+    void showHoverTooltipNearScene(class QGraphicsObject *anchor, double anchorWidth);
+    void showCardHoverTooltip(CardItem *card);
+    void showJokerHoverTooltip(int jokerIdx);
+    void showConsumableHoverTooltip(int consumableIdx);
+    void hideHoverTooltip();
 
     QWidget           *mPlayPage          = nullptr;     // 对局页（包 mLeftPanel + mView）
     BlindSelectWidget *mBlindSelectWidget = nullptr;

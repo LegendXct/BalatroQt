@@ -38,6 +38,8 @@ qt_add_executable(BalatroQt
     src/ui/dynamicbackgrounditem.h src/ui/dynamicbackgrounditem.cpp
     src/ui/splashshaderoverlay.h src/ui/splashshaderoverlay.cpp
     src/ui/animatedblindchip.h src/ui/animatedblindchip.cpp
+    src/ui/balatroinfopanel.h src/ui/balatroinfopanel.cpp
+    src/ui/cardtooltipformat.h
 )
 
 target_include_directories(BalatroQt

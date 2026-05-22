@@ -10,6 +10,7 @@ class QPushButton;
 class QScrollArea;
 class QGridLayout;
 class QResizeEvent;
+class BalatroInfoPanel;
 
 class DeckViewWidget : public QWidget
 {
@@ -56,6 +57,13 @@ private:
     void refreshGrid();
     QPixmap renderCard(const CardData &card, const QSize &size) const;
     QString cardExtraText(const CardData &card) const;
+
+    BalatroInfoPanel *mHoverTooltip = nullptr;
+
+public:
+    // 给匿名命名空间里的 DeckCardPreviewLabel 调用：hover 进入/离开时切换浮窗。
+    void showHoverInfo(QWidget *anchor, const CardData &card);
+    void hideHoverInfo();
 };
 
 #endif // DECKVIEWWIDGET_H

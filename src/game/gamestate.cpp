@@ -1989,6 +1989,13 @@ QVector<CardData> GameState::drawPackHand()
         if (mDeck.isEmpty()) break;
         out.append(mDeck.draw());
     }
+    // 塔罗 / 幻灵包打开时，临时手牌也要遵循玩家当前的理牌方式——
+    // 否则随机抽出的顺序看起来"乱"。Manual 模式不动顺序（玩家自己拖过的当前手牌的次序与抽出的随机序无关，
+    // 这里就当 Manual 是"按抽到的随机顺序"也合理）。
+    if (mSortMode == HandSortMode::ByRank)
+        std::sort(out.begin(), out.end(), rankComp);
+    else if (mSortMode == HandSortMode::BySuit)
+        std::sort(out.begin(), out.end(), suitComp);
     emit scoreChanged();
     return out;
 }
