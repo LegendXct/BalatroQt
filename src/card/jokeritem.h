@@ -6,16 +6,20 @@
 #include <QPointF>
 #include "joker.h"
 
+class CardShadowItem;
+
 class JokerItem : public QGraphicsObject
 {
     Q_OBJECT
+    Q_PROPERTY(qreal shadowLift READ shadowLift WRITE setShadowLift)
 public:
     // 图集采样单元（Jokers.png 每格固定 142×190）。
     static constexpr int SRC_W = 142;
     static constexpr int SRC_H = 190;
-    // 场景显示尺寸：与 CardItem 同步放大约 20%，让小窗口下也能看清。
-    static constexpr int WIDTH = 170;
-    static constexpr int HEIGHT = 228;
+    // 场景显示尺寸：商店去掉金额栏后，把槽位卡牌略微放大与商店保持一致。
+    // 162×218 ≈ 图集 142×190 × 1.14，aspect 0.743 与原版 CARD_W/H 完全一致。
+    static constexpr int WIDTH = 162;
+    static constexpr int HEIGHT = 218;
 
     static void loadResources();                  // main.cpp 里调一次
     static QPoint spritePos(JokerType type);      // 在 Jokers.png 里的(列,行)
@@ -26,6 +30,7 @@ public:
                                    bool animated = true);
 
     explicit JokerItem(const Joker &joker, QGraphicsItem *parent = nullptr);
+    ~JokerItem() override;
 
     QRectF boundingRect() const override;
     void paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) override;
@@ -33,6 +38,11 @@ public:
     const Joker &joker() const { return mJoker; }
     void juiceUp(double scaleAmount = 1.15, int durationMs = 200);
     void moveTo(const QPointF &target, int durationMs = 180);
+
+    qreal shadowLift() const { return mShadowLift; }
+    void setShadowLift(qreal v);
+    // 计分阶段抬升：让 OnPlayedHand / OnScoringCard 触发时阴影最大化。
+    void setScoringLifted(bool lifted);
 
 signals:
     void clicked(JokerItem *self);
@@ -48,6 +58,7 @@ protected:
     void hoverEnterEvent(QGraphicsSceneHoverEvent *e) override;
     void hoverMoveEvent(QGraphicsSceneHoverEvent *e) override;
     void hoverLeaveEvent(QGraphicsSceneHoverEvent *e) override;
+    QVariant itemChange(GraphicsItemChange change, const QVariant &value) override;
 
 private:
     Joker mJoker;
@@ -58,8 +69,19 @@ private:
     qreal mRestZ = 0;
     double mHoverTiltX = 0.0;
     double mHoverTiltY = 0.0;
+    // 拖拽水平速度倾斜，与 CardItem 用同一套折算公式，让小丑/塔罗/星球 也具备甩动手感。
+    double mDragTilt = 0.0;
+    QPointF mLastDragScenePos;
+    qint64  mLastDragTimeMs = 0;
+    qreal mShadowLift = 0.0;
+    bool mScoringLifted = false;
+    CardShadowItem *mShadow = nullptr;
     void applyHoverTransform();
     void animateScale(qreal target, int durationMs = 120);
+    void animateShadowLift(qreal target, int durationMs = 120);
+    void triggerHoverJitter();
+    qreal currentShadowTarget() const;
+    void updateShadowZ();
     static QPixmap *sSheet;
 };
 

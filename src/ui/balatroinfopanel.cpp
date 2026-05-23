@@ -2,6 +2,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QLabel>
+#include <QTextDocument>
 
 BalatroInfoPanel::BalatroInfoPanel(const QFont &cnFont, QWidget *parent)
     : QWidget(parent), mCNFont(cnFont)
@@ -97,7 +98,8 @@ BalatroInfoPanel::BalatroInfoPanel(const QFont &cnFont, QWidget *parent)
     mBadgesLayout = new QHBoxLayout(mBadgesRow);
     mBadgesLayout->setContentsMargins(0, 2, 0, 0);
     mBadgesLayout->setSpacing(5);
-    mBadgesLayout->setAlignment(Qt::AlignCenter);
+    // 不再使用 AlignCenter——badges 在 setContent 时会设为 Expanding，平均瓜分整条宽度
+    // （原版底部那条"塔罗牌 / 普通"等胶囊就是横向撑满）。
     inner->addWidget(mBadgesRow);
 
     outer->addWidget(mInner);
@@ -141,23 +143,84 @@ void BalatroInfoPanel::setContent(const QString &name, const QString &body,
         auto *pill = new QLabel(b.text, mBadgesRow);
         pill->setAttribute(Qt::WA_StyledBackground, true);
         pill->setAlignment(Qt::AlignCenter);
-        QFont pf = mCNFont; pf.setPixelSize(12); pf.setBold(true);
+        QFont pf = mCNFont; pf.setPixelSize(13); pf.setBold(true);
         pill->setFont(pf);
-        // 原版 create_badge：彩色圆角块 + 白字，emboss 加一道深一档的下沿色——这里用上下渐变 + 描边模拟。
+        // 横向 Expanding：多个 pill 在 BadgesRow 里平均瓜分宽度——对齐原版底部 "塔罗牌"
+        // 这种胶囊撑满整条 info 框的视觉。
+        pill->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+        pill->setMinimumHeight(22);
+        // 原版 create_badge：彩色圆角块 + 白字，emboss 加一道深一档的下沿色——这里用描边模拟。
         const QString bgHex = b.bg.name();
         const QColor darker = b.bg.darker(135);
         pill->setStyleSheet(QString(
             "QLabel { background: %1; color: %2;"
             "  border: 1px solid %3;"
             "  border-bottom: 2px solid %3;"
-            "  border-radius: 7px; padding: 2px 10px; }"
+            "  border-radius: 7px; padding: 2px 8px; }"
         ).arg(bgHex, b.fg.name(), darker.name()));
-        mBadgesLayout->addWidget(pill);
+        // stretch=1 平分；如果将来想做"主 badge 占主体 + 小 badge 收尾"可改成不同 stretch。
+        mBadgesLayout->addWidget(pill, 1);
     }
     mBadgesRow->setVisible(!badges.isEmpty());
 
-    setFixedWidth(qMax(160, preferredWidth));
-    adjustSize();
+    // 宽度严格固定，让高度跟随实际内容自适应。
+    // Qt 的 QLabel + wordWrap 需要显式给出宽度，heightForWidth 才能算出正确的高度；
+    // 不然 adjustSize() 会按"单行不换行"算高度，长描述被截断（用户反馈6）。
+    const int w = qMax(110, preferredWidth);
+    setFixedWidth(w);
+    setMaximumHeight(QWIDGETSIZE_MAX);
+    // 关键：第一次显示时高度不对的根因——QLabel 的 wordWrap 必须把 heightForWidth 打开，
+    // 父 layout 才会按"按当前宽度算环绕高度"算。光设 minimumWidth + adjustSize 不够。
+    auto enableHFW = [](QLabel *lbl) {
+        if (!lbl) return;
+        QSizePolicy sp = lbl->sizePolicy();
+        sp.setHeightForWidth(true);
+        lbl->setSizePolicy(sp);
+    };
+    enableHFW(mBodyLbl);
+    enableHFW(mNameLbl);
+    const int bodyWidth = qMax(40, w - 38);
+    // 用 QTextDocument 真实排版一次拿换行后的高度——QLabel 的 heightForWidth 在
+    // 首次 show 前 font metrics 还没就绪，返回值会偏小，导致第一次 hover info 被截。
+    auto measureHtmlHeight = [](const QFont &f, const QString &text, int width) -> int {
+        if (text.isEmpty()) return 0;
+        QTextDocument doc;
+        doc.setDefaultFont(f);
+        doc.setTextWidth(width);
+        if (text.contains(QLatin1Char('<'))) doc.setHtml(text);
+        else doc.setPlainText(text);
+        return int(doc.size().height() + 0.999);
+    };
+    if (mBodyLbl) {
+        mBodyLbl->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::MinimumExpanding);
+        QSizePolicy sp = mBodyLbl->sizePolicy();
+        sp.setHeightForWidth(true);
+        mBodyLbl->setSizePolicy(sp);
+        mBodyLbl->setMinimumWidth(bodyWidth);
+        mBodyLbl->setMaximumWidth(bodyWidth);
+        const int measured = measureHtmlHeight(mBodyLbl->font(), body, bodyWidth);
+        if (measured > 0) mBodyLbl->setMinimumHeight(measured + 4);
+    }
+    if (mNameLbl) {
+        mNameLbl->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+        // 跟 body 一样用 QTextDocument 测高，避免长名字（"X 之心：永恒/牢不可破"等）首次截掉。
+        const int nameWidth = bodyWidth;
+        mNameLbl->setMinimumWidth(nameWidth);
+        mNameLbl->setMaximumWidth(nameWidth);
+        const int measured = measureHtmlHeight(mNameLbl->font(), name, nameWidth);
+        if (measured > 0) mNameLbl->setMinimumHeight(measured + 2);
+    }
+    // ensurePolished 让 QStyle / font metrics 在 show 前完成初始化（否则首次 heightForWidth
+    // 会用默认 font，第二次 hover 时才用正确的 mCNFont 重算）。
+    ensurePolished();
+    if (mInner) mInner->ensurePolished();
+    if (mBodyBox) mBodyBox->ensurePolished();
+    if (mBodyLbl) mBodyLbl->ensurePolished();
+    // 多跑几遍 activate+adjustSize：Qt 5/6 在嵌套 layout + wordWrap 场景下偶尔需要 2-3 次。
+    for (int i = 0; i < 3; ++i) {
+        if (layout()) layout()->activate();
+        adjustSize();
+    }
 }
 
 void BalatroInfoPanel::setBodyMinHeight(int h) {
@@ -181,4 +244,57 @@ QColor BalatroInfoPanel::sealPillColor(int kind) {
     case 3: return QColor("#8867a5");  // purple
     }
     return QColor("#888888");
+}
+
+// ── BalatroInfoCluster ────────────────────────────────────────────────────
+BalatroInfoCluster::BalatroInfoCluster(const QFont &cnFont, QWidget *parent)
+    : QWidget(parent), mCNFont(cnFont)
+{
+    setAttribute(Qt::WA_StyledBackground, false);
+    mRowLayout = new QHBoxLayout(this);
+    mRowLayout->setContentsMargins(0, 0, 0, 0);
+    mRowLayout->setSpacing(8);
+    mRowLayout->setAlignment(Qt::AlignTop | Qt::AlignLeft);
+    mMain = new BalatroInfoPanel(mCNFont, this);
+    mRowLayout->addWidget(mMain, 0, Qt::AlignTop);
+}
+
+void BalatroInfoCluster::clear()
+{
+    for (auto *p : mSidePanels) {
+        mRowLayout->removeWidget(p);
+        p->deleteLater();
+    }
+    mSidePanels.clear();
+}
+
+void BalatroInfoCluster::setMainContent(const QString &name, const QString &body,
+                                        const QVector<BalatroInfoPanel::Badge> &badges,
+                                        int preferredWidth, bool nameHasWhiteBox)
+{
+    mMain->setContent(name, body, badges, preferredWidth, nameHasWhiteBox);
+}
+
+void BalatroInfoCluster::addSidePanel(const BalatroInfoPanel::SideEntry &entry)
+{
+    auto *p = new BalatroInfoPanel(mCNFont, this);
+    // 副面板：name 走暗底白字（不包白盒），body 仍是白底圆角文字区。
+    p->setContent(entry.name, entry.body, entry.badges,
+                  qMax(110, entry.preferredWidth), /*nameHasWhiteBox=*/false);
+    mRowLayout->addWidget(p, 0, Qt::AlignTop);
+    mSidePanels.append(p);
+}
+
+void BalatroInfoCluster::relayout()
+{
+    // 每张子面板自己的 layout 已在 setContent 里强制 polish/activate 过，这里只让 cluster
+    // 自己的 HBoxLayout 把它们收紧。多跑几次 activate+adjustSize 来处理 wordWrap +
+    // heightForWidth 的层叠场景。
+    ensurePolished();
+    if (mMain) mMain->ensurePolished();
+    for (auto *p : mSidePanels) if (p) p->ensurePolished();
+    for (int i = 0; i < 3; ++i) {
+        if (auto *lay = layout()) lay->activate();
+        adjustSize();
+    }
 }

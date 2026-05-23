@@ -93,6 +93,10 @@ void PackOpenWidget::buildUi()
     mLblChoose->setAlignment(Qt::AlignCenter);
 
     // ── 临时手牌区:QGraphicsView + QGraphicsScene + CardItem ──
+    // 关键：mHandView 不再放进 VBoxLayout 的 240px 槽里——而是作为 mPanel 的子部件
+    // 全尺寸覆盖整个面板，这样拖牌时卡片可以在面板任意位置可见，不再被原本的小条
+    // 剪裁（对齐用户反馈3）。其它子部件（标题/选项/按钮）位于 mPanel 内并依靠
+    // raise() 排在 mHandView 之上。透明 spacer 占位以维持原 VBox 布局高度。
     mHandScene = new QGraphicsScene(this);
     mHandView  = new QGraphicsView(mHandScene, mPanel);
     mHandView->setRenderHints(QPainter::Antialiasing | QPainter::SmoothPixmapTransform);
@@ -102,15 +106,16 @@ void PackOpenWidget::buildUi()
     mHandView->setStyleSheet("background: transparent;");
     mHandView->setAttribute(Qt::WA_TranslucentBackground);
     mHandView->viewport()->setAttribute(Qt::WA_TranslucentBackground);
-    mHandView->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    // 开包临时手牌相对主场景应该再小一档——主场景手牌已经接近卡片原生尺寸，
-    // 但开包面板上方还有标题/选项卡，原生尺寸在小窗口里显得过大。
-    // 这里用 view scale = 0.78，把视觉尺寸压到主场景的约 78%。
-    // 高度同步压成 240（原 320 × 0.78 ≈ 250，向下取一点给整体面板更多余量）。
-    mHandView->setMinimumHeight(240);
-    mHandView->setMaximumHeight(240);
     mHandView->setMouseTracking(true);
-    root->addWidget(mHandView);
+    // 占位：让 VBoxLayout 仍然在中间留出 240px 高度。spacer 设为 WA_TransparentForMouseEvents
+    // 让点击直接穿透到下方（mHandView 上层 raise 时为它，非 raise 时为 mPanel 自身/无）。
+    auto *handSlotSpacer = new QWidget(mPanel);
+    handSlotSpacer->setObjectName("handSlotSpacer");
+    handSlotSpacer->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+    handSlotSpacer->setStyleSheet("background: transparent;");
+    handSlotSpacer->setFixedHeight(240);
+    handSlotSpacer->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
+    root->addWidget(handSlotSpacer);
 
     // ── 中间:左侧包内牌选项,右侧仓库特殊牌 ──
     auto *midRow = new QWidget(mPanel);
@@ -133,7 +138,9 @@ void PackOpenWidget::buildUi()
         ou.card = new QWidget(optionsBox);
         // 卡下方原本有一行 nameLbl 文本（"黑桃J / 太空人 / 木星"）——按用户反馈去掉，
         // 卡片整体下移，让默认状态看起来更贴近原版 booster 包内"卡居中略偏下"的布局。
-        ou.card->setFixedSize(184, 280);
+        // 用户反馈：148×198 还是显得偏大；再缩一档到接近图集原始 142×190 的尺寸 134×180，
+        // 容器按比例 148×226。
+        ou.card->setFixedSize(148, 226);
         ou.card->setStyleSheet("background:transparent; border:none;");
         ou.card->setAttribute(Qt::WA_Hover, true);
         ou.card->installEventFilter(this);
@@ -141,14 +148,13 @@ void PackOpenWidget::buildUi()
         // 用绝对定位：默认状态 card 图垂直略偏下（restImageY > 居中），
         // 点击聚焦时整体上移让出底部空间给"选择/使用"小按钮——对齐原版
         // card_focus_button 的 align="bm" 视觉。
-        constexpr int kImageW = 168, kImageH = 226;
-        constexpr int kBtnH   = 28;
-        constexpr int kBtnW   = 96;
-        // restImageY：让卡更靠下，剩余 (280-226)/2 = 27 的间距对半分给上下不太对——
-        // 这里把卡贴到接近底部（留 6 px），上面留出 48 px 给 info 浮窗 hover 锚定。
+        constexpr int kImageW = 134, kImageH = 180;
+        constexpr int kBtnH   = 26;
+        constexpr int kBtnW   = 88;
+        // restImageY：让卡更靠下，留出顶部空间给 info 浮窗 hover 锚定。
         const int restImageY = ou.card->height() - kImageH - 6;
-        // liftImageY：上移 30 px 让出底部空间给按钮。
-        const int liftImageY = qMax(2, restImageY - 30);
+        // liftImageY：上移 28 px 让出底部空间给按钮。
+        const int liftImageY = qMax(2, restImageY - 28);
 
         ou.imageLbl = new QLabel(ou.card);
         ou.imageLbl->setAlignment(Qt::AlignCenter);
@@ -170,18 +176,15 @@ void PackOpenWidget::buildUi()
         QFont bf = mCNFont; bf.setPixelSize(14); bf.setBold(true);
         ou.takeBtn->setFont(bf);
         ou.takeBtn->setCursor(Qt::PointingHandCursor);
-        // 对齐原版 card_focus_button：colour=G.C.BLACK #374244 + shadow=true（仅下沿暗色 emboss）
-        // + r=0.08 圆角。去掉以前四边描边的写法。
-        ou.takeBtn->setStyleSheet(
-            "QPushButton { background:#374244; color:white;"
-            "  border: 1px solid #2a3133;"
-            "  border-bottom: 3px solid #1d2627;"
-            "  border-radius: 6px; padding: 3px 12px 1px 12px; }"
-            "QPushButton:hover { background:#4f6367; border-bottom-color:#2a3133; }"
-            "QPushButton:disabled { background:#2a3133; color:#777; border-color:#1d2627; }"
-            );
+        // 对齐原版 button_callbacks.lua: can_use_consumeable / can_select_card——
+        //   使用（消耗类）= G.C.RED  #fe5f55
+        //   选择（小丑 / 标准包） = G.C.GREEN #4BC292
+        // 禁用统一是 G.C.UI.BACKGROUND_INACTIVE = #666666。
+        // 具体颜色在 refreshOptionUi / setOptionFocused 根据 PackKind 切换。默认用 GREEN，
+        // 这里只设字体 / 圆角 / emboss 风格，颜色由 styleSheet 动态注入。
+        ou.takeBtn->setObjectName("packTakeBtn");
         ou.takeBtn->setGeometry((ou.card->width() - kBtnW) / 2,
-                                liftImageY + kImageH + 6, kBtnW, kBtnH);
+                                liftImageY + kImageH - 2, kBtnW, kBtnH);
         ou.takeBtn->hide();
         connect(ou.takeBtn, &QPushButton::clicked, this, [this, i]() { onChoose(i); });
 
@@ -315,6 +318,12 @@ void PackOpenWidget::open(const PackContent &content,
         setOptionFocused(mFocusedOptIdx, false, false);
         mFocusedOptIdx = -1;
     }
+    // 关键修复（问题4）：之前如果上一次开包走 finalChoice 把 mBtnSkip 禁用，
+    // 重新打开时没有重置，遇到小丑槽满的小丑包就出现"选项灰、跳过也灰"，
+    // 用户只能卖小丑才能继续。这里强制把所有按钮恢复可用状态。
+    if (mBtnSkip) mBtnSkip->setEnabled(true);
+    for (OptUi &ou : mOptUi)
+        if (ou.takeBtn) ou.takeBtn->setEnabled(true);
 
     show();
     raise();
@@ -445,15 +454,22 @@ void PackOpenWidget::refreshHandUi()
     }
     mPackHandItems = reordered;
 
-    // 触发翻面：CardItem::flip() 内部 scale 1→0→1 总时长 240ms，
-    // 中点（≈120ms）切换 CardData——和 mainwindow.cpp 主场景的塔罗 / 幻灵翻面节奏一致。
+    // 触发"翻到背面 → 换数据 → 翻回正面"的双段翻面，对齐 mainwindow.cpp
+    // 的塔罗/幻灵节奏：单次 flip() 只是 1→0→1 的 240ms 收缩+扩张，并且在中点
+    // 把 faceUp 切换到背面。如果只调一次，setCardData() 会因为 keepFaceUp
+    // 保留住"背面"状态，导致永远翻不回来——正是用户反馈的问题1。
     for (int k = 0; k < toFlip.size(); ++k) {
         CardItem *target = toFlip[k];
         const CardData newData = flipNewData[k];
         target->flip();
         QPointer<CardItem> guard(target);
+        // 1) 翻到背面的中点（≈120ms）切换数据，setCardData 保留 faceUp=false。
         QTimer::singleShot(120, this, [guard, newData]() {
             if (guard) guard->setCardData(newData);
+        });
+        // 2) 等首次 flip 整段（240ms）+ 短暂停顿后再翻回正面。
+        QTimer::singleShot(300, this, [guard]() {
+            if (guard) guard->flip();
         });
     }
 
@@ -473,7 +489,31 @@ bool PackOpenWidget::eventFilter(QObject *obj, QEvent *e)
         || e->type() == QEvent::MouseButtonPress) {
         for (int i = 0; i < mOptUi.size(); ++i) {
             if (mOptUi[i].card == obj) {
-                if (e->type() == QEvent::Enter) showOptionTooltip(i);
+                if (e->type() == QEvent::Enter) {
+                    showOptionTooltip(i);
+                    // 与槽位 / 商店里的 JokerItem hover 一致的"弹一下"feedback——给开包里的
+                    // 选项卡也加上视觉抖动。focus 中的选项跳过，避免几何动画冲突。
+                    if (mFocusedOptIdx != i && i < optionCount() && !optionAlreadyChosen(i)
+                        && mOptUi[i].imageLbl) {
+                        QLabel *img = mOptUi[i].imageLbl;
+                        const QRect base = img->geometry();
+                        const QRect up   = base.translated(0, -5);
+                        auto *seq = new QSequentialAnimationGroup(img);
+                        auto *go = new QPropertyAnimation(img, "geometry", seq);
+                        go->setDuration(70);
+                        go->setStartValue(base);
+                        go->setEndValue(up);
+                        go->setEasingCurve(QEasingCurve::OutQuad);
+                        auto *back = new QPropertyAnimation(img, "geometry", seq);
+                        back->setDuration(150);
+                        back->setStartValue(up);
+                        back->setEndValue(base);
+                        back->setEasingCurve(QEasingCurve::OutBack);
+                        seq->addAnimation(go);
+                        seq->addAnimation(back);
+                        seq->start(QAbstractAnimation::DeleteWhenStopped);
+                    }
+                }
                 else if (e->type() == QEvent::Leave) hideTooltip();
                 else if (e->type() == QEvent::MouseButtonPress) {
                     if (i < optionCount() && !optionAlreadyChosen(i) && !mFinishing) {
@@ -526,6 +566,21 @@ void PackOpenWidget::setOptionFocused(int idx, bool focused, bool animate)
                               || mContent.kind == PackKind::Celestial)
                                 ? QStringLiteral("使用")
                                 : QStringLiteral("选择"));
+        // 按按钮类型挑色：使用类（消耗品）= G.C.RED，选择类（小丑/扑克）= G.C.GREEN。
+        const bool isUseBtn = (mContent.kind == PackKind::Arcana
+                               || mContent.kind == PackKind::Spectral
+                               || mContent.kind == PackKind::Celestial);
+        const QString bg = isUseBtn ? "#fe5f55" : "#4BC292";   // G.C.RED / G.C.GREEN
+        const QString bgHover = isUseBtn ? "#ff7065" : "#5fd1a0";
+        const QString bgDown  = isUseBtn ? "#c64a42" : "#3a9870";
+        ou.takeBtn->setStyleSheet(QString(
+            "QPushButton { background:%1; color:white;"
+            "  border: 1px solid %3;"
+            "  border-bottom: 3px solid %3;"
+            "  border-radius: 6px; padding: 3px 12px 1px 12px; }"
+            "QPushButton:hover { background:%2; }"
+            "QPushButton:disabled { background:#666666; color:#cccccc; border-color:#4f4f4f; }"
+        ).arg(bg, bgHover, bgDown));
         ou.takeBtn->show();
         ou.takeBtn->raise();
     } else {
@@ -546,47 +601,52 @@ void PackOpenWidget::showOptionTooltip(int idx)
     }
 
     QVector<BalatroInfoPanel::Badge> badges;
-    QString name = optionName(idx);
-    QString body = optionDesc(idx);
+    QString name;
+    QString bodyHtml;
+    bool playingCardStyle = false;
+    int tooltipW = 175;
 
     switch (mContent.kind) {
     case PackKind::Arcana:
+        name = optionName(idx);
+        bodyHtml = CardTooltipFormat::fromLuaMarkup(optionDesc(idx));
         badges.append({QStringLiteral("塔罗牌"), BalatroInfoPanel::tarotPillColor()});
         break;
     case PackKind::Celestial:
+        name = optionName(idx);
+        bodyHtml = CardTooltipFormat::fromLuaMarkup(optionDesc(idx));
         badges.append({QStringLiteral("行星牌"), BalatroInfoPanel::planetPillColor()});
         break;
     case PackKind::Spectral:
+        name = optionName(idx);
+        bodyHtml = CardTooltipFormat::fromLuaMarkup(optionDesc(idx));
         badges.append({QStringLiteral("幻灵牌"), BalatroInfoPanel::spectralPillColor()});
         break;
     case PackKind::Buffoon:
-        badges.append({QStringLiteral("小丑牌"), BalatroInfoPanel::jokerCommonColor()});
+        if (idx < mContent.jokers.size()) {
+            Joker tmp = createJoker(mContent.jokers[idx]);
+            name = tmp.name;
+            bodyHtml = CardTooltipFormat::fromLuaMarkup(tmp.description);
+            const JokerRarity rr = jokerRarity(mContent.jokers[idx]);
+            badges.append({CardTooltipFormat::rarityName(rr),
+                           CardTooltipFormat::rarityColor(rr)});
+        }
         break;
     case PackKind::Standard:
+        // Standard pack：与主场景手牌悬浮相同——标题只放花色+点数，描述用 cardBodyHtml
+        // 内联（基础筹码 / 增强加成 / edition / 蜡封 全部带色），不再走 optionDesc 的
+        // "Foil/Holo/Poly" 缩写。
         if (idx < mContent.standardCards.size()) {
             const CardData &c = mContent.standardCards[idx];
-            switch (c.edition) {
-            case Edition::Foil:        badges.append({QStringLiteral("镀膜"), BalatroInfoPanel::editionPillColor()}); break;
-            case Edition::Holographic: badges.append({QStringLiteral("全息"), BalatroInfoPanel::editionPillColor()}); break;
-            case Edition::Polychrome:  badges.append({QStringLiteral("多彩"), BalatroInfoPanel::editionPillColor()}); break;
-            default: break;
-            }
-            switch (c.seal) {
-            case Seal::Gold:   badges.append({QStringLiteral("金印章"), BalatroInfoPanel::sealPillColor(0)}); break;
-            case Seal::Red:    badges.append({QStringLiteral("红印章"), BalatroInfoPanel::sealPillColor(1)}); break;
-            case Seal::Blue:   badges.append({QStringLiteral("蓝印章"), BalatroInfoPanel::sealPillColor(2)}); break;
-            case Seal::Purple: badges.append({QStringLiteral("紫印章"), BalatroInfoPanel::sealPillColor(3)}); break;
-            default: break;
-            }
+            name = CardTooltipFormat::cardTitleHtml(c);
+            bodyHtml = CardTooltipFormat::cardBodyHtml(c);
+            playingCardStyle = true;
+            tooltipW = 160;
         }
         break;
     }
 
-    // 仅 Standard pack（扑克牌）才把名字包白盒，其它包都按原版只在描述上加白盒。
-    const bool playingCardStyle = (mContent.kind == PackKind::Standard);
-    // Standard pack 的牌跟主场景手牌同尺寸 160 px；其它消耗类/小丑稍宽一档 175。
-    int tooltipW = playingCardStyle ? 160 : 175;
-    mInfoTooltip->setContent(name, body, badges, tooltipW, playingCardStyle);
+    mInfoTooltip->setContent(name, bodyHtml, badges, tooltipW, playingCardStyle);
 
     // 定位到选项卡顶部上方居中。坐标需要从 ou.card 的 parent 转到本 widget。
     QWidget *card = mOptUi[idx].card;
@@ -681,8 +741,12 @@ void PackOpenWidget::layoutPackHand(int skipIdx, bool instant)
     if (step < 30) step = 30;
     int totalW = (n - 1) * step + CardItem::WIDTH;
     int startX = qMax(8, (areaW - totalW) / 2);
-    // baseY 贴底布局，留出 16px 下边距；上方剩余空间够 hover 抬升 + 悬浮标签。
-    int baseY = qMax(int(CardItem::HEIGHT * 0.30), areaH - CardItem::HEIGHT - 16);
+    // mHandView 现在覆盖整个 mPanel；卡片视觉位置仍要落在原"上方第二行"的
+    // 旧手牌槽位置——把 mPanel 坐标系下槽位中心换算到场景坐标。
+    // 槽位 = panel 内 (titleH 8+24=32 ~ +240)，中心约 32 + 120 = 152。
+    int slotCenterPanelY = 32 + 120;
+    int slotCenterSceneY = int(slotCenterPanelY / kPackHandViewScale);
+    int baseY = qMax(int(CardItem::HEIGHT * 0.30), slotCenterSceneY - CardItem::HEIGHT / 2);
 
     for (int i = 0; i < n; ++i) {
         if (i == skipIdx) continue;
@@ -736,6 +800,10 @@ void PackOpenWidget::onPackCardDragMoved(CardItem *card, QPointF scenePos)
     int n = mPackHandItems.size();
     if (n <= 1) return;
 
+    // 拖拽期间把 mHandView 提到 mPanel 顶层，让卡片在整个面板范围内都可见、
+    // 不再被原手牌槽下方的选项卡 /底部栏视觉遮挡。释放时再 lower 回去恢复点击。
+    if (mHandView) mHandView->raise();
+
     // 拖拽布局需要在场景坐标系算，因此沿用 layoutPackHand 的缩放后逻辑宽。
     constexpr double kPackHandViewScale = 0.78;
     int areaW = int(qMax(1, mHandView->viewport()->width()) / kPackHandViewScale);
@@ -764,8 +832,10 @@ void PackOpenWidget::onPackCardDragMoved(CardItem *card, QPointF scenePos)
     visual.removeAt(from);
     visual.insert(to, card);
 
-    int areaH = int(qMax(1, mHandView->viewport()->height()) / kPackHandViewScale);
-    int baseY = qMax(int(CardItem::HEIGHT * 0.30), areaH - CardItem::HEIGHT - 16);
+    // baseY 与 layoutPackHand 一致：定位到 mPanel 上"原手牌槽"的中心。
+    int slotCenterPanelY = 32 + 120;
+    int slotCenterSceneY = int(slotCenterPanelY / kPackHandViewScale);
+    int baseY = qMax(int(CardItem::HEIGHT * 0.30), slotCenterSceneY - CardItem::HEIGHT / 2);
 
     for (int vi = 0; vi < visual.size(); ++vi) {
         CardItem *ci = visual[vi];
@@ -817,6 +887,8 @@ void PackOpenWidget::onPackCardDragReleased(CardItem *card, QPointF scenePos)
     }
 
     layoutPackHand();   // 所有卡(含刚拖的)动画归位
+    // 释放后把 mHandView 退回 mPanel 底层，让选项 / 跳过按钮恢复可点击。
+    if (mHandView) mHandView->lower();
 }
 
 void PackOpenWidget::refreshOptionUi()
@@ -875,7 +947,9 @@ void PackOpenWidget::refreshInventoryUi()
 
 QPixmap PackOpenWidget::renderOption(int i) const
 {
-    const QSize size(112, 150);
+    // 与 imageLbl 实际尺寸（134×180）一致——比槽位略小一档，对齐用户对开包
+    // 卡片"还是偏大"的反馈。比例仍接近图集原始 142×190 = ~0.747 长宽比。
+    const QSize size(134, 180);
 
     if (mContent.kind == PackKind::Buffoon) {
         QPixmap sheet(":/textures/images/Jokers.png");
@@ -1249,12 +1323,11 @@ void PackOpenWidget::animateCardsIn()
     fadeOnly(mInventoryBox, 180);
     fadeOnly(mBtnSkip, 240);
 
-    // 手牌区：CardItem 从 mPanel 中心位置朝各自目标飞，并伴随 opacity 渐入。
-    // 与 layoutPackHand 一样，这里需要把 viewport 像素换算成场景逻辑坐标。
+    // 手牌区：CardItem 从手牌槽位中心稍上方飞向各自目标，并伴随 opacity 渐入。
     constexpr double kPackHandViewScale = 0.78;
     int areaW = mHandView ? int(mHandView->viewport()->width()  / kPackHandViewScale) : 1024;
-    int areaH = mHandView ? int(mHandView->viewport()->height() / kPackHandViewScale) : 308;
-    QPointF burstFrom(areaW / 2.0, areaH * 0.5 - 200.0);
+    int slotCenterSceneY = int((32 + 120) / kPackHandViewScale);
+    QPointF burstFrom(areaW / 2.0, slotCenterSceneY - 200.0);
     for (int i = 0; i < mPackHandItems.size(); ++i) {
         CardItem *c = mPackHandItems[i];
         if (!c) continue;
@@ -1505,5 +1578,15 @@ void PackOpenWidget::layoutPanel()
     int x = (width()  - mPanel->width())  / 2;
     int y = qMax(6, (height() - mPanel->height()) / 2);
     mPanel->move(x, y);
+
+    // mHandView 现在是 mPanel 的全尺寸子级；默认 lower 到 mPanel 内最底层，
+    // 这样选项/标题/按钮（依然在 mPanel 内）显示在 mHandView 之上、能够正常点击；
+    // 拖牌时再 raise() 到顶（见 onPackCardDragMoved/onPackCardDragReleased）。
+    if (mHandView) {
+        mHandView->setGeometry(0, 0, mPanel->width(), mPanel->height());
+        mHandView->lower();
+    }
+    if (mInfoTooltip) mInfoTooltip->raise();
+
     layoutPackHand();
 }

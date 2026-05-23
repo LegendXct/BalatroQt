@@ -9,6 +9,13 @@
 class GameState;
 struct HandResult;
 
+enum class JokerRarity {
+    Common,     // 1
+    Uncommon,   // 2
+    Rare,       // 3
+    Legendary,  // 4
+};
+
 enum class TriggerTiming {
     OnScoringCard, // 每张记分牌触发一次
     OnPlayedHand, // 出牌后触发
@@ -91,5 +98,6 @@ public:
 };
 
 Joker createJoker(JokerType type);
+JokerRarity jokerRarity(JokerType t);
 
 #endif // JOKER_HH

@@ -1824,6 +1824,30 @@ void GameState::bringHandCardsToFront(const QVector<int> &indices)
     emit handChanged();
 }
 
+void GameState::reorderHandByUids(const QVector<int> &uidOrder)
+{
+    if (uidOrder.isEmpty()) return;
+    QHash<int, CardData> byUid;
+    for (const CardData &c : mHand) byUid.insert(c.uid, c);
+    QVector<CardData> rebuilt;
+    rebuilt.reserve(mHand.size());
+    QSet<int> placed;
+    for (int uid : uidOrder) {
+        auto it = byUid.find(uid);
+        if (it != byUid.end()) {
+            rebuilt.append(it.value());
+            placed.insert(uid);
+        }
+    }
+    // 快照里没有的新牌（理论上"最佳出牌"瞬间不该有补牌，但保险起见保留尾部）。
+    for (const CardData &c : mHand) {
+        if (!placed.contains(c.uid)) rebuilt.append(c);
+    }
+    if (rebuilt.size() != mHand.size()) return;   // 数据不一致就放弃
+    mHand = rebuilt;
+    emit handChanged();
+}
+
 void GameState::scoreCard(const CardData &card, HandResult &result, int playedIdx, bool firstFaceCard)
 {
     // 1) chip:Stone 不加点数 chip
@@ -3058,13 +3082,30 @@ bool GameState::addRandomLegendaryJoker()
 
 void GameState::levelUpAllHands(int times)
 {
+    if (mDryRun) return;
     const HandType all[] = {
         HandType::HighCard, HandType::Pair, HandType::TwoPair, HandType::ThreeOfAKind,
         HandType::Straight, HandType::Flush, HandType::FullHouse, HandType::FourOfAKind,
         HandType::StraightFlush, HandType::RoyalFlush, HandType::FiveOfAKind,
         HandType::FlushHouse, HandType::FlushFive
     };
-    for (HandType t : all) levelUpHand(t, times);
+    // 直接改 mHandLevels 而非走 13 次 levelUpHand+emit；
+    // 这样 onHandLevelsChanged 只触发一次，能识别"多手同时升级"走 All Hands 演出。
+    for (HandType t : all) {
+        HandLevel &lv = mHandLevels[t];
+        auto d = handLevelDelta(t);
+        for (int i = 0; i < times; ++i) {
+            lv.level++;
+            lv.chipsBonus += d.first;
+            lv.multBonus  += d.second;
+        }
+    }
+    // 计数器（Constellation 等）：与单次 levelUpHand 一致，按总升级次数累加。
+    for (Joker &j : mJokers) {
+        if (!j.isDebuffed && j.type == JokerType::Constellation)
+            j.counter += times * (int)(sizeof(all) / sizeof(all[0]));
+    }
+    emit handLevelsChanged();
 }
 
 HandResult GameState::previewSelection(const QVector<int> &indices) const

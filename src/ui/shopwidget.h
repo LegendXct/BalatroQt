@@ -57,6 +57,9 @@ private:
     void hideOfferInfo();
     OfferUi createOfferSlot(QWidget *parent, bool isBooster);
     QPixmap offerPixmap(const ShopOffer &o) const;
+    // 价格 tab 同步：rest / hover / drag 三态都通过这一只函数定位。cardBtn 是 QPushButton*
+    // (ShopCardButton)；内部读 visibleCardSize 与 isHovered 算位置。
+    void syncPriceLblForCardBtn(QWidget *cardBtn);
 
     void onBuyShop(int slot);
     void onBuyAndUseShop(int slot);    // 商店里"购买并使用"塔罗/星球/幻灵牌
@@ -73,9 +76,10 @@ private:
     QPushButton *mBtnReroll    = nullptr;
     QLabel      *mLblGold      = nullptr;
 
-    QWidget *mInfoPanel = nullptr;
-    QLabel *mInfoTitle = nullptr;
-    QLabel *mInfoBody = nullptr;
+    // 统一风格的 hover 浮窗——与主场景 mHoverTooltip 同一种 BalatroInfoCluster：
+    // 暗底圆角 + 白底文字栏 + 可选并排副面板。
+    class BalatroInfoCluster *mInfoPanel = nullptr;
+    QWidget *mInfoSource = nullptr;     // 当前正在 hover 的源 widget，用于重定位
 
     QVector<OfferUi> mShopUi;
     QVector<OfferUi> mVoucherUi;

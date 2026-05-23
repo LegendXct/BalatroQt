@@ -6,6 +6,8 @@
 #include <QPropertyAnimation>
 #include "carddata.h"
 
+class CardShadowItem;
+
 class CardItem : public QGraphicsObject
 {
     Q_OBJECT
@@ -13,6 +15,9 @@ class CardItem : public QGraphicsObject
     Q_PROPERTY(qreal opacity READ opacity WRITE setOpacity)
     // 翻牌动画专用：仅 X 方向缩放，对应原版 card.lua 的 pinch.x（绕 Y 轴翻牌效果）。
     Q_PROPERTY(qreal flipXScale READ flipXScale WRITE setFlipXScale)
+    // 阴影抬升量(0..1)。原版 G.SHADOW + shadow_parallax：卡片悬停 / 按下 / 计分时
+    // Z 高度增加 → 阴影 offset.y 与软化范围同步增大，给出"悬浮起来"的立体感。
+    Q_PROPERTY(qreal shadowLift READ shadowLift WRITE setShadowLift)
 public:
     // 图集采样单元：8BitDeck.png/Enhancers.png 每格固定 142×190，不能改。
     static constexpr int SRC_W = 142;
@@ -37,6 +42,7 @@ public:
 
     static void loadResources();
     explicit CardItem(const CardData &data, QGraphicsItem *parent = nullptr);
+    ~CardItem() override;
     QRectF boundingRect() const override;
     QPainterPath shape() const override;
     void paint(QPainter *painter, const QStyleOptionGraphicsItem *option, QWidget *widget) override;
@@ -62,6 +68,11 @@ public:
     void triggerHoverJitter();
     qreal flipXScale() const { return mFlipXScale; }
     void setFlipXScale(qreal s) { mFlipXScale = s; applyTransform(); }
+    qreal shadowLift() const { return mShadowLift; }
+    void setShadowLift(qreal v);
+    // 计分阶段抬升：mainwindow.cpp 在 playScoreEvent / animatePlayedCardsToDiscardThen
+    // 期间调用，让正在被计分的牌阴影最大化（off + blur 增大），看上去卡牌悬浮起来。
+    void setScoringLifted(bool lifted);
 signals:
     void clicked(CardItem *card);
     void dragMoved(CardItem *card, QPointF scenePos);
@@ -74,6 +85,7 @@ protected:
     void hoverMoveEvent(QGraphicsSceneHoverEvent *event) override;
     void hoverEnterEvent(QGraphicsSceneHoverEvent  *event) override;
     void hoverLeaveEvent(QGraphicsSceneHoverEvent  *event) override;
+    QVariant itemChange(GraphicsItemChange change, const QVariant &value) override;
 private:
     CardData mData;
     bool mSelected = false;
@@ -96,7 +108,14 @@ private:
     QPointF mLastDragScenePos;
     qint64  mLastDragTimeMs = 0;
     qreal  mFlipXScale = 1.0;         // 翻牌时的 X 方向缩放(1→0→1)，对齐原版 pinch.x
+    qreal  mShadowLift = 0.0;         // 阴影抬升量 0..1，由 hover/press/select/scoring 驱动。
+    bool   mScoringLifted = false;    // 计分阶段强制保持最高阴影抬升。
+    qreal  mPressRestZ = 0.0;         // 按下前 zValue，release 还原；防止覆盖 layout 给的 z。
+    CardShadowItem *mShadow = nullptr; // sibling 阴影项，z=-1000 在所有牌之下；按下时升到本牌之下。
     void applyTransform();
+    void animateShadowLift(qreal target, int durationMs = 120);
+    qreal currentShadowTarget() const; // 根据 hover/press/select/scoring 状态返回目标值。
+    void updateShadowZ();              // 根据 active 状态决定阴影 z；release 后回到 -1000。
 
     QRect whiteBaseSrcRect() const; // 白色底片
     QRect deckSrcRect() const; // 牌面

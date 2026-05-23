@@ -158,6 +158,105 @@ static int jokerBaseCost(JokerType t)
     return 4;
 }
 
+// 每张小丑的 spawn 池档位（原版 game.lua 里的 rarity 字段，1/2/3/4 = 普通/罕见/稀有/传奇）。
+// 影响商店概率、价格基数、info 浮窗底部 pill 配色。未列出的类型默认 Common（rarity=1）。
+JokerRarity jokerRarity(JokerType t) {
+    switch (t) {
+    // Uncommon
+    case JokerType::JokerStencil:
+    case JokerType::FourFingers:
+    case JokerType::Mime:
+    case JokerType::CeremonialDagger:
+    case JokerType::MarbleJoker:
+    case JokerType::LoyaltyCard:
+    case JokerType::Dusk:
+    case JokerType::Fibonacci:
+    case JokerType::SteelJoker:
+    case JokerType::Hack:
+    case JokerType::Pareidolia:
+    case JokerType::SpaceJoker:
+    case JokerType::Burglar:
+    case JokerType::Blackboard:
+    case JokerType::Constellation:
+    case JokerType::Hiker:
+    case JokerType::CardSharp:
+    case JokerType::Madness:
+    case JokerType::Seance:
+    case JokerType::Vampire:
+    case JokerType::Shortcut:
+    case JokerType::Hologram:
+    case JokerType::Cloud9:
+    case JokerType::Rocket:
+    case JokerType::MidasMask:
+    case JokerType::Luchador:
+    case JokerType::GiftCard:
+    case JokerType::TurtleBean:
+    case JokerType::Erosion:
+    case JokerType::ToTheMoon:
+    case JokerType::StoneJoker:
+    case JokerType::LuckyCat:
+    case JokerType::Bull:
+    case JokerType::DietCola:
+    case JokerType::FlashCard:
+    case JokerType::SpareTrousers:
+    case JokerType::Ramen:
+    case JokerType::Seltzer:
+    case JokerType::Castle:
+    case JokerType::MrBones:
+    case JokerType::Acrobat:
+    case JokerType::SockAndBuskin:
+    case JokerType::Troubadour:
+    case JokerType::Certificate:
+    case JokerType::SmearedJoker:
+    case JokerType::Throwback:
+    case JokerType::RoughGem:
+    case JokerType::Bloodstone:
+    case JokerType::Arrowhead:
+    case JokerType::OnyxAgate:
+    case JokerType::GlassJoker:
+    case JokerType::Showman:
+    case JokerType::FlowerPot:
+    case JokerType::MerryAndy:
+    case JokerType::OopsAllSixes:
+    case JokerType::TheIdol:
+    case JokerType::SeeingDouble:
+    case JokerType::Satellite:
+    case JokerType::Cartomancer:
+    case JokerType::Bootstraps:
+        return JokerRarity::Uncommon;
+    // Rare
+    case JokerType::DNA:
+    case JokerType::Vagabond:
+    case JokerType::Baron:
+    case JokerType::Obelisk:
+    case JokerType::AncientJoker:
+    case JokerType::Campfire:
+    case JokerType::Blueprint:
+    case JokerType::WeeJoker:
+    case JokerType::HitTheRoad:
+    case JokerType::TheDuo:
+    case JokerType::TheTrio:
+    case JokerType::TheFamily:
+    case JokerType::TheOrder:
+    case JokerType::TheTribe:
+    case JokerType::Stuntman:
+    case JokerType::InvisibleJoker:
+    case JokerType::Brainstorm:
+    case JokerType::DriversLicense:
+    case JokerType::BurntJoker:
+        return JokerRarity::Rare;
+    // Legendary
+    case JokerType::Caino:
+    case JokerType::Triboulet:
+    case JokerType::Yorick:
+    case JokerType::Chicot:
+    case JokerType::Perkeo:
+        return JokerRarity::Legendary;
+    default:
+        return JokerRarity::Common;
+    }
+}
+
 Joker createJoker(JokerType type) {
     Joker j;
     j.type = type;

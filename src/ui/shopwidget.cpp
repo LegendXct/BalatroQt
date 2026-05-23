@@ -1,6 +1,11 @@
 #include "shopwidget.h"
 #include "../card/consumableitem.h"
 #include "../card/jokeritem.h"
+#include "cardtooltipformat.h"
+#include "balatroinfopanel.h"
+#include <QRandomGenerator>
+#include <QSequentialAnimationGroup>
+#include <QVariantAnimation>
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QResizeEvent>
@@ -94,15 +99,113 @@ public:
     void setDisplayPixmap(const QPixmap &pix)
     {
         mPixmap = pix;
+        // 同时缓存"剪影阴影"——把源 pixmap 的 alpha 通道复制出来填成半透明黑色。
+        // 这样 booster 等异形卡包的阴影会自动贴合包外形（圆角、卡包翻角等），
+        // 不再是一个比可见图像更宽的矩形。
+        if (!pix.isNull()) {
+            QImage img = pix.toImage().convertToFormat(QImage::Format_ARGB32);
+            for (int y = 0; y < img.height(); ++y) {
+                QRgb *row = reinterpret_cast<QRgb *>(img.scanLine(y));
+                for (int x = 0; x < img.width(); ++x) {
+                    const int a = qAlpha(row[x]);
+                    if (a > 0)
+                        row[x] = qRgba(0, 0, 0, a);
+                }
+            }
+            mShadowPixmap = QPixmap::fromImage(img);
+        } else {
+            mShadowPixmap = QPixmap();
+        }
         update();
     }
+
+    // 被选中的商品 cardBtn 会移动到 -dp(36) 位置；shadow lift 同步拉到 0.5，让阴影"远一些"。
+    void setLifted(bool lifted)
+    {
+        if (mLifted == lifted) return;
+        mLifted = lifted;
+        update();
+    }
+
+    // booster (异形) 用 alpha 剪影；joker / tarot / planet / spectral / voucher / playing card
+    // 都是矩形 sprite，用双层圆角阴影更贴合手牌槽位的质感。
+    void setUseSilhouetteShadow(bool useSilhouette)
+    {
+        mUseSilhouetteShadow = useSilhouette;
+        update();
+    }
+
+    // 可见卡牌尺寸——button 本身比这个大一圈，用以容纳 hover 缩放。paint 都按这个尺寸居中。
+    void setVisibleCardSize(const QSize &sz)
+    {
+        mVisibleCardSize = sz;
+        update();
+    }
+    QSize visibleCardSize() const { return mVisibleCardSize; }
+    bool isHovered() const { return mHovered; }
 
 protected:
     void enterEvent(QEnterEvent *event) override
     {
         mHovered = true;
         QPushButton::enterEvent(event);
+        triggerHoverJitter();
         update();
+    }
+
+    // 鼠标按下 → mPressed=true 让阴影 lift 拉到拖动级别（与手牌点击一致）。
+    void mousePressEvent(QMouseEvent *event) override
+    {
+        if (event->button() == Qt::LeftButton) {
+            mPressed = true;
+            update();
+        }
+        QPushButton::mousePressEvent(event);
+    }
+    void mouseReleaseEvent(QMouseEvent *event) override
+    {
+        if (event->button() == Qt::LeftButton) {
+            mPressed = false;
+            update();
+        }
+        QPushButton::mouseReleaseEvent(event);
+    }
+
+    // 与 CardItem / JokerItem 同款 hover 抖动：进入悬浮时 ±2.4° 顶峰 + -0.6° 反弹再回零。
+    void triggerHoverJitter()
+    {
+        const double dir = (QRandomGenerator::global()->bounded(2) == 0) ? -1.0 : 1.0;
+        const double peakRot   = 2.4 * dir;
+        const double overshoot = -0.6 * dir;
+        if (mJitterAnim) {
+            mJitterAnim->stop();
+            mJitterAnim->deleteLater();
+            mJitterAnim = nullptr;
+        }
+        auto *seq = new QSequentialAnimationGroup(this);
+        mJitterAnim = seq;
+        auto makeStep = [this, seq](double from, double to, int dur, QEasingCurve::Type curve) {
+            auto *a = new QVariantAnimation(seq);
+            a->setDuration(dur);
+            a->setStartValue(from);
+            a->setEndValue(to);
+            a->setEasingCurve(curve);
+            QObject::connect(a, &QVariantAnimation::valueChanged, this,
+                             [this](const QVariant &v) {
+                mJitterRotDeg = v.toDouble();
+                update();
+            });
+            seq->addAnimation(a);
+        };
+        makeStep(0.0, peakRot, 70, QEasingCurve::OutQuad);
+        makeStep(peakRot, overshoot, 110, QEasingCurve::InOutQuad);
+        makeStep(overshoot, 0.0, 120, QEasingCurve::OutCubic);
+        QObject::connect(seq, &QSequentialAnimationGroup::finished, this, [this]() {
+            mJitterRotDeg = 0.0;
+            mJitterAnim = nullptr;
+            update();
+        });
+        seq->start(QAbstractAnimation::DeleteWhenStopped);
     }
 
     void leaveEvent(QEvent *event) override
@@ -134,19 +237,84 @@ protected:
         p.setRenderHint(QPainter::Antialiasing, true);
         p.setRenderHint(QPainter::SmoothPixmapTransform, false);
 
+        // ── 剪影阴影：用 mShadowPixmap (源 pixmap 的 alpha 复制) 偏移后绘制，
+        //    booster 等异形包阴影会自动贴合包形状；jokers/consumables 的源是矩形 sprite，
+        //    剪影也是矩形，自然就和手牌的圆角矩形阴影一致。
+        if (!mPixmap.isNull() && !mShadowPixmap.isNull()) {
+            // 沿父链找到 ShopWidget 作为"场景中央"参考。
+            QWidget *topShop = parentWidget();
+            while (topShop && topShop->parentWidget() &&
+                   QString(topShop->metaObject()->className()) != QStringLiteral("ShopWidget")) {
+                topShop = topShop->parentWidget();
+            }
+            qreal nx = 0.0;
+            if (topShop && topShop->width() > 0) {
+                const QPoint centerInShop = mapTo(topShop, QPoint(width()/2, height()/2));
+                nx = (centerInShop.x() - topShop->width() / 2.0) / (topShop->width() / 2.0);
+                nx = qBound(-1.0, nx, 1.0);
+            }
+            // 与手牌一致的 lift 优先级：press > selected(mLifted) > hover > rest。
+            // 按下时拖到 0.85（手牌拖动也是这个值），阴影距离明显拉远。
+            const qreal lift = mPressed ? 0.85
+                                        : (mLifted ? 0.55
+                                                   : (mHovered ? 0.30 : 0.0));
+            const qreal shadowHeight = 0.1 + 0.45 * lift;
+            const qreal kPx = 32.0;
+            const qreal offX = -nx * 1.5 * shadowHeight * kPx;
+            const qreal offY =  1.5 * shadowHeight * kPx;
+
+            // 卡图实际落点：button 中心 + hover 时 -4 px。剪影按 pixSize 绘制——
+            // 与下面 drawPixmap 用同一套几何，shadow 就完全跟随可见图像形状。
+            QSize pixSize = mPixmap.size();
+            // 按"可见卡牌"尺寸缩放（button 比这一圈大，预留 hover 放大溢出空间）。
+            const QSize target = mVisibleCardSize.isValid() ? mVisibleCardSize
+                                                            : QSize(width(), height());
+            pixSize.scale(target, Qt::KeepAspectRatio);
+            const qreal cx = width() / 2.0;
+            const qreal cy = height() / 2.0 + (mHovered ? -8.0 : 0.0);
+            const qreal w = pixSize.width();
+            const qreal h = pixSize.height();
+            const QRectF shadowRect(cx - w/2.0 + offX, cy - h/2.0 + offY, w, h);
+
+            p.save();
+            p.setRenderHint(QPainter::Antialiasing, true);
+            p.setPen(Qt::NoPen);
+            if (mUseSilhouetteShadow) {
+                // booster (异形) → 用 alpha 剪影 pixmap 描出包形。
+                const qreal opacity = 0.35 + 0.25 * lift;
+                p.setOpacity(opacity);
+                p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+                p.drawPixmap(shadowRect, mShadowPixmap,
+                             QRectF(0, 0, mShadowPixmap.width(), mShadowPixmap.height()));
+            } else {
+                // 普通商品 (joker/tarot/voucher/playing card) → 双层圆角矩形，
+                // 与 cardshadow.cpp 的 CardShadowItem 同一套配色与抹平比例。
+                const qreal expand = 0.5 + 2.0 * lift;
+                const QRectF rectOuter(shadowRect.adjusted(-expand, -expand, expand, expand));
+                const int alphaOuter = int(20 + 25 * lift);
+                p.setBrush(QColor(0, 0, 0, alphaOuter));
+                p.drawRoundedRect(rectOuter, 10, 10);
+                const int alphaInner = int(45 + 40 * lift);
+                p.setBrush(QColor(0, 0, 0, alphaInner));
+                p.drawRoundedRect(shadowRect, 9, 9);
+            }
+            p.restore();
+        }
+
         // 原版卡牌/卡包自己带阴影和高光，商店槽位按钮不应该再画一层黑底。
         // 之前的黑色矩形和卡片后面的脏阴影就是这里的按钮背景造成的。
         if (mPixmap.isNull()) return;
-        // 卡图按 1:1 填满 button 矩形，与右上角消耗品 / 小丑等场景里的卡牌等大。
-        // hover 时的 1.045 缩放也只是稍微溢出，QPainter 默认不会裁出 button rect。
-        QSize target(int(width() * 0.96), int(height() * 0.96));
+        // 卡图按"可见卡牌"尺寸绘制——button 本身比这个大一圈（hover 缩放预留），
+        // 这样 hover 1.045 后还在 button rect 内，卡顶不会被裁。
+        QSize target = mVisibleCardSize.isValid() ? mVisibleCardSize
+                                                  : QSize(width(), height());
         QSize pixSize = mPixmap.size();
         pixSize.scale(target, Qt::KeepAspectRatio);
         QRectF pr(QPointF(-pixSize.width() / 2.0, -pixSize.height() / 2.0), pixSize);
 
         p.save();
         p.setOpacity(isEnabled() ? 1.0 : 0.42);
-        p.translate(width() / 2.0, height() / 2.0 + (mHovered ? -4.0 : 0.0));
+        p.translate(width() / 2.0, height() / 2.0 + (mHovered ? -8.0 : 0.0));
 
         const qreal tiltX = mTiltX * 3.14159265358979323846 / 180.0;
         const qreal tiltY = mTiltY * 3.14159265358979323846 / 180.0;
@@ -162,8 +330,12 @@ protected:
             0,              0,              1
         );
         QTransform t;
+        // hover 1.045 放大现在能正常工作——button 多留了 14 px overflow 空间。
         const qreal hoverScale = 1.0 + (mHovered ? 0.045 : 0.0);
         t.scale(hoverScale, hoverScale);
+        // hover 抖动：进入悬浮时 ±2.4° 弹一下；和 CardItem/JokerItem 一致。
+        if (!qFuzzyIsNull(mJitterRotDeg))
+            t.rotate(mJitterRotDeg);
         t = persp * t;
         p.setTransform(t, true);
 
@@ -173,9 +345,16 @@ protected:
 
 private:
     QPixmap mPixmap;
+    QPixmap mShadowPixmap;     // 缓存的剪影阴影，setDisplayPixmap 时按 alpha 重建。
+    QSize mVisibleCardSize;    // 可见卡牌尺寸（button 比这个大一圈给 hover 缩放）。空则用 button rect。
     bool mHovered = false;
+    bool mLifted = false;
+    bool mPressed = false;
+    bool mUseSilhouetteShadow = false; // true 给 booster 用 (异形)，否则双层圆角矩形 (joker/consumable/voucher)
     qreal mTiltX = 0.0; // degrees, same direction as CardItem/JokerItem
     qreal mTiltY = 0.0;
+    double mJitterRotDeg = 0.0;
+    QSequentialAnimationGroup *mJitterAnim = nullptr;
 };
 }
 
@@ -209,25 +388,9 @@ void ShopWidget::buildUi()
     root->setContentsMargins(dp(16), dp(12), dp(16), dp(12));
     root->setSpacing(dp(8));
 
-    // ── 顶部:右上角金币 ──
-    auto *topRow = new QWidget(mPanel);
-    auto *thbl = new QHBoxLayout(topRow);
-    thbl->setContentsMargins(0, 0, 0, 0);
-    thbl->addStretch();
-
-    auto *goldBox = new QWidget(topRow);
-    goldBox->setAttribute(Qt::WA_StyledBackground, true);
-    goldBox->setStyleSheet("background:#4f6367; border-radius:8px;");
-    auto *gbl = new QHBoxLayout(goldBox);
-    gbl->setContentsMargins(dp(10), dp(3), dp(10), dp(3));
-    mLblGold = new QLabel("$0", goldBox);
-    QFont gf = mCNFont; gf.setPixelSize(fontPx(26)); gf.setBold(true);
-    mLblGold->setFont(gf);
-    mLblGold->setStyleSheet("color:#f3b958; background:transparent;");
-    gbl->addWidget(mLblGold);
-    thbl->addWidget(goldBox);
-
-    root->addWidget(topRow);
+    // 金额栏已移除——金币显示在主场景顶部，商店内不再重复。商品和礼包两行因此可以
+    // 各自占用面板更大比例的高度。mLblGold 保留指针为 nullptr，refresh 时跳过。
+    mLblGold = nullptr;
 
     // ── 上栏:[Next 红 + Reroll 绿] | 商品区(2 槽) ──
     auto *upperRow = new QWidget(mPanel);
@@ -237,14 +400,14 @@ void ShopWidget::buildUi()
 
     // 左:两按钮竖排
     auto *btnCol = new QWidget(upperRow);
-    btnCol       ->setFixedWidth(dp(148));
+    btnCol       ->setFixedWidth(dp(168));
     auto *bvbl = new QVBoxLayout(btnCol);
     bvbl->setContentsMargins(0, 0, 0, 0);
-    bvbl->setSpacing(dp(8));
+    bvbl->setSpacing(dp(10));
 
     mBtnNextRound = new QPushButton("下一个\n回合", btnCol);
-    mBtnNextRound->setFixedSize(dp(148), dp(112));
-    QFont nrf = mCNFont; nrf.setPixelSize(fontPx(17)); nrf.setBold(true);
+    mBtnNextRound->setFixedSize(dp(168), dp(130));
+    QFont nrf = mCNFont; nrf.setPixelSize(fontPx(22)); nrf.setBold(true);
     mBtnNextRound->setFont(nrf);
     mBtnNextRound->setCursor(Qt::PointingHandCursor);
     mBtnNextRound->setStyleSheet(
@@ -256,7 +419,7 @@ void ShopWidget::buildUi()
     bvbl->addWidget(mBtnNextRound);
 
     mBtnReroll = new QPushButton("重抽\n$5", btnCol);
-    mBtnReroll   ->setFixedSize(dp(148), dp(112));
+    mBtnReroll   ->setFixedSize(dp(168), dp(130));
     mBtnReroll->setFont(nrf);
     mBtnReroll->setCursor(Qt::PointingHandCursor);
     mBtnReroll->setStyleSheet(
@@ -359,48 +522,76 @@ void ShopWidget::buildUi()
 ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
 {
     OfferUi ou;
-    // 原版 UI_definitions.lua:656 给 booster 列 (2.4*CARD_W, 1.15*CARD_H, card_w = 1.27*CARD_W)：
-    //   booster slot width  = 1.27 * G.CARD_W
-    //   booster slot height = 1.15 * G.CARD_H
-    // 普通 shop slot 与 G.CARD_W × G.CARD_H 同号（线 641 中 height 系数 1.05 几乎可以忽略）。
-    // 我们的 CardItem 是 170×228，shop slot 与之等高等宽；booster 按 1.27W × 1.15H 放大。
-    // 卡图与右上角消耗品 / 小丑场景里的卡牌使用同一尺寸 (CardItem::WIDTH×HEIGHT = 170×228)，
-    // 不再做 0.80 缩小，鼠标 hover 时的 1.045 放大本身就够明显。
-    // 商店里的牌不应使用场上 CardItem 的 170×228 大尺寸。原版商店卡位接近
-    // 图集原始牌面比例，booster 约为 1.27W × 1.15H；这样两行商品、包名和跳过/购买按钮
-    // 能在 16:9 下完整落入同一屏，不再把下排名字裁到屏幕外。
-    const int slotW = isBooster ? 180 : 142;
-    const int slotH = isBooster ? 218 : 190;
+    // 原版 game.lua:3153：booster 用 G.CARD_W*1.27 × G.CARD_H*1.27 显示——两个轴都乘 1.27
+    // 保持与扑克牌相同的 0.747 长宽比。我们的 JokerItem/ConsumableItem 是 162×218，所以：
+    //   非礼包槽：162 × 218
+    //   礼包槽 ：162×1.27 × 218×1.27 ≈ 206 × 278
+    const int slotW = isBooster ? 206 : 162;
+    const int slotH = isBooster ? 278 : 218;
     // 普通商品槽右侧专门预留给“购买&使用”侧按钮。
     // 关键点：预留宽度不参与卡牌列居中，否则按钮只拿到一半预留空间，右侧会被容器裁掉。
     const int actionReserveW = isBooster ? 0 : 48;
-    const int containerW = slotW + actionReserveW;
-    // 价格标签 28 + 间距 2 + 卡图 slotH + 间距 2 + 名字 38。
-    const int containerH = 28 + 2 + slotH + 6 + 42;
+    // cardBtn 给 hover 1.045 缩放预留 ±7 px overflow 空间：实际 paint pixmap 大小是
+    // slotW × slotH（与槽位 JokerItem/ConsumableItem 同尺寸），但 button 本身略大，
+    // 这样 hover 放大时图像顶部不会被 widget rect 裁掉。
+    const int btnOverflow = 14;     // 7 px each side
+    const int btnW = slotW + btnOverflow;
+    const int btnH = slotH + btnOverflow;
+    const int containerW = btnW + actionReserveW;
+    const int priceTabH = 26;
+    // 选中时 cardBtn 会向上 move dp(36)，必须在 ou.card 顶部预留同等空间，
+    // 否则 Qt 把超出 ou.card 顶边的 cardBtn 像素裁掉，看着像"商品上半截没了"。
+    const int selectionLiftReserve = 36;
+    const int topReserve = (priceTabH - 1) + selectionLiftReserve;
+    const int containerH = topReserve + btnH + 12;
 
     ou.card = new QWidget(parent);
     ou.card->setFixedSize(dp(containerW), dp(containerH));
     ou.card->setStyleSheet("background:transparent;");
 
     auto *vbl = new QVBoxLayout(ou.card);
-    vbl->setContentsMargins(0, 0, dp(actionReserveW), 0);
+    // 给上面留出 price tab 露出 + 选中升起预留——cardBtn 从这之下开始。
+    vbl->setContentsMargins(0, dp(topReserve), dp(actionReserveW), 0);
     vbl->setSpacing(dp(2));
     vbl->setAlignment(Qt::AlignCenter);
 
     // 顶部 $X 价格标签(深底圆角)
-    ou.priceLbl = new QLabel("$0", ou.card);
-    ou.priceLbl->setFixedSize(dp(64), dp(28));
+    // 关键：parent 改成 ShopWidget(this) 而不是 ou.card——cardBtn 选中上升 36 px 后
+    // priceLbl 会跑到 ou.card 上方甚至超出 mPanel，子 widget 会被父矩形裁切。
+    // 挂在 ShopWidget 这层就能延伸到 mPanel 之外（金额栏移除后空出来的区域）。
+    ou.priceLbl = new QLabel("$0", this);
+    // 默认隐藏——fillSlot 在 offer 实际存在时显式 setVisible(true)。否则空槽位的
+    // priceLbl 会带着默认 "$0" 文字在 ShopWidget 左上角浮着。
+    ou.priceLbl->hide();
+    ou.priceLbl->raise();
+    // 价格 tab：上圆下方风格，几乎完全位于卡顶上方（1 px overlap）；
+    // cardBtn 选中升起时 eventFilter 会捕获 QEvent::Move 把这只 label 同步上移。
+    ou.priceLbl->setFixedSize(dp(86), dp(priceTabH));
     QFont pf = mCNFont; pf.setPixelSize(fontPx(17)); pf.setBold(true);
     ou.priceLbl->setFont(pf);
     ou.priceLbl->setAlignment(Qt::AlignCenter);
+    // 原版价格标签：外层近黑 #1c2426 + 内层深灰 #374244，统一上圆下方风格。
+    // 用 3 px 边框模拟"外层黑色背景包住内层灰色前景"的双圆角矩形效果。
     ou.priceLbl->setStyleSheet(
-        "color:#f3b958; background:#374244; border-radius:6px;"
-        );
-    vbl->addWidget(ou.priceLbl, 0, Qt::AlignCenter);
+        "color:#f3b958; background:#374244;"
+        "border:3px solid #1c2426;"
+        "border-top-left-radius:10px;"
+        "border-top-right-radius:10px;"
+        "border-bottom-left-radius:0px;"
+        "border-bottom-right-radius:0px;"
+        "border-bottom: 0px;"
+    );
+    // 不加入 QVBoxLayout——靠 eventFilter 与 cardBtn 同步位置（坐标在 ShopWidget 内）。
 
     // 卡图(整张点击)
-    ou.cardBtn = new ShopCardButton(ou.card);
-    ou.cardBtn->setFixedSize(dp(slotW), dp(slotH));
+    auto *scb = new ShopCardButton(ou.card);
+    ou.cardBtn = scb;
+    // 礼包用剪影阴影（包形不规则），其它矩形 sprite 走和槽位一致的双层圆角阴影。
+    scb->setUseSilhouetteShadow(isBooster);
+    // button 留出 hover 缩放 overflow 空间——内部 pixmap 仍按 slotW × slotH 居中绘制，
+    // hover 1.045 时仍在 button rect 内不被裁。
+    ou.cardBtn->setFixedSize(dp(btnW), dp(btnH));
+    scb->setVisibleCardSize(QSize(dp(slotW), dp(slotH)));
     ou.cardBtn->setCursor(Qt::PointingHandCursor);
     ou.cardBtn->installEventFilter(this);
     ou.cardBtn->setStyleSheet(
@@ -451,14 +642,10 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
     ou.actionRow = nullptr;
     Q_UNUSED(isBooster);
 
+    // 商品名字不再常驻——悬浮 info 已经显示完整名字 + 描述。保留 ou.nameLbl 指针但永远 hide()，
+    // 不进 layout，避免槽位底部多一片空白。
     ou.nameLbl = new QLabel("", ou.card);
-    QFont nf = mCNFont; nf.setPixelSize(fontPx(14));
-    ou.nameLbl->setFont(nf);
-    ou.nameLbl->setStyleSheet("color:white; background:transparent;");
-    ou.nameLbl->setAlignment(Qt::AlignCenter);
-    ou.nameLbl->setWordWrap(true);
-    ou.nameLbl->setFixedHeight(dp(38));
-    vbl->addWidget(ou.nameLbl);
+    ou.nameLbl->hide();
 
     return ou;
 }
@@ -466,37 +653,9 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
 void ShopWidget::buildInfoPanel()
 {
     if (mInfoPanel) return;
-    mInfoPanel = new QWidget(this);
-    mInfoPanel->setAttribute(Qt::WA_StyledBackground, true);
-    mInfoPanel->setStyleSheet(
-        "background:rgba(31,37,42,245);"
-        "border:2px solid #fda200;"
-        "border-radius:12px;"
-    );
-
-    auto *vbl = new QVBoxLayout(mInfoPanel);
-    vbl->setContentsMargins(dp(12), dp(10), dp(12), dp(10));
-    vbl->setSpacing(dp(6));
-
-    mInfoTitle = new QLabel(mInfoPanel);
-    QFont tf = mCNFont; tf.setPixelSize(fontPx(22)); tf.setBold(true);
-    mInfoTitle->setFont(tf);
-    mInfoTitle->setAlignment(Qt::AlignCenter);
-    mInfoTitle->setStyleSheet("color:#ffe9a8; background:transparent; border:none;");
-    mInfoTitle->setWordWrap(true);
-    mInfoTitle->setFixedWidth(dp(310));
-    vbl->addWidget(mInfoTitle);
-
-    mInfoBody = new QLabel(mInfoPanel);
-    QFont bf = mCNFont; bf.setPixelSize(fontPx(18));
-    mInfoBody->setFont(bf);
-    mInfoBody->setAlignment(Qt::AlignCenter);
-    mInfoBody->setWordWrap(true);
-    mInfoBody->setStyleSheet("color:white; background:transparent; border:none;");
-    mInfoBody->setFixedWidth(dp(310));
-    vbl->addWidget(mInfoBody);
-
-    mInfoPanel->setFixedWidth(dp(344));
+    // 与主场景 mHoverTooltip 同款 BalatroInfoCluster：暗底圆角 + 白底文字栏 + 并排副面板。
+    mInfoPanel = new BalatroInfoCluster(mCNFont, this);
+    mInfoPanel->setAttribute(Qt::WA_TransparentForMouseEvents, true);
     mInfoPanel->hide();
 }
 
@@ -504,16 +663,195 @@ void ShopWidget::showOfferInfo(QWidget *source)
 {
     if (!source) return;
     buildInfoPanel();
-    const QString title = source->property("infoTitle").toString();
-    const QString body = source->property("infoBody").toString();
-    if (title.isEmpty() && body.isEmpty()) return;
 
-    mInfoTitle->setText(title);
-    mInfoBody->setText(body);
-    mInfoBody->setVisible(!body.isEmpty());
-    if (auto *lay = mInfoPanel->layout()) lay->activate();
-    mInfoPanel->adjustSize();
-    mInfoPanel->resize(dp(344), qBound(dp(120), mInfoPanel->height(), dp(340)));
+    // 通过 cardBtn 的 parent (ou.card) 上的 shopOfferIdx/voucherSlotIdx/boosterSlotIdx
+    // 反查当前 ShopOffer——拿到 offer 后可按 kind 装配 rarity / edition / granted enhancement
+    // 等副面板，跟主场景 hover 表现一致。
+    QWidget *container = source->parentWidget();
+    const ShopOffer *offer = nullptr;
+    if (container) {
+        const QVariant shopIdxV    = container->property("shopOfferIdx");
+        const QVariant voucherIdxV = container->property("voucherSlotIdx");
+        const QVariant boosterIdxV = container->property("boosterSlotIdx");
+        if (shopIdxV.isValid()) {
+            const auto &offers = mGS->shop().shopOffers();
+            const int i = shopIdxV.toInt();
+            if (i >= 0 && i < offers.size()) offer = &offers[i];
+        } else if (voucherIdxV.isValid()) {
+            const auto &offers = mGS->shop().voucherOffers();
+            const int i = voucherIdxV.toInt();
+            if (i >= 0 && i < offers.size()) offer = &offers[i];
+        } else if (boosterIdxV.isValid()) {
+            const auto &offers = mGS->shop().boosterOffers();
+            const int i = boosterIdxV.toInt();
+            if (i >= 0 && i < offers.size()) offer = &offers[i];
+        }
+    }
+
+    // 退化：找不到 offer 时，用 widget 上缓存的 title/body 字符串构造一个最简 cluster。
+    const QString fallbackTitle = source->property("infoTitle").toString();
+    const QString fallbackBody  = source->property("infoBody").toString();
+    if (!offer && fallbackTitle.isEmpty() && fallbackBody.isEmpty()) return;
+
+    mInfoPanel->clear();
+    QVector<BalatroInfoPanel::Badge> mainBadges;
+    QString name = fallbackTitle;
+    QString bodyHtml;
+    bool nameWhiteBox = false;
+    int mainWidth = 175;
+
+    auto addEditionSide = [this](Edition e) {
+        if (e == Edition::None) return;
+        BalatroInfoPanel::SideEntry s;
+        s.name = CardTooltipFormat::editionName(e);
+        s.body = CardTooltipFormat::editionBodyHtml(e);
+        s.badges.append({CardTooltipFormat::editionName(e),
+                         BalatroInfoPanel::editionPillColor()});
+        s.preferredWidth = 130;
+        mInfoPanel->addSidePanel(s);
+    };
+
+    if (offer) {
+        switch (offer->kind) {
+        case OfferKind::Joker: {
+            Joker tmp = createJoker(offer->joker);
+            // name 不再前缀 edition——edition 全部放副面板
+            name = tmp.name;
+            bodyHtml = CardTooltipFormat::fromLuaMarkup(tmp.description);
+            const JokerRarity rr = jokerRarity(offer->joker);
+            mainBadges.append({CardTooltipFormat::rarityName(rr),
+                               CardTooltipFormat::rarityColor(rr)});
+            mInfoPanel->setMainContent(name, bodyHtml, mainBadges, mainWidth, nameWhiteBox);
+            addEditionSide(offer->jokerEdition);
+            break;
+        }
+        case OfferKind::Tarot:
+        case OfferKind::Planet:
+        case OfferKind::Spectral: {
+            Consumable tmp = createConsumable(offer->consumable);
+            name = tmp.name;
+            bodyHtml = CardTooltipFormat::fromLuaMarkup(tmp.description);
+            const ConsumableKind k = kindOf(offer->consumable);
+            QColor setColor;
+            QString setLabel;
+            switch (k) {
+            case ConsumableKind::Tarot:
+                setLabel = QStringLiteral("塔罗牌");
+                setColor = BalatroInfoPanel::tarotPillColor(); break;
+            case ConsumableKind::Planet:
+                setLabel = QStringLiteral("行星牌");
+                setColor = BalatroInfoPanel::planetPillColor(); break;
+            case ConsumableKind::Spectral:
+                setLabel = QStringLiteral("幻灵牌");
+                setColor = BalatroInfoPanel::spectralPillColor(); break;
+            }
+            mainBadges.append({setLabel, setColor});
+            mInfoPanel->setMainContent(name, bodyHtml, mainBadges, mainWidth, nameWhiteBox);
+            // 副面板：被授予的增强 / 蜡封 / 随机版本——与主场景悬浮同一套逻辑。
+            if (Enhancement gE = CardTooltipFormat::consumableGrantsEnhancement(offer->consumable);
+                gE != Enhancement::None) {
+                BalatroInfoPanel::SideEntry s;
+                s.name = CardTooltipFormat::enhancementName(gE);
+                s.body = CardTooltipFormat::enhancementBodyHtml(gE);
+                s.preferredWidth = 140;
+                mInfoPanel->addSidePanel(s);
+            }
+            if (Seal gS = CardTooltipFormat::consumableGrantsSeal(offer->consumable);
+                gS != Seal::None) {
+                BalatroInfoPanel::SideEntry s;
+                s.name = CardTooltipFormat::sealName(gS);
+                s.body = CardTooltipFormat::sealBodyHtml(gS);
+                const int sealKind = (gS == Seal::Gold ? 0 :
+                                      gS == Seal::Red  ? 1 :
+                                      gS == Seal::Blue ? 2 : 3);
+                s.badges.append({QStringLiteral("蜡封"),
+                                 BalatroInfoPanel::sealPillColor(sealKind)});
+                s.preferredWidth = 130;
+                mInfoPanel->addSidePanel(s);
+            }
+            if (CardTooltipFormat::consumableGrantsRandomEdition(offer->consumable)) {
+                BalatroInfoPanel::SideEntry s;
+                s.name = QStringLiteral("随机版本");
+                s.body = QStringLiteral("闪箔 / 全息 / 多彩 三选一");
+                s.preferredWidth = 130;
+                mInfoPanel->addSidePanel(s);
+            }
+            break;
+        }
+        case OfferKind::Voucher: {
+            VoucherData v = voucherData(offer->voucher);
+            name = v.name;
+            bodyHtml = CardTooltipFormat::fromLuaMarkup(v.description);
+            mainBadges.append({QStringLiteral("优惠券"),
+                               BalatroInfoPanel::voucherPillColor()});
+            mInfoPanel->setMainContent(name, bodyHtml, mainBadges, mainWidth, nameWhiteBox);
+            break;
+        }
+        case OfferKind::Pack: {
+            name = fallbackTitle;
+            // 计算补充包尺寸与可选数：与 boosterpack.cpp::optionsFor / choicesFor 完全对齐。
+            const int options = (offer->pack == PackKind::Buffoon || offer->pack == PackKind::Spectral)
+                ? (offer->packSize == PackSize::Normal ? 2 : 4)
+                : (offer->packSize == PackSize::Normal ? 3 : 5);
+            const int choices = (offer->packSize == PackSize::Mega) ? 2 : 1;
+            QString kindLabel, kindColor, takeSuffix;
+            switch (offer->pack) {
+            case PackKind::Arcana:
+                kindLabel = QStringLiteral("塔罗牌");
+                kindColor = QStringLiteral("#a782d1");
+                takeSuffix = QStringLiteral("（即选即用）");
+                break;
+            case PackKind::Celestial:
+                kindLabel = QStringLiteral("行星牌");
+                kindColor = QStringLiteral("#13afce");
+                takeSuffix = QStringLiteral("（即选即用）");
+                break;
+            case PackKind::Spectral:
+                kindLabel = QStringLiteral("幻灵牌");
+                kindColor = QStringLiteral("#4584fa");
+                takeSuffix = QStringLiteral("（即选即用）");
+                break;
+            case PackKind::Buffoon:
+                kindLabel = QStringLiteral("小丑牌");
+                kindColor = QStringLiteral("#fe5f55");
+                takeSuffix = QStringLiteral("（加入小丑槽）");
+                break;
+            case PackKind::Standard:
+            default:
+                kindLabel = QStringLiteral("扑克牌");
+                kindColor = QStringLiteral("#cdd2d7");
+                takeSuffix = QStringLiteral("（加入牌组）");
+                break;
+            }
+            bodyHtml = QString(
+                "从最多 <span style=\"color:%1;font-weight:bold\">%2</span> 张"
+                "<span style=\"color:%3;font-weight:bold\">%4</span><br/>"
+                "中选择 <span style=\"color:%1;font-weight:bold\">%5</span> 张"
+                "<br/><span style=\"color:#7a8489\">%6</span>"
+            ).arg(QStringLiteral("#4bc292"),  // attention/green：数字
+                  QString::number(options),
+                  kindColor, kindLabel,
+                  QString::number(choices),
+                  takeSuffix);
+            // 底部统一 "补充包" 类型 pill——按补充包种类用对应集合色，文字本身保持统一。
+            mainBadges.append({QStringLiteral("补充包"), QColor(kindColor)});
+            mInfoPanel->setMainContent(name, bodyHtml, mainBadges, mainWidth, nameWhiteBox);
+            break;
+        }
+        case OfferKind::PlayingCard: {
+            const CardData &c = offer->playingCard;
+            name = CardTooltipFormat::cardTitleHtml(c);
+            bodyHtml = CardTooltipFormat::cardBodyHtml(c);
+            nameWhiteBox = true;
+            mInfoPanel->setMainContent(name, bodyHtml, mainBadges, 160, nameWhiteBox);
+            break;
+        }
+        }
+    } else {
+        bodyHtml = CardTooltipFormat::fromLuaMarkup(fallbackBody);
+        mInfoPanel->setMainContent(name, bodyHtml, mainBadges, mainWidth, nameWhiteBox);
+    }
+    mInfoPanel->relayout();
 
     QPoint pos = source->mapTo(this, QPoint(source->width() + dp(12), 0));
     if (pos.x() + mInfoPanel->width() > width() - 8)
@@ -524,11 +862,47 @@ void ShopWidget::showOfferInfo(QWidget *source)
     mInfoPanel->move(pos);
     mInfoPanel->raise();
     mInfoPanel->show();
+    mInfoSource = source;
 }
 
 void ShopWidget::hideOfferInfo()
 {
     if (mInfoPanel) mInfoPanel->hide();
+    mInfoSource = nullptr;
+}
+
+void ShopWidget::syncPriceLblForCardBtn(QWidget *cardBtn)
+{
+    if (!cardBtn) return;
+    auto *scb = dynamic_cast<ShopCardButton*>(cardBtn);
+    auto findOu = [cardBtn](const QVector<OfferUi> &vec) -> const OfferUi* {
+        for (const auto &ou : vec) if (ou.cardBtn == cardBtn) return &ou;
+        return nullptr;
+    };
+    const OfferUi *ou = findOu(mShopUi);
+    if (!ou) ou = findOu(mVoucherUi);
+    if (!ou) ou = findOu(mBoosterUi);
+    if (!ou || !ou->priceLbl) return;
+
+    // 可见卡牌在 button 内的垂直偏移：button 比可见尺寸大一圈给 hover 缩放预留。
+    const int visibleTopOffset = (scb && scb->visibleCardSize().isValid())
+        ? (cardBtn->height() - scb->visibleCardSize().height()) / 2
+        : 0;
+    // hover 时画面上移 -4 px（与 ShopCardButton::paintEvent 的 translate 对齐）。
+    const int hoverShift = (scb && scb->isHovered()) ? -8 : 0;
+    const QPoint cardTopLeftInThis = cardBtn->mapTo(this, QPoint(0, 0));
+    const int px = cardTopLeftInThis.x() + (cardBtn->width() - ou->priceLbl->width()) / 2;
+    const int py = cardTopLeftInThis.y() + visibleTopOffset
+                   - ou->priceLbl->height() + 1 + hoverShift;
+    ou->priceLbl->move(px, py);
+    // 关键守卫：cardBtn 不可见（卖完 / 空槽）时显式 hide()，确保 priceLbl 的默认可见状态
+    // （创建时的 "$0" 残影）一定被消掉；否则刚启动 / 拖动结束遍历会把空槽 priceLbl 也拉出来。
+    if (cardBtn->isVisible()) {
+        ou->priceLbl->show();
+        ou->priceLbl->raise();
+    } else {
+        ou->priceLbl->hide();
+    }
 }
 
 bool ShopWidget::eventFilter(QObject *obj, QEvent *event)
@@ -569,7 +943,8 @@ bool ShopWidget::eventFilter(QObject *obj, QEvent *event)
                     if (!mDraggingOffer && (gp - mDragStartGlobal).manhattanLength() > dp(8)) {
                         mDraggingOffer = true;
                         hideOfferInfo();
-
+                        // 拖动开始：不再藏起 priceLbl——下面的 MouseMove 路径会把它同步到
+                        // ghost 的顶部，跟随拖动移动。
                         destroyDragGhost();
                         mDragGhost = new QLabel(this);
                         mDragGhost->setAttribute(Qt::WA_TranslucentBackground, true);
@@ -592,6 +967,32 @@ bool ShopWidget::eventFilter(QObject *obj, QEvent *event)
                         if (mDragGhost) {
                             mDragGhost->move(mapFromGlobal(gp) - mDragPressOffset);
                             mDragGhost->raise();
+                            // 价格 tab 跟随 ghost——ghost 是整张 ou.card grab，cardBtn 位于
+                            // ghost 内 x=cardBtn.pos().x(), y=cardBtn.pos().y()，宽度=cardBtn.width。
+                            // 价格 tab 必须以 cardBtn 中心为基准（非 ghost 中心），否则非礼包槽
+                            // 的右侧 actionReserveW 会把 tab 整体推向右。
+                            auto syncPriceWithGhost = [this, w](const QVector<OfferUi> &vec) -> bool {
+                                for (const auto &ou : vec) {
+                                    if (ou.cardBtn != w || !ou.priceLbl) continue;
+                                    auto *scb = dynamic_cast<ShopCardButton*>(w);
+                                    const int visOff = scb && scb->visibleCardSize().isValid()
+                                        ? (w->height() - scb->visibleCardSize().height()) / 2 : 0;
+                                    const QPoint gp2 = mDragGhost->pos();
+                                    const QPoint cardBtnInCard = w->pos();
+                                    const int cardCenterX = cardBtnInCard.x() + w->width() / 2;
+                                    const int px = gp2.x() + cardCenterX - ou.priceLbl->width() / 2;
+                                    const int py = gp2.y() + cardBtnInCard.y() + visOff
+                                                 - ou.priceLbl->height() + 1;
+                                    ou.priceLbl->move(px, py);
+                                    ou.priceLbl->show();
+                                    ou.priceLbl->raise();
+                                    return true;
+                                }
+                                return false;
+                            };
+                            if (!syncPriceWithGhost(mShopUi))
+                                if (!syncPriceWithGhost(mVoucherUi))
+                                    syncPriceWithGhost(mBoosterUi);
                         }
                         int to = slotAtGlobalPos(mDragGroup, gp);
                         if (to < 0) to = mDragFromSlot;
@@ -635,6 +1036,8 @@ bool ShopWidget::eventFilter(QObject *obj, QEvent *event)
                         if (mDragWidget) mDragWidget->setGraphicsEffect(nullptr);
                         mDragHiddenEffect = nullptr;
                         destroyDragGhost();
+                        // 不在这里同步 priceLbl——animateOfferReorder 会和 ou.card 一起跑
+                        // priceLbl 动画，保证两者同步移动到最终位置。
                         animateOfferReorder(releaseGroup, from, to, dropPos);
                     } else {
                         mDragGroup = releaseGroup;
@@ -647,6 +1050,44 @@ bool ShopWidget::eventFilter(QObject *obj, QEvent *event)
                             anim->setStartValue(mDragGhost->pos());
                             anim->setEndValue(endInThis);
                             anim->setEasingCurve(QEasingCurve::OutCubic);
+
+                            // 被拖商品的 priceLbl 跟 ghost 一起回到原槽位——之前依赖 sync
+                            // 立即归位，priceLbl 会瞬移。这里改成并行 QPropertyAnimation。
+                            QLabel *draggedPrice = nullptr;
+                            QWidget *draggedCardBtn = nullptr;
+                            auto findDragged = [this, &draggedPrice, &draggedCardBtn](const QVector<OfferUi> &vec) {
+                                for (const auto &ou : vec)
+                                    if (ou.card == mDragWidget) {
+                                        draggedPrice = ou.priceLbl;
+                                        draggedCardBtn = ou.cardBtn;
+                                        return true;
+                                    }
+                                return false;
+                            };
+                            if (!findDragged(mShopUi)) if (!findDragged(mVoucherUi)) findDragged(mBoosterUi);
+                            if (draggedPrice && draggedCardBtn && draggedPrice->isVisible()) {
+                                auto *scb = dynamic_cast<ShopCardButton*>(draggedCardBtn);
+                                const int visOff = (scb && scb->visibleCardSize().isValid())
+                                    ? (draggedCardBtn->height() - scb->visibleCardSize().height()) / 2 : 0;
+                                const QPoint cardBtnInCard = draggedCardBtn->pos();
+                                const QPoint priceEnd(
+                                    endInThis.x() + cardBtnInCard.x()
+                                        + (draggedCardBtn->width() - draggedPrice->width()) / 2,
+                                    endInThis.y() + cardBtnInCard.y()
+                                        + visOff - draggedPrice->height() + 1);
+                                for (QObject *child : draggedPrice->children()) {
+                                    if (auto *oldAnim = qobject_cast<QPropertyAnimation*>(child)) {
+                                        if (oldAnim->propertyName() == QByteArray("pos")) oldAnim->stop();
+                                    }
+                                }
+                                auto *priceAnim = new QPropertyAnimation(draggedPrice, "pos", draggedPrice);
+                                priceAnim->setDuration(170);
+                                priceAnim->setStartValue(draggedPrice->pos());
+                                priceAnim->setEndValue(priceEnd);
+                                priceAnim->setEasingCurve(QEasingCurve::OutCubic);
+                                priceAnim->start(QAbstractAnimation::DeleteWhenStopped);
+                            }
+
                             QPointer<QWidget> sourceGuard(mDragWidget);
                             QPointer<ShopWidget> self(this);
                             connect(anim, &QPropertyAnimation::finished, this, [self, sourceGuard]() {
@@ -677,26 +1118,51 @@ bool ShopWidget::eventFilter(QObject *obj, QEvent *event)
         } else if (event->type() == QEvent::Leave || event->type() == QEvent::Hide) {
             hideOfferInfo();
         }
+        // cardBtn 移动 / 显示 → 重新计算价格 tab 的"贴可见卡牌顶部"位置。
+        if (event->type() == QEvent::Move || event->type() == QEvent::Show) {
+            if (auto *scb = dynamic_cast<ShopCardButton*>(w)) syncPriceLblForCardBtn(scb);
+        }
+        // hover 进出 → 延迟一帧再 sync。eventFilter 跑在 widget 自己 enterEvent 之前，
+        // 此时 ShopCardButton::mHovered 还没被翻成 true，直接 sync 会拿到 stale 状态，
+        // 导致 hover 时价格 tab 反而停留在 rest 位置（视觉上看像"hover 时价格下降"）。
+        if (event->type() == QEvent::Enter || event->type() == QEvent::Leave) {
+            if (auto *scb = dynamic_cast<ShopCardButton*>(w)) {
+                QPointer<QWidget> guard(scb);
+                QPointer<ShopWidget> self(this);
+                QTimer::singleShot(0, this, [self, guard]() {
+                    if (self && guard) self->syncPriceLblForCardBtn(guard);
+                });
+            }
+        }
     }
     return QWidget::eventFilter(obj, event);
 }
 
 void ShopWidget::refresh()
 {
-    mLblGold->setText(QString("$%1").arg(mGS->gold()));
+    if (mLblGold) mLblGold->setText(QString("$%1").arg(mGS->gold()));
 
     auto fillSlot = [this](OfferUi &ou, const ShopOffer &o, bool canBuy, bool isBooster) {
         Q_UNUSED(isBooster);
         if (o.sold) {
-            ou.card->setVisible(false);
-            ou.cardBtn->setToolTip(QString());
-            ou.cardBtn->setProperty("infoTitle", QString());
-            ou.cardBtn->setProperty("infoBody", QString());
+            // 卖完后保持外层 ou.card 占位（仍 setVisible(true)），仅隐藏内部 cardBtn / 价格 / 按钮，
+            // 确保当前行的另一槽位高度和宽度不会被 layout 重新瓜分。
+            ou.card->setVisible(true);
+            if (ou.cardBtn) {
+                ou.cardBtn->setVisible(false);
+                ou.cardBtn->setToolTip(QString());
+                ou.cardBtn->setProperty("infoTitle", QString());
+                ou.cardBtn->setProperty("infoBody", QString());
+            }
+            if (ou.priceLbl) ou.priceLbl->setVisible(false);
+            if (ou.nameLbl)  ou.nameLbl->setText(QString());
             if (ou.buyBtn) ou.buyBtn->hide();
             if (ou.useBtn) ou.useBtn->hide();
             return;
         }
         ou.card->setVisible(true);
+        if (ou.cardBtn) ou.cardBtn->setVisible(true);
+        if (ou.priceLbl) ou.priceLbl->setVisible(true);
 
         QString name;
         QString body;
@@ -808,6 +1274,8 @@ void ShopWidget::refresh()
         }
         // 选中卡片轻微上浮——对齐原版 card.lua highlighted 时的 highlight_offset。
         if (ou.cardBtn) {
+            // 同步阴影 lift 状态：选中即抬升。
+            if (auto *sc = dynamic_cast<ShopCardButton*>(ou.cardBtn)) sc->setLifted(selectedHere);
             QPointer<QWidget> btnGuard(ou.cardBtn);
             QTimer::singleShot(0, this, [btnGuard, selectedHere]() {
                 if (!btnGuard) return;
@@ -1147,6 +1615,35 @@ void ShopWidget::updateDragPreview(DragGroup group, int from, int to)
         anim->setEndValue(target);
         anim->setEasingCurve(QEasingCurve::OutCubic);
         anim->start(QAbstractAnimation::DeleteWhenStopped);
+
+        // priceLbl 跟随 ou.card 同步移动——ou.card 移动不会让 cardBtn 触发 Move 事件
+        // （cardBtn 在 ou.card 内的 pos 不变），所以这里直接平行启动一只 priceLbl 动画。
+        QLabel *price = (*vec)[i].priceLbl;
+        QWidget *cardBtn = (*vec)[i].cardBtn;
+        if (price && cardBtn && price->isVisible()) {
+            auto *scb = dynamic_cast<ShopCardButton*>(cardBtn);
+            const int visOff = (scb && scb->visibleCardSize().isValid())
+                ? (cardBtn->height() - scb->visibleCardSize().height()) / 2 : 0;
+            const int hoverShift = (scb && scb->isHovered()) ? -8 : 0;
+            const QPoint cardTopLeftInThis =
+                card->parentWidget() ? card->parentWidget()->mapTo(this, target) : target;
+            const QPoint cardBtnInCard = cardBtn->pos();
+            const int targetPx = cardTopLeftInThis.x() + cardBtnInCard.x()
+                                 + (cardBtn->width() - price->width()) / 2;
+            const int targetPy = cardTopLeftInThis.y() + cardBtnInCard.y()
+                                 + visOff - price->height() + 1 + hoverShift;
+            for (QObject *child : price->children()) {
+                if (auto *oldAnim = qobject_cast<QPropertyAnimation*>(child)) {
+                    if (oldAnim->propertyName() == QByteArray("pos")) oldAnim->stop();
+                }
+            }
+            auto *priceAnim = new QPropertyAnimation(price, "pos", price);
+            priceAnim->setDuration(120);
+            priceAnim->setStartValue(price->pos());
+            priceAnim->setEndValue(QPoint(targetPx, targetPy));
+            priceAnim->setEasingCurve(QEasingCurve::OutCubic);
+            priceAnim->start(QAbstractAnimation::DeleteWhenStopped);
+        }
     }
 }
 
@@ -1168,8 +1665,32 @@ void ShopWidget::clearDragPreview(bool animateBack)
                 if (oldAnim->propertyName() == QByteArray("pos")) oldAnim->stop();
             }
         }
+        // priceLbl 跟随：与 updateDragPreview 同一套——计算 cardBtn 移动后的目标 priceLbl 位置。
+        QLabel *price = (*vec)[i].priceLbl;
+        QWidget *cardBtn = (*vec)[i].cardBtn;
+        QPoint priceTarget;
+        if (price && cardBtn && price->isVisible()) {
+            auto *scb = dynamic_cast<ShopCardButton*>(cardBtn);
+            const int visOff = (scb && scb->visibleCardSize().isValid())
+                ? (cardBtn->height() - scb->visibleCardSize().height()) / 2 : 0;
+            const int hoverShift = (scb && scb->isHovered()) ? -8 : 0;
+            const QPoint cardTopLeftInThis =
+                card->parentWidget() ? card->parentWidget()->mapTo(this, target) : target;
+            const QPoint cardBtnInCard = cardBtn->pos();
+            priceTarget = QPoint(
+                cardTopLeftInThis.x() + cardBtnInCard.x()
+                    + (cardBtn->width() - price->width()) / 2,
+                cardTopLeftInThis.y() + cardBtnInCard.y()
+                    + visOff - price->height() + 1 + hoverShift);
+            for (QObject *child : price->children()) {
+                if (auto *oldAnim = qobject_cast<QPropertyAnimation*>(child)) {
+                    if (oldAnim->propertyName() == QByteArray("pos")) oldAnim->stop();
+                }
+            }
+        }
         if (!animateBack) {
             card->move(target);
+            if (price && cardBtn && price->isVisible()) price->move(priceTarget);
             continue;
         }
         auto *anim = new QPropertyAnimation(card, "pos", card);
@@ -1178,6 +1699,14 @@ void ShopWidget::clearDragPreview(bool animateBack)
         anim->setEndValue(target);
         anim->setEasingCurve(QEasingCurve::OutCubic);
         anim->start(QAbstractAnimation::DeleteWhenStopped);
+        if (price && cardBtn && price->isVisible()) {
+            auto *priceAnim = new QPropertyAnimation(price, "pos", price);
+            priceAnim->setDuration(140);
+            priceAnim->setStartValue(price->pos());
+            priceAnim->setEndValue(priceTarget);
+            priceAnim->setEasingCurve(QEasingCurve::OutCubic);
+            priceAnim->start(QAbstractAnimation::DeleteWhenStopped);
+        }
     }
 }
 
@@ -1210,38 +1739,81 @@ void ShopWidget::animateOfferReorder(DragGroup group, int from, int to, const QP
 
     refresh();
 
-    // moveOfferInGroup 使用 takeAt/insert 语义。refresh 后每个固定槽位显示的是“新位置”的 offer。
-    // 先把每个槽位放回该 offer 原先所在的视觉位置，再动画归位，避免变成瞬间换贴图。
+    // 用户反馈：非拖动商品在 release 时不应该"先跳回原位再动画到目标"——预览阶段它们
+    // 已经被 updateDragPreview 移到了视觉上的目标位置（对应 layout 重排后的最终 slot），
+    // 应该 stay-put 直接落定；只有被拖动的那张才从 dropPos 平滑动画到目标 slot。
     for (int i = 0; i < vec->size(); ++i) {
         QWidget *card = (*vec)[i].card;
         if (!card || i >= slotPos.size()) continue;
 
-        int originalIndex = i;
-        if (from < to) {
-            if (i >= from && i < to) originalIndex = i + 1;
-            else if (i == to) originalIndex = from;
-        } else if (from > to) {
-            if (i == to) originalIndex = from;
-            else if (i > to && i <= from) originalIndex = i - 1;
-        }
-
-        QPoint start = (i == to) ? dropPos : slotPos.value(originalIndex, slotPos.value(i));
-        QPoint end = slotPos.value(i, card->pos());
+        const QPoint endCardPos = slotPos.value(i, card->pos());
         card->setProperty("dragPreviewPos", QVariant());
         for (QObject *child : card->children()) {
             if (auto *oldAnim = qobject_cast<QPropertyAnimation *>(child)) {
                 if (oldAnim->propertyName() == QByteArray("pos")) oldAnim->stop();
             }
         }
-        card->move(start);
-        card->raise();
 
-        auto *anim = new QPropertyAnimation(card, "pos", card);
-        anim->setDuration(i == to ? 230 : 190);
-        anim->setStartValue(start);
-        anim->setEndValue(end);
-        anim->setEasingCurve(QEasingCurve::OutCubic);
-        anim->start(QAbstractAnimation::DeleteWhenStopped);
+        QLabel *price = (*vec)[i].priceLbl;
+        QWidget *cardBtn = (*vec)[i].cardBtn;
+        auto computePriceTopLeft = [&](const QPoint &cardLocalPos) -> QPoint {
+            if (!price || !cardBtn) return QPoint();
+            auto *scb = dynamic_cast<ShopCardButton*>(cardBtn);
+            const int visOff = (scb && scb->visibleCardSize().isValid())
+                ? (cardBtn->height() - scb->visibleCardSize().height()) / 2 : 0;
+            QWidget *cardParent = card->parentWidget();
+            const QPoint inThis = cardParent ? cardParent->mapTo(this, cardLocalPos) : cardLocalPos;
+            const QPoint cardBtnInCard = cardBtn->pos();
+            return QPoint(
+                inThis.x() + cardBtnInCard.x() + (cardBtn->width() - price->width()) / 2,
+                inThis.y() + cardBtnInCard.y() + visOff - price->height() + 1);
+        };
+        const QPoint priceEnd = computePriceTopLeft(endCardPos);
+
+        if (i == to) {
+            // 被拖动的商品：从 dropPos（ghost 释放位置）动画到目标 slot。
+            const int duration = 230;
+            card->move(dropPos);
+            card->raise();
+            auto *anim = new QPropertyAnimation(card, "pos", card);
+            anim->setDuration(duration);
+            anim->setStartValue(dropPos);
+            anim->setEndValue(endCardPos);
+            anim->setEasingCurve(QEasingCurve::OutCubic);
+            anim->start(QAbstractAnimation::DeleteWhenStopped);
+
+            if (price && cardBtn) {
+                for (QObject *child : price->children()) {
+                    if (auto *oldAnim = qobject_cast<QPropertyAnimation*>(child)) {
+                        if (oldAnim->propertyName() == QByteArray("pos")) oldAnim->stop();
+                    }
+                }
+                const QPoint priceStart = computePriceTopLeft(dropPos);
+                if (price->isVisible()) {
+                    price->move(priceStart);
+                    auto *priceAnim = new QPropertyAnimation(price, "pos", price);
+                    priceAnim->setDuration(duration);
+                    priceAnim->setStartValue(priceStart);
+                    priceAnim->setEndValue(priceEnd);
+                    priceAnim->setEasingCurve(QEasingCurve::OutCubic);
+                    priceAnim->start(QAbstractAnimation::DeleteWhenStopped);
+                } else {
+                    price->move(priceEnd);
+                }
+            }
+        } else {
+            // 非拖动商品：直接落定到 end 位置。预览已经把它们移到了视觉对应位置，
+            // 这次 move(end) 把 widget 真正贴到 layout 槽位上，用户感受不到跳变。
+            card->move(endCardPos);
+            if (price && cardBtn) {
+                for (QObject *child : price->children()) {
+                    if (auto *oldAnim = qobject_cast<QPropertyAnimation*>(child)) {
+                        if (oldAnim->propertyName() == QByteArray("pos")) oldAnim->stop();
+                    }
+                }
+                price->move(priceEnd);
+            }
+        }
     }
     mDragSlotBasePos.clear();
 }
@@ -1356,6 +1928,121 @@ void ShopWidget::onBuyAndUseShop(int slot) {
 // 兑换券 / 开包前先清选中再交给原逻辑。
 
 void ShopWidget::onBuyVoucher(int slot) {
+    if (slot < 0 || slot >= mVoucherUi.size()) {
+        if (mGS->buyVoucherOffer(slot)) {
+            mSelectedVoucherSlot = -1;
+            refresh();
+        }
+        return;
+    }
+    // 兑换动画：完整 3 段——
+    //   Phase A (260ms)：截下 cardBtn 像素 → ghost 沿屏幕中心平移 + 放大到 2.4x；
+    //   Phase B (240ms)：在中心轻微摇晃 (±5° 抖动)；
+    //   Phase C (320ms)：dissolve——再放大一档 + opacity 1→0。
+    // 这是对原版 booster_open 类似的"挥发"序列在 voucher 上的复刻。
+    QWidget *cardBtn = mVoucherUi[slot].cardBtn;
+    if (cardBtn && cardBtn->isVisible()) {
+        QPixmap snap(cardBtn->size());
+        snap.fill(Qt::transparent);
+        cardBtn->render(&snap);
+
+        auto *ghost = new QLabel(this);
+        ghost->setPixmap(snap);
+        ghost->setFixedSize(snap.size());
+        ghost->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+        ghost->setStyleSheet("background:transparent;");
+        ghost->setAlignment(Qt::AlignCenter);
+        ghost->setScaledContents(true);
+        const QPoint globalTopLeft = cardBtn->mapToGlobal(QPoint(0, 0));
+        const QPoint localTopLeft = mapFromGlobal(globalTopLeft);
+        ghost->move(localTopLeft);
+        ghost->show();
+        ghost->raise();
+
+        auto *opacity = new QGraphicsOpacityEffect(ghost);
+        opacity->setOpacity(1.0);
+        ghost->setGraphicsEffect(opacity);
+
+        const QSize startSize = snap.size();
+        const QPoint startTopLeft = localTopLeft;
+        const QPoint startCenter(startTopLeft.x() + startSize.width()  / 2,
+                                  startTopLeft.y() + startSize.height() / 2);
+        const QPoint screenCenter(width() / 2, height() / 2);
+
+        QPointer<QLabel> ghostGuard(ghost);
+        QPointer<QGraphicsOpacityEffect> opGuard(opacity);
+        auto setGhostGeom = [ghostGuard, startSize](qreal scale, QPoint centerInThis) {
+            if (!ghostGuard) return;
+            const QSize ns(int(startSize.width()  * scale),
+                           int(startSize.height() * scale));
+            ghostGuard->setFixedSize(ns);
+            ghostGuard->move(centerInThis.x() - ns.width()  / 2,
+                             centerInThis.y() - ns.height() / 2);
+        };
+
+        // Phase A：平移到屏幕中心 + 放大到 1.5（之前 2.4 太大，与开包视觉量级不一致）
+        auto *phaseA = new QVariantAnimation(this);
+        phaseA->setDuration(260);
+        phaseA->setStartValue(0.0);
+        phaseA->setEndValue(1.0);
+        phaseA->setEasingCurve(QEasingCurve::OutCubic);
+        connect(phaseA, &QVariantAnimation::valueChanged, ghost,
+                [setGhostGeom, startCenter, screenCenter](const QVariant &v) {
+            const qreal t = v.toReal();
+            const qreal scale = 1.0 + 0.5 * t;
+            const QPoint c(startCenter.x() + int((screenCenter.x() - startCenter.x()) * t),
+                           startCenter.y() + int((screenCenter.y() - startCenter.y()) * t));
+            setGhostGeom(scale, c);
+        });
+
+        // Phase B：在中央摇晃（位移近似旋转）；scale 保持在 1.5。
+        auto *phaseB = new QSequentialAnimationGroup(this);
+        for (int i = 0; i < 4; ++i) {
+            auto *step = new QVariantAnimation(phaseB);
+            step->setDuration(60);
+            step->setStartValue(0.0);
+            step->setEndValue(1.0);
+            step->setEasingCurve(QEasingCurve::InOutQuad);
+            const int dx = (i % 2 == 0 ? 6 : -6);
+            connect(step, &QVariantAnimation::valueChanged, ghost,
+                    [setGhostGeom, screenCenter, dx](const QVariant &v) {
+                const qreal t = v.toReal();
+                const qreal s = std::sin(t * M_PI);
+                setGhostGeom(1.5, QPoint(screenCenter.x() + int(dx * s), screenCenter.y()));
+            });
+            phaseB->addAnimation(step);
+        }
+
+        // Phase C：dissolve——走 BalatroShaders::renderDissolvePixmap，与小丑包/Blind 切换
+        //          一致的"灼烧 -> 颗粒消散"效果；同时继续放大到 3.2。
+        auto *phaseC = new QVariantAnimation(this);
+        phaseC->setDuration(380);
+        phaseC->setStartValue(0.0);
+        phaseC->setEndValue(1.0);
+        phaseC->setEasingCurve(QEasingCurve::InCubic);
+        const QPixmap dissolveBase = snap;  // 用截下来的 cardBtn 像素做溶解基底
+        connect(phaseC, &QVariantAnimation::valueChanged, ghost,
+                [ghostGuard, setGhostGeom, screenCenter, dissolveBase](const QVariant &v) {
+            if (!ghostGuard) return;
+            const qreal t = qBound(0.0, v.toDouble(), 1.0);
+            const qreal scale = 1.5 + 0.3 * t;
+            setGhostGeom(scale, screenCenter);
+            // 溶解 shader：burn1 暖白 / burn2 橙红，匹配优惠券"被使用掉"的能量耗散感。
+            QPixmap dissolved = BalatroShaders::renderDissolvePixmap(
+                dissolveBase, t,
+                QColor(255, 230, 130, 200),
+                QColor(255, 110, 70, 160),
+                1.0);
+            if (!dissolved.isNull()) ghostGuard->setPixmap(dissolved);
+        });
+
+        auto *seq = new QSequentialAnimationGroup(this);
+        seq->addAnimation(phaseA);
+        seq->addAnimation(phaseB);
+        seq->addAnimation(phaseC);
+        connect(seq, &QSequentialAnimationGroup::finished, ghost, &QObject::deleteLater);
+        seq->start(QAbstractAnimation::DeleteWhenStopped);
+    }
     if (mGS->buyVoucherOffer(slot)) {
         mSelectedVoucherSlot = -1;
         refresh();

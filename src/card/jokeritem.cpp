@@ -3,7 +3,9 @@
 #include <QGraphicsSceneMouseEvent>
 #include <QCursor>
 #include <QPropertyAnimation>
+#include <QVariantAnimation>
 #include <QSequentialAnimationGroup>
+#include <QRandomGenerator>
 #include <QGraphicsSceneHoverEvent>
 #include <QLineF>
 #include <QDateTime>
@@ -16,6 +18,8 @@
 #include <cmath>
 #include <QtMath>
 #include "../utils/shadereffects.h"
+#include "cardshadow.h"
+#include <QGraphicsScene>
 
 QPixmap *JokerItem::sSheet = nullptr;
 
@@ -313,6 +317,9 @@ JokerItem::JokerItem(const Joker &j, QGraphicsItem *parent)
 {
     setAcceptHoverEvents(true);
     setCursor(Qt::PointingHandCursor);
+    setFlag(QGraphicsItem::ItemSendsGeometryChanges, true);
+    mShadow = new CardShadowItem(WIDTH, HEIGHT, [this]() { return mShadowLift; });
+    mShadow->setZValue(-1000.0);
 
     if (jokerNeedsShaderTick(mJoker)) {
         ensureJokerShaderTimer();
@@ -321,12 +328,54 @@ JokerItem::JokerItem(const Joker &j, QGraphicsItem *parent)
     }
 }
 
+JokerItem::~JokerItem()
+{
+    if (mShadow) {
+        if (auto *s = mShadow->scene()) s->removeItem(mShadow);
+        delete mShadow;
+        mShadow = nullptr;
+    }
+}
+
+QVariant JokerItem::itemChange(GraphicsItemChange change, const QVariant &value)
+{
+    if (change == ItemSceneHasChanged) {
+        QGraphicsScene *s = scene();
+        if (s && mShadow && mShadow->scene() != s) s->addItem(mShadow);
+        if (!s && mShadow && mShadow->scene())
+            mShadow->scene()->removeItem(mShadow);
+    } else if (mShadow) {
+        switch (change) {
+        case ItemPositionHasChanged:   mShadow->setPos(value.toPointF()); break;
+        case ItemRotationHasChanged:   mShadow->setRotation(value.toReal()); break;
+        case ItemScaleHasChanged:      mShadow->setScale(value.toReal()); break;
+        // 不同步 ItemTransformHasChanged——applyHoverTransform 的透视矩阵不应该套到阴影上。
+        case ItemOpacityHasChanged:    mShadow->setOpacity(value.toReal()); break;
+        case ItemVisibleHasChanged:    mShadow->setVisible(value.toBool()); break;
+        case ItemZValueHasChanged:     updateShadowZ(); break;
+        default: break;
+        }
+    }
+    return QGraphicsObject::itemChange(change, value);
+}
+
+void JokerItem::updateShadowZ()
+{
+    if (!mShadow) return;
+    const bool active = mPressed || mDragging || mScoringLifted;
+    mShadow->setZValue(active ? zValue() - 0.5 : -1000.0);
+}
+
 QRectF JokerItem::boundingRect() const {
+    // 阴影现在是 sibling CardShadowItem，独立绘制；本 item 的 boundingRect 收紧到
+    // 牌面本体，确保 hover hit-test 只覆盖可见牌面（避免 hover 在阴影区不消失）。
     return QRectF(0, 0, WIDTH, HEIGHT);
 }
 
 void JokerItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) {
     p->setRenderHint(QPainter::SmoothPixmapTransform, false);
+
+    // 阴影由 mShadow（sibling CardShadowItem）单独绘制——z=-1000 落到所有牌之下。
 
     const bool floatingAnimated = jokerNeedsShaderTick(mJoker);
     const int frame = floatingAnimated ? shaderCacheFrame() : -1;
@@ -378,9 +427,14 @@ void JokerItem::mousePressEvent(QGraphicsSceneMouseEvent *e)
         mDragging = false;
         mHoverTiltX = 0.0;
         mHoverTiltY = 0.0;
+        mDragTilt = 0.0;
+        mLastDragScenePos = e->scenePos();
+        mLastDragTimeMs = QDateTime::currentMSecsSinceEpoch();
         applyHoverTransform();
         mPressScenePos = e->scenePos();
         mRestZ = zValue();
+        updateShadowZ();
+        animateShadowLift(currentShadowTarget(), 100);
         e->accept();
         return;
     }
@@ -396,10 +450,29 @@ void JokerItem::mouseMoveEvent(QGraphicsSceneMouseEvent *e)
     if (!mDragging && QLineF(e->scenePos(), mPressScenePos).length() > 7.0) {
         mDragging = true;
         setZValue(650);
+        updateShadowZ();
+        mLastDragScenePos = e->scenePos();
+        mLastDragTimeMs = QDateTime::currentMSecsSinceEpoch();
+        animateShadowLift(currentShadowTarget(), 120);
     }
 
     if (mDragging) {
+        // 拖拽水平速度倾斜——参数与 CardItem::mouseMoveEvent 保持一致（用户反馈9：
+        // 小丑/塔罗/星球也要有这种甩动倾斜）。
+        const qint64 nowMs = QDateTime::currentMSecsSinceEpoch();
+        const qint64 dtMs = qMax<qint64>(1, nowMs - mLastDragTimeMs);
+        const double dx = e->scenePos().x() - mLastDragScenePos.x();
+        const double vxPerSec = dx * 1000.0 / double(dtMs);
+        double desTilt = vxPerSec * 0.022;
+        if (desTilt > 15.0) desTilt = 15.0;
+        if (desTilt < -15.0) desTilt = -15.0;
+        mDragTilt = mDragTilt * 0.65 + desTilt * 0.35;
+        mLastDragScenePos = e->scenePos();
+        mLastDragTimeMs = nowMs;
         setPos(e->scenePos() - QPointF(WIDTH / 2.0, HEIGHT / 2.0));
+        // 旋转使用 setRotation，围绕 transformOriginPoint（中心）。
+        setTransformOriginPoint(WIDTH / 2.0, HEIGHT / 2.0);
+        setRotation(mDragTilt);
         emit dragMoved(this, e->scenePos());
         e->accept();
         return;
@@ -413,11 +486,30 @@ void JokerItem::mouseReleaseEvent(QGraphicsSceneMouseEvent *e)
         mPressed = false;
         if (mDragging) {
             mDragging = false;
+            // 平滑把拖拽倾斜衰减回 0。
+            if (qFuzzyIsNull(mDragTilt)) {
+                mDragTilt = 0.0;
+                setRotation(0.0);
+            } else {
+                auto *decay = new QVariantAnimation(this);
+                decay->setDuration(220);
+                decay->setStartValue(mDragTilt);
+                decay->setEndValue(0.0);
+                decay->setEasingCurve(QEasingCurve::OutCubic);
+                connect(decay, &QVariantAnimation::valueChanged, this,
+                        [this](const QVariant &v) {
+                    mDragTilt = v.toDouble();
+                    setRotation(mDragTilt);
+                });
+                decay->start(QAbstractAnimation::DeleteWhenStopped);
+            }
             emit dragReleased(this, e->scenePos());
         } else {
             emit pressed(this, e->button());
             if (e->button() == Qt::LeftButton) emit clicked(this);
         }
+        animateShadowLift(currentShadowTarget(), 160);
+        updateShadowZ();
         e->accept();
         return;
     }
@@ -454,9 +546,43 @@ void JokerItem::hoverEnterEvent(QGraphicsSceneHoverEvent *e)
     mHovered = true;
     setTransformOriginPoint(WIDTH / 2.0, HEIGHT / 2.0);
     animateScale(1.08, 100);
+    animateShadowLift(currentShadowTarget(), 120);
+    triggerHoverJitter();
     emit hoverChanged(this, true);
     update();
     QGraphicsObject::hoverEnterEvent(e);
+}
+
+void JokerItem::triggerHoverJitter()
+{
+    if (mDragging) return; // 拖拽时不抖
+    const double dir = (QRandomGenerator::global()->bounded(2) == 0) ? -1.0 : 1.0;
+    const double peakRot   = 2.4 * dir;
+    const double overshoot = -0.6 * dir;
+
+    auto *rotOut = new QPropertyAnimation(this, "rotation");
+    rotOut->setDuration(70);
+    rotOut->setStartValue(0.0);
+    rotOut->setEndValue(peakRot);
+    rotOut->setEasingCurve(QEasingCurve::OutQuad);
+
+    auto *rotBack = new QPropertyAnimation(this, "rotation");
+    rotBack->setDuration(110);
+    rotBack->setStartValue(peakRot);
+    rotBack->setEndValue(overshoot);
+    rotBack->setEasingCurve(QEasingCurve::InOutQuad);
+
+    auto *rotSettle = new QPropertyAnimation(this, "rotation");
+    rotSettle->setDuration(120);
+    rotSettle->setStartValue(overshoot);
+    rotSettle->setEndValue(0.0);
+    rotSettle->setEasingCurve(QEasingCurve::OutCubic);
+
+    auto *seq = new QSequentialAnimationGroup(this);
+    seq->addAnimation(rotOut);
+    seq->addAnimation(rotBack);
+    seq->addAnimation(rotSettle);
+    seq->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
 void JokerItem::hoverMoveEvent(QGraphicsSceneHoverEvent *e)
@@ -475,6 +601,7 @@ void JokerItem::hoverLeaveEvent(QGraphicsSceneHoverEvent *e)
     mHoverTiltY = 0.0;
     applyHoverTransform();
     animateScale(1.0, 110);
+    animateShadowLift(currentShadowTarget(), 160);
     emit hoverChanged(this, false);
     update();
     QGraphicsObject::hoverLeaveEvent(e);
@@ -520,4 +647,46 @@ void JokerItem::juiceUp(double scaleAmount, int durationMs)
     seq->addAnimation(down);
     up->setParent(seq); down->setParent(seq);
     seq->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+void JokerItem::setShadowLift(qreal v)
+{
+    v = qBound(0.0, v, 1.0);
+    if (qFuzzyCompare(v + 1.0, mShadowLift + 1.0)) return;
+    mShadowLift = v;
+    if (mShadow) mShadow->update();
+}
+
+void JokerItem::setScoringLifted(bool lifted)
+{
+    if (mScoringLifted == lifted) return;
+    mScoringLifted = lifted;
+    updateShadowZ();
+    animateShadowLift(currentShadowTarget(), 180);
+}
+
+qreal JokerItem::currentShadowTarget() const
+{
+    if (mScoringLifted) return 1.0;
+    if (mDragging)      return 0.85;
+    if (mPressed)       return 0.55;
+    if (mHovered)       return 0.30;
+    return 0.0;
+}
+
+void JokerItem::animateShadowLift(qreal target, int durationMs)
+{
+    auto *anim = findChild<QPropertyAnimation*>(QStringLiteral("JokerShadowAnim"),
+                                                 Qt::FindDirectChildrenOnly);
+    if (!anim) {
+        anim = new QPropertyAnimation(this, "shadowLift", this);
+        anim->setObjectName(QStringLiteral("JokerShadowAnim"));
+        anim->setEasingCurve(QEasingCurve::OutCubic);
+    } else if (anim->state() == QAbstractAnimation::Running) {
+        anim->stop();
+    }
+    anim->setDuration(durationMs);
+    anim->setStartValue(mShadowLift);
+    anim->setEndValue(qBound(0.0, target, 1.0));
+    anim->start();
 }

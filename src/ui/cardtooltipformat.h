@@ -2,6 +2,9 @@
 #define CARDTOOLTIPFORMAT_H
 
 #include "../card/carddata.h"
+#include "../card/consumable.h"
+#include "../card/joker.h"
+#include <QColor>
 #include <QString>
 #include <QStringList>
 
@@ -64,6 +67,29 @@ inline QString rankText(Rank r)
     case Rank::Ace:   return QStringLiteral("A");
     default: return QString::number(static_cast<int>(r));
     }
+}
+
+// 小丑稀有度的中文标签（badge 文案）。原版 k_common / k_uncommon / k_rare / k_legendary。
+inline QString rarityName(JokerRarity r)
+{
+    switch (r) {
+    case JokerRarity::Common:    return QStringLiteral("普通");
+    case JokerRarity::Uncommon:  return QStringLiteral("罕见");
+    case JokerRarity::Rare:      return QStringLiteral("稀有");
+    case JokerRarity::Legendary: return QStringLiteral("传奇");
+    }
+    return QString();
+}
+
+inline QColor rarityColor(JokerRarity r)
+{
+    switch (r) {
+    case JokerRarity::Common:    return QColor("#009dff");
+    case JokerRarity::Uncommon:  return QColor("#4BC292");
+    case JokerRarity::Rare:      return QColor("#fe5f55");
+    case JokerRarity::Legendary: return QColor("#b26cbb");
+    }
+    return QColor("#888888");
 }
 
 inline QString enhancementName(Enhancement e)
@@ -226,36 +252,154 @@ inline QString fromLuaMarkup(const QString &src)
 }
 
 // playing card 标题：花色染色 + 点数 light_black（白色 name 盒上的暗灰色文字）。
+// 标题只放"花色+点数"，增强类型不入标题——对应效果在 body 内联（+8 筹码 / +30 额外筹码 …）。
 inline QString cardTitleHtml(const CardData &c)
 {
     if (c.enhancement == Enhancement::Stone)
         return span(QStringLiteral("石头牌"), kRankColor());
-    // 花色和点数之间留一个空格，更接近原版 "Spades  J" 的视觉间距。
-    QString s = span(suitText(c.suit), suitColor(c.suit))
-              + QStringLiteral(" ")
-              + span(rankText(c.rank), kRankColor());
-    if (c.enhancement != Enhancement::None)
-        s += QLatin1String(" ")
-           + span(QStringLiteral("· ") + enhancementName(c.enhancement), kMoneyColor());
-    return s;
+    return span(suitText(c.suit), suitColor(c.suit))
+         + QStringLiteral(" ")
+         + span(rankText(c.rank), kRankColor());
+}
+
+// ── 单独的副面板正文：每种增强 / edition / seal 各自一个独立面板。
+//    cluster 模式下主面板只显示牌面的基础筹码，效果性的描述拆到副面板。
+
+inline QString enhancementBodyHtml(Enhancement e)
+{
+    switch (e) {
+    case Enhancement::Bonus:
+        return span(QStringLiteral("+30"), kChipsColor()) + QStringLiteral(" 额外筹码");
+    case Enhancement::Mult:
+        return span(QStringLiteral("+4"), kMultColor()) + QStringLiteral(" 倍率");
+    case Enhancement::Wild:
+        return QStringLiteral("可视作任意花色");
+    case Enhancement::Glass:
+        return xmultPill(QStringLiteral("X2")) + QStringLiteral(" 倍率<br/>")
+             + QStringLiteral("有 ") + span(QStringLiteral("1/4"), kProbColor())
+             + QStringLiteral(" 概率摧毁此牌");
+    case Enhancement::Steel:
+        return xmultPill(QStringLiteral("X1.5"))
+             + QStringLiteral(" 倍率<br/>当此牌停留在手牌时");
+    case Enhancement::Gold:
+        return QStringLiteral("回合结束时若仍在手牌：")
+             + span(QStringLiteral("$3"), kMoneyColor());
+    case Enhancement::Lucky:
+        return span(QStringLiteral("1/5"), kProbColor())
+             + QStringLiteral(" 概率 ")
+             + span(QStringLiteral("+20"), kMultColor())
+             + QStringLiteral(" 倍率<br/>")
+             + span(QStringLiteral("1/15"), kProbColor())
+             + QStringLiteral(" 概率 ")
+             + span(QStringLiteral("$20"), kMoneyColor());
+    case Enhancement::Stone:
+        return span(QStringLiteral("+50"), kChipsColor()) + QStringLiteral(" 筹码<br/>")
+             + QStringLiteral("无点数 / 无花色");
+    default:
+        return QString();
+    }
+}
+
+inline QString editionBodyHtml(Edition e)
+{
+    switch (e) {
+    case Edition::Foil:        return span(QStringLiteral("+50"), kChipsColor()) + QStringLiteral(" 筹码");
+    case Edition::Holographic: return span(QStringLiteral("+10"), kMultColor()) + QStringLiteral(" 倍率");
+    case Edition::Polychrome:  return xmultPill(QStringLiteral("X1.5")) + QStringLiteral(" 倍率");
+    case Edition::Negative:    return QStringLiteral("+1 持有槽位");
+    default: return QString();
+    }
+}
+
+inline QString sealBodyHtml(Seal s)
+{
+    switch (s) {
+    case Seal::Gold:   return QStringLiteral("打出并计分后获得 ")
+                            + span(QStringLiteral("$3"), kMoneyColor());
+    case Seal::Red:    return QStringLiteral("重新触发此牌 1 次");
+    case Seal::Blue:   return QStringLiteral("回合结束时生成对应等级的<br/>")
+                            + span(QStringLiteral("行星牌"), QStringLiteral("#13afce"));
+    case Seal::Purple: return QStringLiteral("弃掉时生成一张<br/>")
+                            + span(QStringLiteral("塔罗牌"), QStringLiteral("#a782d1"));
+    default: return QString();
+    }
+}
+
+// ── 消耗类副面板映射 ──────────────────────────────────────────
+// 塔罗 / 幻灵 等"会授予某种增强 / 蜡封 / edition"的消耗，悬浮时把对应被授予物
+// 拆到一只独立副面板。其他不授予效果的（如愚者、女祭司）返回 None。
+
+inline Enhancement consumableGrantsEnhancement(ConsumableType t)
+{
+    switch (t) {
+    case ConsumableType::Tarot_Magician:   return Enhancement::Lucky;
+    case ConsumableType::Tarot_Empress:    return Enhancement::Mult;
+    case ConsumableType::Tarot_Hierophant: return Enhancement::Bonus;
+    case ConsumableType::Tarot_Chariot:    return Enhancement::Steel;
+    case ConsumableType::Tarot_Lovers:     return Enhancement::Wild;
+    case ConsumableType::Tarot_Justice:    return Enhancement::Glass;
+    case ConsumableType::Tarot_Tower:      return Enhancement::Stone;
+    case ConsumableType::Tarot_Devil:      return Enhancement::Gold;
+    default:                               return Enhancement::None;
+    }
+}
+
+inline Seal consumableGrantsSeal(ConsumableType t)
+{
+    switch (t) {
+    case ConsumableType::Spectral_Talisman: return Seal::Gold;
+    case ConsumableType::Spectral_DejaVu:   return Seal::Red;
+    case ConsumableType::Spectral_Trance:   return Seal::Blue;
+    case ConsumableType::Spectral_Medium:   return Seal::Purple;
+    default:                                return Seal::None;
+    }
+}
+
+// Spectral_Aura 给随机 Foil/Holo/Polychrome；Tarot_Wheel 也是同样池子。
+// 返回 true 表示该消耗会授予一个随机 edition——副面板可以提示三种 edition 池子。
+inline bool consumableGrantsRandomEdition(ConsumableType t)
+{
+    return t == ConsumableType::Spectral_Aura
+        || t == ConsumableType::Tarot_Wheel;
+}
+
+// 主面板正文（cluster 模式）：只描述牌面本体的基础筹码与点数信息，不写 enhancement/edition/seal。
+inline QString cardMainBodyHtml(const CardData &c)
+{
+    if (c.enhancement == Enhancement::Stone) {
+        // 石头牌没有点数与花色——本体没有"基础筹码"以外的信息可显示，
+        // 提示文字交给增强副面板，主面板就空着只显示标题。
+        return QString();
+    }
+    int chips = c.chipValue() + c.permanentBonusChips;
+    QStringList lines;
+    lines << span(QStringLiteral("+%1").arg(chips), kChipsColor())
+            + QStringLiteral(" 筹码");
+    if (c.isDebuffed)
+        lines << span(QStringLiteral("被 Boss 盲注禁用"), kMultColor());
+    return lines.join(QLatin1String("<br/>"));
 }
 
 // playing card 描述：与原版 m_xxx 模板对齐——chips/+mult/$ 用各自颜色。
+//   - 基础筹码（点数 + 累计奖励）单独一行：+8 筹码
+//   - 增强加成的筹码 / 倍率 / 概率效果各自换行：+30 额外筹码 / X1.5 倍率 / 1/4 概率…
 inline QString cardBodyHtml(const CardData &c)
 {
     QStringList lines;
-    auto chipsLine = [](int chips) {
+    auto chipsLine = [](int chips, bool extra) {
         return span(QStringLiteral("+%1").arg(chips), kChipsColor())
-             + QStringLiteral(" 筹码");
+             + (extra ? QStringLiteral(" 额外筹码") : QStringLiteral(" 筹码"));
     };
     if (c.enhancement == Enhancement::Stone) {
-        lines << chipsLine(50 + c.permanentBonusChips);
+        lines << chipsLine(50 + c.permanentBonusChips, false);
         lines << QStringLiteral("无点数 / 无花色");
     } else {
-        int chips = c.chipValue() + c.permanentBonusChips;
-        if (c.enhancement == Enhancement::Bonus) chips += 30;
-        lines << chipsLine(chips);
+        int baseChips = c.chipValue() + c.permanentBonusChips;
+        lines << chipsLine(baseChips, false);
         switch (c.enhancement) {
+        case Enhancement::Bonus:
+            lines << chipsLine(30, true);
+            break;
         case Enhancement::Mult:
             lines << span(QStringLiteral("+4"), kMultColor())
                    + QStringLiteral(" 倍率");

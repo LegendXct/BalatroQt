@@ -1,6 +1,7 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
 #include <QPainter>
+#include <QPainterPath>
 #include <QFontDatabase>
 #include <QGraphicsProxyWidget>
 #include <QGraphicsPixmapItem>
@@ -212,9 +213,12 @@ static void setLabelScaledText(QLabel *lbl, const QString &text, int nomPx)
     QFont f = lbl->font();
     f.setPixelSize(nomPx);
     const int w = lbl->width();
+    // 用户反馈10：之前下限 nomPx/2 会在 10+ 位的分数 / 倍率上仍然装不下；
+    // 这里把下限放宽到 nomPx/3 但不低于 10px，保证再长的位数也能完整显示。
+    const int minPx = qMax(10, nomPx / 3);
     if (w > 20) {
         QFontMetrics fm(f);
-        while (f.pixelSize() > nomPx / 2 && fm.horizontalAdvance(text) > w - 20) {
+        while (f.pixelSize() > minPx && fm.horizontalAdvance(text) > w - 16) {
             f.setPixelSize(f.pixelSize() - 1);
             fm = QFontMetrics(f);
         }
@@ -2242,14 +2246,14 @@ void MainWindow::refreshCounters() {
         mJokerCountLabel->setPlainText(QString("%1/%2")
                                            .arg(mGameState->jokers().size()).arg(mGameState->jokerSlots()));
         QRectF br = mJokerCountLabel->boundingRect();
-        mJokerCountLabel->setPos(22, JOKER_Y + CARD_H + 40);
+        mJokerCountLabel->setPos(40, JOKER_Y + TOP_SLOT_H + 40);
     }
     if (mConsCountLabel) {
         QRectF br = mConsCountLabel->boundingRect();
         int visualSlots = Constants::MAX_CONSUMABLE_SLOTS;
-        int totalW = CARD_W + qMax(0, visualSlots - 1) * (CARD_W + 14);
-        int startX = mSceneW - 22 - totalW;
-        mConsCountLabel->setPos(startX + totalW - br.width() - 2, JOKER_Y + CARD_H + 40);
+        int totalW = TOP_SLOT_W + qMax(0, visualSlots - 1) * (TOP_SLOT_W + 14);
+        int startX = mSceneW - 40 - totalW;
+        mConsCountLabel->setPos(startX + totalW - br.width() - 2, JOKER_Y + TOP_SLOT_H + 40);
     }
 }
 
@@ -2631,7 +2635,7 @@ void MainWindow::ensureHoverTooltip()
     if (mHoverTooltip) return;
     // 直接作为 mPlayPage 子 widget——绕过 QGraphicsProxyWidget 在带 drop-shadow effect 时的
     // 渲染坑（之前主场景 hover 一直不显示，根因就是这个）。
-    mHoverTooltip = new BalatroInfoPanel(mCNFont, mPlayPage ? mPlayPage : this);
+    mHoverTooltip = new BalatroInfoCluster(mCNFont, mPlayPage ? mPlayPage : this);
     mHoverTooltip->hide();
     mHoverTooltip->setAttribute(Qt::WA_TransparentForMouseEvents, true);
 }
@@ -2673,29 +2677,168 @@ void MainWindow::showCardHoverTooltip(CardItem *card)
     ensureHoverTooltip();
     const CardData &c = card->cardData();
 
-    QVector<BalatroInfoPanel::Badge> badges;
-    switch (c.edition) {
-    case Edition::Foil:        badges.append({QStringLiteral("镀膜"), BalatroInfoPanel::editionPillColor()}); break;
-    case Edition::Holographic: badges.append({QStringLiteral("全息"), BalatroInfoPanel::editionPillColor()}); break;
-    case Edition::Polychrome:  badges.append({QStringLiteral("多彩"), BalatroInfoPanel::editionPillColor()}); break;
-    default: break;
-    }
-    switch (c.seal) {
-    case Seal::Gold:   badges.append({QStringLiteral("金印章"), BalatroInfoPanel::sealPillColor(0)}); break;
-    case Seal::Red:    badges.append({QStringLiteral("红印章"), BalatroInfoPanel::sealPillColor(1)}); break;
-    case Seal::Blue:   badges.append({QStringLiteral("蓝印章"), BalatroInfoPanel::sealPillColor(2)}); break;
-    case Seal::Purple: badges.append({QStringLiteral("紫印章"), BalatroInfoPanel::sealPillColor(3)}); break;
-    default: break;
-    }
-    if (c.isDebuffed) badges.append({QStringLiteral("被禁用"), QColor("#9b3a3a")});
-
-    // 原版 info_tip_from_rows minw = 1.5 lua 单位 ≈ 90 px；多行描述里实际宽度通常 ~140 px。
-    // 这里给 BalatroInfoPanel 一个稍宽的 160px，既容下 "1/15 概率 $20" 又不会把卡描述撑得很宽。
-    // 原版：playing card 的名字会被包在一个白色圆角盒里——传 nameHasWhiteBox=true。
-    mHoverTooltip->setContent(BalatroTooltip::cardTitleHtml(c),
-                              BalatroTooltip::cardBodyHtml(c),
-                              badges, 160, /*nameHasWhiteBox=*/true);
+    // 手牌 info：所有效果（基础筹码 + 增强 + edition + 蜡封）在同一只面板的中间文字栏内联，
+    // 不并排副面板——副面板只用于 "塔罗/幻灵 等会授予增强" 这种引用场景。
+    mHoverTooltip->clear();
+    QVector<BalatroInfoPanel::Badge> mainBadges;
+    if (c.isDebuffed)
+        mainBadges.append({QStringLiteral("被禁用"), QColor("#9b3a3a")});
+    mHoverTooltip->setMainContent(BalatroTooltip::cardTitleHtml(c),
+                                  BalatroTooltip::cardBodyHtml(c),
+                                  mainBadges, 160, /*nameHasWhiteBox=*/true);
+    mHoverTooltip->relayout();
     showHoverTooltipNearScene(card, CardItem::WIDTH);
+}
+
+QString MainWindow::jokerRuntimeStateSuffix(int idx) const
+{
+    const auto &js = mGameState->jokers();
+    if (idx < 0 || idx >= js.size()) return QString();
+    const Joker &j = js[idx];
+    const int c = qMax(0, j.counter);
+    auto suitName = [](Suit s) -> QString {
+        switch (s) {
+        case Suit::Spades:   return QStringLiteral("{C:spades}黑桃");
+        case Suit::Hearts:   return QStringLiteral("{C:hearts}红桃");
+        case Suit::Diamonds: return QStringLiteral("{C:diamonds}方块");
+        case Suit::Clubs:    return QStringLiteral("{C:clubs}梅花");
+        }
+        return QString();
+    };
+    auto rankName = [](Rank r) -> QString {
+        switch (r) {
+        case Rank::Jack:  return QStringLiteral("J");
+        case Rank::Queen: return QStringLiteral("Q");
+        case Rank::King:  return QStringLiteral("K");
+        case Rank::Ace:   return QStringLiteral("A");
+        default: return QString::number(int(r));
+        }
+    };
+    switch (j.type) {
+    // ── 传奇 / 已有 ─────────────────────────────────────────────────
+    case JokerType::Yorick:
+        return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率，还需弃 {C:attention}%2/23")
+            .arg(mGameState->yorickXMult(), 0, 'f', 1)
+            .arg(mGameState->yorickDiscardsRemaining());
+    case JokerType::Caino:
+        return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
+            .arg(mGameState->cainoXMult(), 0, 'f', 1);
+    case JokerType::DriversLicense: {
+        int enhanced = 0;
+        for (const CardData &c2 : mGameState->fullDeckCards())
+            if (c2.enhancement != Enhancement::None) ++enhanced;
+        return QString("\n{C:inactive}当前增强牌：{C:attention}%1/16{} %2")
+            .arg(enhanced)
+            .arg(enhanced >= 16 ? QStringLiteral("{X:mult,C:white}X3{} 已生效")
+                                 : QStringLiteral("{C:inactive}未生效"));
+    }
+    case JokerType::IceCream:
+        return QString("\n{C:inactive}当前：{C:chips}+%1{} 筹码").arg(c);
+    case JokerType::Stuntman:
+        return QStringLiteral("\n{C:inactive}当前：{C:chips}+250{} 筹码 / 手牌上限 {C:red}-2");
+    case JokerType::DNA:
+        return mGameState->dnaCanTriggerThisPlay()
+                   ? QStringLiteral("\n{C:attention}本次出 1 张可触发")
+                   : QStringLiteral("\n{C:inactive}仅本盲注第一次且只出 1 张时触发");
+    case JokerType::Blueprint:
+        return (idx + 1 < js.size())
+                   ? QString("\n{C:inactive}指向右侧：{C:attention}%1").arg(js[idx + 1].name)
+                   : QStringLiteral("\n{C:inactive}右侧没有可复制小丑");
+    case JokerType::Brainstorm:
+        return (!js.isEmpty() && idx != 0)
+                   ? QString("\n{C:inactive}指向最左：{C:attention}%1").arg(js.first().name)
+                   : QStringLiteral("\n{C:inactive}没有可复制小丑");
+
+    // ── 计数器型：每次触发累积；counter 为当前累积值 ────────────────
+    case JokerType::SquareJoker:
+        return QString("\n{C:inactive}当前：{C:chips}+%1{} 筹码").arg(c);
+    case JokerType::Runner:
+        return QString("\n{C:inactive}当前：{C:chips}+%1{} 筹码").arg(c);
+    case JokerType::Castle:
+        return QString("\n{C:inactive}当前花色：%1{}　{C:chips}+%2{} 筹码")
+            .arg(suitName(mGameState->castleSuit())).arg(c);
+    case JokerType::WeeJoker:
+        return QString("\n{C:inactive}当前：{C:chips}+%1{} 筹码").arg(c);
+
+    case JokerType::GreenJoker:
+        return QString("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(j.counter);
+    case JokerType::RideTheBus:
+        return QString("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(c);
+    case JokerType::SpareTrousers:
+        return QString("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(c);
+    case JokerType::FlashCard:
+        return QString("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(c);
+    case JokerType::FortuneTeller:
+        return QString("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(c);
+    case JokerType::Popcorn:
+        return QString("\n{C:inactive}剩余：{C:mult}+%1{} 倍率（回合结束 -4）").arg(c);
+
+    case JokerType::Hologram:
+        return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
+            .arg(1.0 + 0.25 * c, 0, 'f', 2);
+    case JokerType::Constellation:
+        return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
+            .arg(1.0 + 0.1 * c, 0, 'f', 1);
+    case JokerType::Vampire:
+        return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
+            .arg(1.0 + 0.1 * c, 0, 'f', 1);
+    case JokerType::Madness:
+        return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
+            .arg(1.0 + 0.5 * c, 0, 'f', 1);
+    case JokerType::LuckyCat:
+        return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
+            .arg(1.0 + 0.25 * c, 0, 'f', 2);
+    case JokerType::Obelisk:
+        return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
+            .arg(1.0 + 0.2 * c, 0, 'f', 1);
+    case JokerType::GlassJoker:
+        return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
+            .arg(1.0 + 0.75 * c, 0, 'f', 2);
+    case JokerType::HitTheRoad:
+        return QString("\n{C:inactive}本回合：{X:mult,C:white}X%1{} 倍率")
+            .arg(1.0 + 0.5 * c, 0, 'f', 1);
+    case JokerType::Throwback:
+        return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
+            .arg(1.0 + 0.25 * c, 0, 'f', 2);
+    case JokerType::CeremonialDagger:
+        return QString("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(c);
+    case JokerType::SteelJoker:
+        return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
+            .arg(1.0 + 0.2 * c, 0, 'f', 1);
+    case JokerType::StoneJoker:
+        return QString("\n{C:inactive}当前：{C:chips}+%1{} 筹码").arg(c);
+
+    case JokerType::LoyaltyCard:
+        return QString("\n{C:inactive}状态：%1{}")
+            .arg((j.counter % 6 == 5)
+                     ? QStringLiteral("{X:mult,C:white}X4{} 倍率（本手生效）")
+                     : QString("{C:attention}%1{} 手后生效").arg(5 - (j.counter % 6)));
+    case JokerType::Egg:
+        return QString("\n{C:inactive}当前售价：{C:money}$%1").arg(j.sellValue);
+    case JokerType::GiftCard:
+        return QString("\n{C:inactive}已累计 {C:money}$%1{} 售价加成").arg(c);
+    case JokerType::ToTheMoon:
+        return QString("\n{C:inactive}当前持有金额按 $5 + $%1{} 利息发放")
+            .arg(qMin(mGameState->gold() / 5, 5));
+
+    // ── 当回合随机花色 / 点数：从 GameState 读取 ─────────────────
+    case JokerType::AncientJoker:
+        return QString("\n{C:inactive}本回合花色：%1").arg(suitName(mGameState->ancientSuit()));
+    case JokerType::TheIdol:
+        return QString("\n{C:inactive}本回合卡牌：{C:attention}%1{} 的 %2")
+            .arg(rankName(mGameState->idolRank())).arg(suitName(mGameState->idolSuit()));
+    case JokerType::MailInRebate:
+        return QString("\n{C:inactive}本回合点数：{C:attention}%1")
+            .arg(rankName(mGameState->mailRank()));
+
+    case JokerType::Ramen:
+    case JokerType::Seltzer:
+    case JokerType::TurtleBean:
+        return QString("\n{C:inactive}剩余 {C:attention}%1{} 次").arg(c);
+
+    default:
+        return QString();
+    }
 }
 
 void MainWindow::showJokerHoverTooltip(int idx)
@@ -2705,57 +2848,29 @@ void MainWindow::showJokerHoverTooltip(int idx)
     ensureHoverTooltip();
     const Joker &j = js[idx];
 
-    QString desc = j.description;
-    if (j.type == JokerType::Yorick) {
-        desc += QString("\n当前：X%1 倍率\n还需要弃牌 [%2/23]")
-                    .arg(mGameState->yorickXMult(), 0, 'f', 1)
-                    .arg(mGameState->yorickDiscardsRemaining());
-    } else if (j.type == JokerType::Caino) {
-        desc += QString("\n当前：X%1 倍率")
-                    .arg(mGameState->cainoXMult(), 0, 'f', 1);
-    } else if (j.type == JokerType::DriversLicense) {
-        int enhanced = 0;
-        for (const CardData &c : mGameState->fullDeckCards())
-            if (c.enhancement != Enhancement::None) ++enhanced;
-        desc += QString("\n当前增强牌 [%1/16] %2")
-                    .arg(enhanced)
-                    .arg(enhanced >= 16 ? QStringLiteral("已生效：X3") : QStringLiteral("未生效"));
-    } else if (j.type == JokerType::IceCream) {
-        desc += QString("\n当前：+%1 筹码\n每次出牌后 -5 筹码").arg(qMax(0, j.counter));
-    } else if (j.type == JokerType::DNA) {
-        desc += QString("\n状态：%1")
-                    .arg(mGameState->dnaCanTriggerThisPlay()
-                           ? QStringLiteral("本次出 1 张可触发")
-                           : QStringLiteral("仅本盲注第一次出牌且只出 1 张时触发"));
-    } else if (j.type == JokerType::Blueprint) {
-        if (idx + 1 < js.size())
-            desc += QString("\n当前指向右侧：%1").arg(js[idx + 1].name);
-        else
-            desc += QStringLiteral("\n右侧没有可复制小丑");
-    } else if (j.type == JokerType::Brainstorm) {
-        if (!js.isEmpty() && idx != 0)
-            desc += QString("\n当前指向最左侧：%1").arg(js.first().name);
-        else
-            desc += QStringLiteral("\n当前没有可复制小丑");
-    }
+    QString desc = j.description + jokerRuntimeStateSuffix(idx);
 
     QVector<BalatroInfoPanel::Badge> badges;
-    badges.append({QStringLiteral("小丑牌"), BalatroInfoPanel::jokerCommonColor()});
-    switch (j.edition) {
-    case Edition::Foil:        badges.append({QStringLiteral("镀膜"), BalatroInfoPanel::editionPillColor()}); break;
-    case Edition::Holographic: badges.append({QStringLiteral("全息"), BalatroInfoPanel::editionPillColor()}); break;
-    case Edition::Polychrome:  badges.append({QStringLiteral("多彩"), BalatroInfoPanel::editionPillColor()}); break;
-    case Edition::Negative:    badges.append({QStringLiteral("负片"), BalatroInfoPanel::editionPillColor()}); break;
-    default: break;
-    }
-    badges.append({QStringLiteral("$%1").arg(qMax(1, j.sellValue)),
-                   QColor("#f3b958")});   // 售价 pill, MONEY 黄
+    const JokerRarity rarity = jokerRarity(j.type);
+    // 只放一只稀有度 pill——撑满底栏；售价不再放 info（点击小丑会专门弹"售出 $X"按钮）。
+    badges.append({BalatroTooltip::rarityName(rarity), BalatroTooltip::rarityColor(rarity)});
 
+    mHoverTooltip->clear();
     // 小丑名字直接是白字落在暗底上（原版 name_from_rows 传 nil），描述才有白盒。
-    // 宽度参考原版 desc_from_rows minw=2 lua 单位（≈卡宽），相比之前 210 收到 175 更接近原版比例。
-    mHoverTooltip->setContent(j.name, BalatroTooltip::fromLuaMarkup(desc), badges, 175,
-                              /*nameHasWhiteBox=*/false);
-    showHoverTooltipNearScene(mJokerItems[idx], CARD_W);
+    mHoverTooltip->setMainContent(j.name, BalatroTooltip::fromLuaMarkup(desc), badges, 175,
+                                  /*nameHasWhiteBox=*/false);
+    // Edition 作为独立副面板，对齐原版"全息 / 多彩"等单独 info 框。
+    if (j.edition != Edition::None) {
+        BalatroInfoPanel::SideEntry e;
+        e.name = BalatroTooltip::editionName(j.edition);
+        e.body = BalatroTooltip::editionBodyHtml(j.edition);
+        e.badges.append({BalatroTooltip::editionName(j.edition),
+                         BalatroInfoPanel::editionPillColor()});
+        e.preferredWidth = 130;
+        mHoverTooltip->addSidePanel(e);
+    }
+    mHoverTooltip->relayout();
+    showHoverTooltipNearScene(mJokerItems[idx], JokerItem::WIDTH);
 }
 
 void MainWindow::showConsumableHoverTooltip(int idx)
@@ -2774,12 +2889,48 @@ void MainWindow::showConsumableHoverTooltip(int idx)
     case ConsumableKind::Spectral:
         badges.append({QStringLiteral("幻灵牌"), BalatroInfoPanel::spectralPillColor()}); break;
     }
-    if (c.negative)
-        badges.append({QStringLiteral("负片"), BalatroInfoPanel::editionPillColor()});
 
+    mHoverTooltip->clear();
     // 消耗牌（塔罗/行星/幻灵）：原版 name_from_rows 也传 nil（无白盒），描述才用白盒。
-    mHoverTooltip->setContent(c.name, BalatroTooltip::fromLuaMarkup(c.description),
-                              badges, 175, /*nameHasWhiteBox=*/false);
+    mHoverTooltip->setMainContent(c.name, BalatroTooltip::fromLuaMarkup(c.description),
+                                  badges, 175, /*nameHasWhiteBox=*/false);
+    if (c.negative) {
+        BalatroInfoPanel::SideEntry e;
+        e.name = QStringLiteral("负片");
+        e.body = BalatroTooltip::editionBodyHtml(Edition::Negative);
+        e.badges.append({QStringLiteral("负片"), BalatroInfoPanel::editionPillColor()});
+        e.preferredWidth = 130;
+        mHoverTooltip->addSidePanel(e);
+    }
+    // 如果这张塔罗 / 幻灵会授予一种增强或蜡封，把对应效果拆到副面板——
+    // 玩家不切到帮助页就能看到 "Hierophant -> Bonus -> +30 chips" 这种链路。
+    if (Enhancement gE = BalatroTooltip::consumableGrantsEnhancement(c.type);
+        gE != Enhancement::None) {
+        BalatroInfoPanel::SideEntry e;
+        e.name = BalatroTooltip::enhancementName(gE);
+        e.body = BalatroTooltip::enhancementBodyHtml(gE);
+        e.preferredWidth = 140;
+        mHoverTooltip->addSidePanel(e);
+    }
+    if (Seal gS = BalatroTooltip::consumableGrantsSeal(c.type); gS != Seal::None) {
+        BalatroInfoPanel::SideEntry e;
+        e.name = BalatroTooltip::sealName(gS);
+        e.body = BalatroTooltip::sealBodyHtml(gS);
+        const int sealKind = (gS == Seal::Gold ? 0 :
+                              gS == Seal::Red  ? 1 :
+                              gS == Seal::Blue ? 2 : 3);
+        e.badges.append({QStringLiteral("蜡封"), BalatroInfoPanel::sealPillColor(sealKind)});
+        e.preferredWidth = 130;
+        mHoverTooltip->addSidePanel(e);
+    }
+    if (BalatroTooltip::consumableGrantsRandomEdition(c.type)) {
+        BalatroInfoPanel::SideEntry e;
+        e.name = QStringLiteral("随机版本");
+        e.body = QStringLiteral("闪箔 / 全息 / 多彩 三选一");
+        e.preferredWidth = 130;
+        mHoverTooltip->addSidePanel(e);
+    }
+    mHoverTooltip->relayout();
     showHoverTooltipNearScene(mConsumableItems[idx], ConsumableItem::WIDTH);
 }
 
@@ -3057,6 +3208,8 @@ void MainWindow::onHandPlayed()
             // 上升 0.2 * CARD_H (HIGHLIGHT_H 原版常量),保持升起状态不下落。
             QPointF target = c->pos() + QPointF(0, -int(CARD_H * 0.2));
             c->moveTo(target, upDurationMs);
+            // 卡牌进入计分态：阴影距离/软化拉满，让卡看上去明显悬浮起来。
+            c->setScoringLifted(true);
         });
     }
 
@@ -3103,17 +3256,18 @@ void MainWindow::onBestPlayHint() {
     if (mScoringInProgress) return;
     if (mGameState->hand().isEmpty()) return;
 
-    // 第二次点击“最佳出牌”：如果玩家没有手动拖动/重新理牌，就恢复到原来的点数/花色排序。
+    // 第二次点击“最佳出牌”：恢复到第一次点击前的手牌顺序快照——
+    // 如果玩家在点最佳出牌之前手动拖动过牌，这里会精确回到那个排列；
+    // 没有手动整理过的话快照本身就是当时的点数/花色排序，等价于"取消提示"。
     if (mBestPlayHintActive) {
         mBestPlayHintActive = false;
         mSelected.clear();
         for (CardItem *c : mHandCards)
             if (c) c->setCardSelected(false);
 
-        if (mGameState->sortMode() == HandSortMode::BySuit)
-            mGameState->sortHandBySuit();
-        else
-            mGameState->sortHandByRank();
+        if (!mBestPlayHintHandOrder.isEmpty())
+            mGameState->reorderHandByUids(mBestPlayHintHandOrder);
+        mBestPlayHintHandOrder.clear();
 
         layoutHandCards();
         refreshCounters();
@@ -3128,6 +3282,10 @@ void MainWindow::onBestPlayHint() {
     if (best.isEmpty()) return;
 
     const int k = best.size();
+    // 在动手改顺序之前，记下当前手牌的 uid 顺序——第二次点击时按 uid 回放。
+    mBestPlayHintHandOrder.clear();
+    for (const CardData &c : mGameState->hand())
+        mBestPlayHintHandOrder.append(c.uid);
     // 把最佳出牌按最优顺序移到手牌最前；handChanged 会同步重建 mHandCards。
     mGameState->bringHandCardsToFront(best);
     mBestPlayHintActive = true;
@@ -3200,14 +3358,18 @@ void MainWindow::refreshJokerSlotFrames()
     mJokerSlotRects.clear();
 
     int visualSlots = Constants::MAX_JOKER_SLOTS;
-    int step = CARD_W + 14;
-    int totalW = CARD_W + qMax(0, visualSlots - 1) * step;
+    int step = TOP_SLOT_W + 14;
+    int totalW = TOP_SLOT_W + qMax(0, visualSlots - 1) * step;
     int available = qMin(mSceneW - 470, 840);
-    int startX = 18;
-    if (totalW < available) startX = 18 + (available - totalW) / 2;
+    // 左边距加大到 40：让小丑槽离屏幕左侧/侧边栏有明显的距离（用户最新反馈）。
+    int startX = 40;
+    if (totalW < available) startX = 40 + (available - totalW) / 2;
 
-    QRectF bg(startX - 20, JOKER_Y + 12, totalW + 40, CARD_H + 18);
-    auto *r = mScene->addRect(bg,
+    // 原版顶部小丑槽边框是圆角矩形 (r ≈ 0.15)；我们也走 addPath/rounded 而非纯 addRect。
+    QRectF bg(startX - 16, JOKER_Y + 12, totalW + 32, TOP_SLOT_H + 18);
+    QPainterPath path;
+    path.addRoundedRect(bg, 16, 16);
+    auto *r = mScene->addPath(path,
                               QPen(Qt::NoPen),
                               QBrush(QColor(0, 0, 0, 44)));
     r->setZValue(0.5);
@@ -3223,11 +3385,20 @@ void MainWindow::refreshJokerSlots()
     }
 
     refreshJokerSlotFrames();
-    hideJokerInfo();
+    // 仅在选中的小丑已经不存在时才隐藏 sell 面板——之前每次 refresh 都 hide，
+    // 会让点击售出按钮之外的任何 refresh（比如 hover 信号、layoutPanels）把 sell 按钮闪没。
+    const auto &jsRaw = mGameState->jokers();
+    if (mSelectedJokerIdx >= jsRaw.size()) {
+        mSelectedJokerIdx = -1;
+        hideJokerInfo();
+    }
 
     for (auto *ji : mJokerItems) {
         mScene->removeItem(ji);
-        delete ji;
+        // deleteLater 而不是直接 delete——dragReleased 信号 emit 后还会在 mouseReleaseEvent
+        // 里访问 this（animateShadowLift、updateShadowZ）。direct delete 会在信号链里就把
+        // JokerItem 析构掉，造成 use-after-free crash。
+        ji->deleteLater();
     }
     mJokerItems.clear();
 
@@ -3238,41 +3409,65 @@ void MainWindow::refreshJokerSlots()
                                && n == oldPositions.size() + 1;
     if (mJokerCountLabel) {
         mJokerCountLabel->setPlainText(QString("%1/%2").arg(n).arg(mGameState->jokerSlots()));
-        mJokerCountLabel->setPos(22, JOKER_Y + CARD_H + 40);
+        mJokerCountLabel->setPos(40, JOKER_Y + TOP_SLOT_H + 40);
     }
     if (mPackOpenWidget && mPackOpenWidget->isVisible())
         mPackOpenWidget->setFreeJokerSlots(mGameState->jokerSlots() - n);
     int visualSlots = Constants::MAX_JOKER_SLOTS;
-    int visualStep = CARD_W + 14;
-    int visualW = CARD_W + qMax(0, visualSlots - 1) * visualStep;
+    int visualStep = TOP_SLOT_W + 14;
+    int visualW = TOP_SLOT_W + qMax(0, visualSlots - 1) * visualStep;
     int available = qMin(mSceneW - 470, 840);
-    int rowStartX = 18;
-    if (visualW < available) rowStartX = 18 + (available - visualW) / 2;
-    // 用固定步距摆放，n < MAX 时整组小丑在 visualW 范围内水平居中（不再左对齐 / 也不再被
-    // (visualW - CARD_W)/(n-1) 拉宽到撑满全行）。
-    int step = overlappedCardStep(visualW, CARD_W, n, visualStep);
-    int usedW = (n > 0) ? (CARD_W + qMax(0, n - 1) * step) : 0;
+    int rowStartX = 40;
+    if (visualW < available) rowStartX = 40 + (available - visualW) / 2;
+    // 用固定步距摆放，n < MAX 时整组小丑在 visualW 范围内水平居中。
+    int step = overlappedCardStep(visualW, TOP_SLOT_W, n, visualStep);
+    int usedW = (n > 0) ? (TOP_SLOT_W + qMax(0, n - 1) * step) : 0;
     int startX = rowStartX + (visualW - usedW) / 2;
-    // 垂直方向：将卡牌相对 slot 框 (高 CARD_H + 18) 居中，避免顶到上边。
+    // 垂直方向：将卡牌相对 slot 框 (高 TOP_SLOT_H + 18) 居中。
     const int slotFrameTopY = JOKER_Y + 12;
-    const int slotFrameH    = CARD_H + 18;
-    const int jokerY = slotFrameTopY + (slotFrameH - CARD_H) / 2;
+    const int slotFrameH    = TOP_SLOT_H + 18;
+    const int jokerY = slotFrameTopY + (slotFrameH - TOP_SLOT_H) / 2;
+    const int selectedLift = int(TOP_SLOT_H * 0.20);
+
+    // 拖动复位用：把 new index → old index 映射出来（同张牌在 from/to 重排前的位置）。
+    auto mapNewIdxToOld = [this, &oldPositions](int newIdx) -> int {
+        const int f = mPendingJokerReorder.from;
+        const int t = mPendingJokerReorder.to;
+        if (f < 0 || t < 0) return -1;
+        if (newIdx == t) return f;                  // 拖动的那张
+        if (f < t) {                                 // 拖向右：(f, t] 的牌左移
+            if (newIdx < f || newIdx > t) return newIdx;
+            return newIdx + 1;
+        } else {                                     // 拖向左：[t, f) 的牌右移
+            if (newIdx < t || newIdx > f) return newIdx;
+            return newIdx - 1;
+        }
+    };
 
     for (int i = 0; i < js.size(); ++i) {
         int x = startX + i * step;
-        int y = jokerY;
+        // 选中的小丑（如刚点击 sell 后 refresh）抬高 0.2*HEIGHT 保持视觉抬升，与原版
+        // highlight_offset 一致。
+        int y = jokerY - (i == mSelectedJokerIdx ? selectedLift : 0);
         const QPointF targetPos(x, y);
         auto *ji = new JokerItem(js[i]);
 
         if (flyInNewJoker && i == js.size() - 1) {
             // 新小丑真实卡先占到目标槽但透明，顶层 QLabel 负责从购买/开包位置飞入。
-            // 这样动画永远盖在商店/开包界面上方，也不会出现槽位里先生成一张的重影。
             ji->setPos(targetPos);
             ji->setOpacity(0.0);
             ji->setZValue(20 + i);
         } else if (flyInNewJoker && i < oldPositions.size()) {
             ji->setPos(oldPositions[i]);
             ji->setZValue(20 + i);
+        } else if (mPendingJokerReorder.from >= 0 && mPendingJokerReorder.to >= 0) {
+            // 拖动复位：从旧 index 的位置出发 moveTo 目标，避免瞬移。
+            const int oldIdx = mapNewIdxToOld(i);
+            const QPointF startPos = (oldIdx >= 0 && oldIdx < oldPositions.size())
+                                          ? oldPositions[oldIdx] : targetPos;
+            ji->setPos(startPos);
+            ji->setZValue(20 + i);
+            ji->moveTo(targetPos, 220);
         } else {
             ji->setPos(targetPos);
             ji->setZValue(20 + i);
@@ -3296,7 +3491,7 @@ void MainWindow::refreshJokerSlots()
             if (i == js.size() - 1) {
                 animateTopLayerCardToScene(mPendingSlotFlyIn.pixmap,
                                            mPendingSlotFlyIn.globalCenter,
-                                           targetPos, QSizeF(CARD_W, CARD_H),
+                                           targetPos, QSizeF(TOP_SLOT_W, TOP_SLOT_H),
                                            false, ji);
             } else {
                 ji->moveTo(targetPos, 220);
@@ -3306,6 +3501,12 @@ void MainWindow::refreshJokerSlots()
 
     if (mPendingSlotFlyIn.active && mPendingSlotFlyIn.targetArea == 1)
         mPendingSlotFlyIn = PendingSlotFlyIn();
+
+    // 重建小丑后，如果之前点击选中的索引依然有效，重新挂出 sell 面板并对齐新位置——
+    // 之前 hideJokerInfo() 在 refresh 开头无条件清空，导致点击售出按钮"看着像闪一下没了"。
+    if (mSelectedJokerIdx >= 0 && mSelectedJokerIdx < mJokerItems.size()) {
+        showJokerInfo(mSelectedJokerIdx, true);
+    }
 }
 
 void MainWindow::showJokerInfo(int idx, bool showSellButton)
@@ -3373,42 +3574,14 @@ void MainWindow::showJokerInfo(int idx, bool showSellButton)
     QString editionEffect = editionDesc(j.edition);
     QString meta = QString("%1小丑　出售 $%2").arg(editionText).arg(qMax(1, j.sellValue));
     if (!editionEffect.isEmpty()) meta += QString("　%1").arg(editionEffect);
-    QString desc = j.description;
-    if (j.type == JokerType::Yorick) {
-        desc += QString("\n当前：X%1 倍率\n还需要弃牌 [%2/23]")
-                    .arg(mGameState->yorickXMult(), 0, 'f', 1)
-                    .arg(mGameState->yorickDiscardsRemaining());
-    } else if (j.type == JokerType::Caino) {
-        desc += QString("\n当前：X%1 倍率")
-                    .arg(mGameState->cainoXMult(), 0, 'f', 1);
-    } else if (j.type == JokerType::DriversLicense) {
-        int enhanced = 0;
-        for (const CardData &c : mGameState->fullDeckCards())
-            if (c.enhancement != Enhancement::None) ++enhanced;
-        desc += QString("\n当前增强牌 [%1/16] %2")
-                    .arg(enhanced)
-                    .arg(enhanced >= 16 ? "已生效：X3" : "未生效");
-    } else if (j.type == JokerType::IceCream) {
-        desc += QString("\n当前：+%1 筹码\n每次出牌后 -5 筹码").arg(qMax(0, j.counter));
-    } else if (j.type == JokerType::Stuntman) {
-        desc += "\n当前：+250 筹码；手牌上限 -2";
-    } else if (j.type == JokerType::DNA) {
-        desc += QString("\n状态：%1")
-                    .arg(mGameState->dnaCanTriggerThisPlay() ? "本次出 1 张可触发" : "仅本盲注第一次出牌且只出 1 张时触发");
-    } else if (j.type == JokerType::Blueprint) {
-        if (idx + 1 < mGameState->jokers().size())
-            desc += QString("\n当前指向右侧：%1").arg(mGameState->jokers()[idx + 1].name);
-        else
-            desc += "\n右侧没有可复制小丑";
-    } else if (j.type == JokerType::Brainstorm) {
-        if (!mGameState->jokers().isEmpty() && idx != 0)
-            desc += QString("\n当前指向最左侧：%1").arg(mGameState->jokers().first().name);
-        else
-            desc += "\n当前没有可复制小丑";
-    }
+    // 与悬浮 info 共用同一份"运行时状态"后缀；含计数器型 (城堡、跑者、绿小丑等)、
+    // 当回合花色 / 点数 (古老、偶像、邮购) 等。
+    QString desc = j.description + jokerRuntimeStateSuffix(idx);
     mJokerInfoName->setVisible(!showSellButton);
     mJokerInfoDesc->setVisible(!showSellButton);
-    mJokerInfoDesc->setText(desc);
+    // desc 现在用 {C:xxx} markup（来自 jokerRuntimeStateSuffix），按 HTML 渲染才能上色。
+    mJokerInfoDesc->setTextFormat(Qt::RichText);
+    mJokerInfoDesc->setText(BalatroTooltip::fromLuaMarkup(desc));
     // hover 模式（showSellButton=false）下面板对鼠标透明，避免"hover 卡牌→显示面板→
     // 鼠标在面板上→卡牌 hover 消失→面板隐藏"的反复闪烁。
     // 点击模式（true）下含有售出按钮，必须可点。
@@ -3487,15 +3660,15 @@ void MainWindow::showJokerInfo(int idx, bool showSellButton)
     qreal x;
     qreal y;
     if (showSellButton) {
-        x = jp.x() + CARD_W + 8;
-        y = jp.y() + CARD_H * 0.5 - 34;
+        x = jp.x() + JokerItem::WIDTH + 8;
+        y = jp.y() + JokerItem::HEIGHT * 0.5 - 34;
         if (x + 76 > mSceneW - 6) x = jp.x() - 84;
         x = qBound<qreal>(6, x, mSceneW - 82);
         y = qBound<qreal>(6, y, mSceneH - 64);
     } else {
-        x = jp.x() + CARD_W / 2.0 - 140;
+        x = jp.x() + JokerItem::WIDTH / 2.0 - 140;
         x = qBound<qreal>(8, x, mSceneW - 285);
-        y = jp.y() + CARD_H + 10;
+        y = jp.y() + JokerItem::HEIGHT + 10;
         if (mShopWidget && mShopWidget->isVisible()) {
             qreal shopTopSceneY = lowerOverlayRect().y() + 18;
             if (y + mJokerInfoPanel->height() > shopTopSceneY)
@@ -3521,10 +3694,48 @@ void MainWindow::onJokerPressed(JokerItem *item, Qt::MouseButton btn)
 {
     int idx = mJokerItems.indexOf(item);
     if (idx < 0) return;
+    if (btn != Qt::LeftButton && btn != Qt::RightButton) return;
 
-    if (btn == Qt::LeftButton || btn == Qt::RightButton) {
+    // 切换选中：再次点同一张 = 取消选中并落下；点新张则把旧的落下、新的抬起。
+    const int prevSelected = mSelectedJokerIdx;
+    if (mSelectedJokerIdx == idx) {
+        mSelectedJokerIdx = -1;
+        hideJokerInfo();
+    } else {
+        mSelectedJokerIdx = idx;
+        // 先隐藏 hover 浮窗——sell 面板会出现在小丑右侧，两张 info 同时出来视觉很乱。
+        hideHoverTooltip();
         showJokerInfo(idx, true);
         item->juiceUp(1.08, 140);
+    }
+    // 应用选中抬升（被取消选中的也要落回）；不重建 mJokerItems。
+    Q_UNUSED(prevSelected);
+    applyJokerSelectionLift();
+}
+
+void MainWindow::applyJokerSelectionLift()
+{
+    if (mJokerItems.isEmpty()) return;
+    int n = mJokerItems.size();
+    const int visualSlots = Constants::MAX_JOKER_SLOTS;
+    const int visualStep = TOP_SLOT_W + 14;
+    const int visualW = TOP_SLOT_W + qMax(0, visualSlots - 1) * visualStep;
+    const int available = qMin(mSceneW - 470, 840);
+    int rowStartX = 40;
+    if (visualW < available) rowStartX = 40 + (available - visualW) / 2;
+    const int step = overlappedCardStep(visualW, TOP_SLOT_W, n, visualStep);
+    const int usedW = (n > 0) ? (TOP_SLOT_W + qMax(0, n - 1) * step) : 0;
+    const int startX = rowStartX + (visualW - usedW) / 2;
+    const int slotFrameTopY = JOKER_Y + 12;
+    const int slotFrameH    = TOP_SLOT_H + 18;
+    const int baseY = slotFrameTopY + (slotFrameH - TOP_SLOT_H) / 2;
+    // 原版 highlight_offset ≈ 0.2 * card_h；这里取 20% TOP_SLOT_H ≈ 40px。
+    const int lift = int(TOP_SLOT_H * 0.20);
+    for (int i = 0; i < n; ++i) {
+        if (!mJokerItems[i]) continue;
+        const int x = startX + i * step;
+        const int y = (i == mSelectedJokerIdx) ? (baseY - lift) : baseY;
+        mJokerItems[i]->moveTo(QPointF(x, y), 180);
     }
 }
 
@@ -3536,24 +3747,23 @@ void MainWindow::onJokerDragMoved(JokerItem *item, QPointF scenePos)
     int n = mJokerItems.size();
     if (n <= 1) return;
 
-    // 与 refreshJokerSlots 保持同一套居中逻辑：固定步距 + 整组在 visualW 内居中，
-    // 否则拖拽中其它小丑会因为 (visualW-CARD_W)/(n-1) 的拉伸公式被瞬间推到最左。
+    // 与 refreshJokerSlots 保持同一套居中逻辑：固定步距 + 整组在 visualW 内居中。
     int visualSlots = Constants::MAX_JOKER_SLOTS;
-    int visualStep = CARD_W + 14;
-    int visualW = CARD_W + qMax(0, visualSlots - 1) * visualStep;
+    int visualStep = TOP_SLOT_W + 14;
+    int visualW = TOP_SLOT_W + qMax(0, visualSlots - 1) * visualStep;
     int available = qMin(mSceneW - 470, 840);
-    int rowStartX = 18;
-    if (visualW < available) rowStartX = 18 + (available - visualW) / 2;
-    int step = overlappedCardStep(visualW, CARD_W, n, visualStep);
-    int usedW = CARD_W + qMax(0, n - 1) * step;
+    int rowStartX = 40;
+    if (visualW < available) rowStartX = 40 + (available - visualW) / 2;
+    int step = overlappedCardStep(visualW, TOP_SLOT_W, n, visualStep);
+    int usedW = TOP_SLOT_W + qMax(0, n - 1) * step;
     int startX = rowStartX + (visualW - usedW) / 2;
     const int slotFrameTopY = JOKER_Y + 12;
-    const int slotFrameH    = CARD_H + 18;
-    const int jokerY = slotFrameTopY + (slotFrameH - CARD_H) / 2;
+    const int slotFrameH    = TOP_SLOT_H + 18;
+    const int jokerY = slotFrameTopY + (slotFrameH - TOP_SLOT_H) / 2;
 
     int to = 0;
     for (int i = 0; i < n; ++i) {
-        double center = startX + i * step + CARD_W / 2.0;
+        double center = startX + i * step + TOP_SLOT_W / 2.0;
         if (scenePos.x() > center) to = i;
     }
     to = qBound(0, to, n - 1);
@@ -3586,24 +3796,29 @@ void MainWindow::onJokerDragReleased(JokerItem *item, QPointF scenePos)
     if (n <= 1) { refreshJokerSlots(); return; }
 
     int visualSlots = Constants::MAX_JOKER_SLOTS;
-    int visualStep = CARD_W + 14;
-    int visualW = CARD_W + qMax(0, visualSlots - 1) * visualStep;
+    int visualStep = TOP_SLOT_W + 14;
+    int visualW = TOP_SLOT_W + qMax(0, visualSlots - 1) * visualStep;
     int available = qMin(mSceneW - 470, 840);
-    int rowStartX = 18;
-    if (visualW < available) rowStartX = 18 + (available - visualW) / 2;
-    int step = overlappedCardStep(visualW, CARD_W, n, visualStep);
-    int usedW = CARD_W + qMax(0, n - 1) * step;
+    int rowStartX = 40;
+    if (visualW < available) rowStartX = 40 + (available - visualW) / 2;
+    int step = overlappedCardStep(visualW, TOP_SLOT_W, n, visualStep);
+    int usedW = TOP_SLOT_W + qMax(0, n - 1) * step;
     int startX = rowStartX + (visualW - usedW) / 2;
 
     int to = 0;
     for (int i = 0; i < n; ++i) {
-        double center = startX + i * step + CARD_W / 2.0;
+        double center = startX + i * step + TOP_SLOT_W / 2.0;
         if (scenePos.x() > center) to = i;
     }
     to = qBound(0, to, n - 1);
 
-    if (from != to) mGameState->moveJoker(from, to);
-    else refreshJokerSlots();
+    if (from != to) {
+        // 标记给 refreshJokerSlots：刚发生 from→to 的拖动复位，新生成的 joker item 应当
+        // 从旧 index 的 position 开始 moveTo 目标，避免瞬移。
+        mPendingJokerReorder = {from, to};
+        mGameState->moveJoker(from, to);
+        mPendingJokerReorder = {-1, -1};
+    } else refreshJokerSlots();
 }
 
 
@@ -3754,8 +3969,8 @@ void MainWindow::showConsumableAction(int idx)
     const int panelW = mConsumableActionPanel->width();
     const int panelH = mConsumableActionPanel->height();
     // 紧贴卡片右沿，缩小到 +2 让按钮"挂在"卡片上而不是浮在外面。
-    qreal x = cp.x() + CARD_W + 2;
-    qreal y = cp.y() + CARD_H * 0.5 - panelH / 2.0;
+    qreal x = cp.x() + ConsumableItem::WIDTH + 2;
+    qreal y = cp.y() + ConsumableItem::HEIGHT * 0.5 - panelH / 2.0;
     if (x + panelW > mSceneW - 6) x = cp.x() - panelW - 2;
     x = qBound<qreal>(6, x, mSceneW - panelW - 6);
     y = qBound<qreal>(6, y, mSceneH - panelH - 6);
@@ -3782,12 +3997,15 @@ void MainWindow::refreshConsumableSlotFrames()
     mConsumableSlotRects.clear();
 
     int visualSlots = Constants::MAX_CONSUMABLE_SLOTS;
-    int step = CARD_W + 14;
-    int totalW = CARD_W + qMax(0, visualSlots - 1) * step;
-    int startX = mSceneW - 22 - totalW;
-    // 与小丑牌槽保持一致：同一份半透明黑色底纹，去掉之前的深绿+金描边。
-    QRectF bg(startX - 20, JOKER_Y + 12, totalW + 40, CARD_H + 18);
-    auto *r = mScene->addRect(bg,
+    int step = TOP_SLOT_W + 14;
+    int totalW = TOP_SLOT_W + qMax(0, visualSlots - 1) * step;
+    // 右边距 40：让消耗槽离屏幕右沿更远（用户最新反馈"消耗槽离右侧一点距离"）。
+    int startX = mSceneW - 40 - totalW;
+    // 与小丑牌槽保持一致：同一份半透明黑色底纹，圆角矩形（原版 r ≈ 0.15）。
+    QRectF bg(startX - 16, JOKER_Y + 12, totalW + 32, TOP_SLOT_H + 18);
+    QPainterPath path;
+    path.addRoundedRect(bg, 16, 16);
+    auto *r = mScene->addPath(path,
                               QPen(Qt::NoPen),
                               QBrush(QColor(0, 0, 0, 44)));
     r->setZValue(0.5);
@@ -3804,7 +4022,9 @@ void MainWindow::refreshConsumableSlots()
 
     refreshConsumableSlotFrames();
 
-    for (auto *ci : mConsumableItems) { mScene->removeItem(ci); delete ci; }
+    // deleteLater 同样原因：消耗品拖动时 dragReleased 信号回调里会调用 refreshConsumableSlots，
+    // 直接 delete 会把当前正在 mouseReleaseEvent 中的 ConsumableItem 析构掉，造成 crash。
+    for (auto *ci : mConsumableItems) { mScene->removeItem(ci); ci->deleteLater(); }
     mConsumableItems.clear();
 
     const auto &cs = mGameState->consumables();
@@ -3820,15 +4040,29 @@ void MainWindow::refreshConsumableSlots()
         mConsCountLabel->setPlainText(QString("%1/%2").arg(cs.size()).arg(slotCount));
         QRectF br = mConsCountLabel->boundingRect();
         int visualSlots = Constants::MAX_CONSUMABLE_SLOTS;
-        int totalW = CARD_W + qMax(0, visualSlots - 1) * (CARD_W + 14);
-        int startX = mSceneW - 22 - totalW;
-        mConsCountLabel->setPos(startX + totalW - br.width() - 2, JOKER_Y + CARD_H + 40);
+        int totalW = TOP_SLOT_W + qMax(0, visualSlots - 1) * (TOP_SLOT_W + 14);
+        int startX = mSceneW - 40 - totalW;
+        mConsCountLabel->setPos(startX + totalW - br.width() - 2, JOKER_Y + TOP_SLOT_H + 40);
     }
 
     int visualSlots = Constants::MAX_CONSUMABLE_SLOTS;
-    int totalW = CARD_W + qMax(0, visualSlots - 1) * (CARD_W + 14);
-    int startX = mSceneW - 22 - totalW;
-    int step = overlappedCardStep(totalW, CARD_W, cs.size(), CARD_W + 14);
+    int totalW = TOP_SLOT_W + qMax(0, visualSlots - 1) * (TOP_SLOT_W + 14);
+    int startX = mSceneW - 40 - totalW;
+    int step = overlappedCardStep(totalW, TOP_SLOT_W, cs.size(), TOP_SLOT_W + 14);
+    auto mapConsNewIdxToOld = [this, &oldPositions](int newIdx) -> int {
+        const int f = mPendingConsumableReorder.from;
+        const int t = mPendingConsumableReorder.to;
+        if (f < 0 || t < 0) return -1;
+        if (newIdx == t) return f;
+        if (f < t) {
+            if (newIdx < f || newIdx > t) return newIdx;
+            return newIdx + 1;
+        } else {
+            if (newIdx < t || newIdx > f) return newIdx;
+            return newIdx - 1;
+        }
+    };
+
     for (int i = 0; i < cs.size(); ++i) {
         int x = startX + i * step;
         int y = JOKER_Y + 18 + ((i == mSelectedConsumableIdx) ? -42 : 0);
@@ -3842,6 +4076,14 @@ void MainWindow::refreshConsumableSlots()
         } else if (flyInNewConsumable && i < oldPositions.size()) {
             ci->setPos(oldPositions[i]);
             ci->setZValue(30 + i);
+        } else if (mPendingConsumableReorder.from >= 0 && mPendingConsumableReorder.to >= 0) {
+            // 拖动复位：从旧 index 的位置出发 moveTo 目标。
+            const int oldIdx = mapConsNewIdxToOld(i);
+            const QPointF startPos = (oldIdx >= 0 && oldIdx < oldPositions.size())
+                                          ? oldPositions[oldIdx] : targetPos;
+            ci->setPos(startPos);
+            ci->setZValue(30 + i);
+            ci->moveTo(targetPos, 220);
         } else {
             ci->setPos(targetPos);
             ci->setZValue(30 + i);
@@ -3869,7 +4111,7 @@ void MainWindow::refreshConsumableSlots()
             if (i == cs.size() - 1) {
                 animateTopLayerCardToScene(mPendingSlotFlyIn.pixmap,
                                            mPendingSlotFlyIn.globalCenter,
-                                           targetPos, QSizeF(CARD_W, CARD_H),
+                                           targetPos, QSizeF(TOP_SLOT_W, TOP_SLOT_H),
                                            false, ci);
             } else {
                 ci->moveTo(targetPos, 220);
@@ -3892,9 +4134,9 @@ void MainWindow::layoutConsumableItems(bool animate)
     if (n == 0) return;
 
     int visualSlots = Constants::MAX_CONSUMABLE_SLOTS;
-    int totalW = CARD_W + qMax(0, visualSlots - 1) * (CARD_W + 14);
-    int startX = mSceneW - 22 - totalW;
-    int step = overlappedCardStep(totalW, CARD_W, n, CARD_W + 14);
+    int totalW = TOP_SLOT_W + qMax(0, visualSlots - 1) * (TOP_SLOT_W + 14);
+    int startX = mSceneW - 40 - totalW;
+    int step = overlappedCardStep(totalW, TOP_SLOT_W, n, TOP_SLOT_W + 14);
 
     for (int i = 0; i < n; ++i) {
         ConsumableItem *ci = mConsumableItems[i];
@@ -3941,7 +4183,7 @@ void MainWindow::animateConsumableUseThen(int idx, std::function<void()> after)
     mSelectedConsumableIdx = -1;
     item->setEnabled(false);
     item->setZValue(780);
-    item->setTransformOriginPoint(CARD_W / 2.0, CARD_H / 2.0);
+    item->setTransformOriginPoint(TOP_SLOT_W / 2.0, TOP_SLOT_H / 2.0);
 
     auto *group = new QParallelAnimationGroup(this);
     auto *posAnim = new QPropertyAnimation(item, "pos", group);
@@ -4025,13 +4267,13 @@ void MainWindow::onConsumableDragMoved(ConsumableItem *item, QPointF scenePos)
     }
 
     int visualSlots = Constants::MAX_CONSUMABLE_SLOTS;
-    int totalW = CARD_W + qMax(0, visualSlots - 1) * (CARD_W + 14);
-    int startX = mSceneW - 22 - totalW;
-    int step = overlappedCardStep(totalW, CARD_W, n, CARD_W + 14);
+    int totalW = TOP_SLOT_W + qMax(0, visualSlots - 1) * (TOP_SLOT_W + 14);
+    int startX = mSceneW - 40 - totalW;
+    int step = overlappedCardStep(totalW, TOP_SLOT_W, n, TOP_SLOT_W + 14);
 
     int to = 0;
     for (int i = 0; i < n; ++i) {
-        double center = startX + i * step + CARD_W / 2.0;
+        double center = startX + i * step + TOP_SLOT_W / 2.0;
         if (scenePos.x() > center) to = i;
     }
     to = qBound(0, to, n - 1);
@@ -4065,19 +4307,22 @@ void MainWindow::onConsumableDragReleased(ConsumableItem *item, QPointF scenePos
     if (n <= 1) { refreshConsumableSlots(); return; }
 
     int visualSlots = Constants::MAX_CONSUMABLE_SLOTS;
-    int totalW = CARD_W + qMax(0, visualSlots - 1) * (CARD_W + 14);
-    int startX = mSceneW - 22 - totalW;
-    int step = overlappedCardStep(totalW, CARD_W, n, CARD_W + 14);
+    int totalW = TOP_SLOT_W + qMax(0, visualSlots - 1) * (TOP_SLOT_W + 14);
+    int startX = mSceneW - 40 - totalW;
+    int step = overlappedCardStep(totalW, TOP_SLOT_W, n, TOP_SLOT_W + 14);
 
     int to = 0;
     for (int i = 0; i < n; ++i) {
-        double center = startX + i * step + CARD_W / 2.0;
+        double center = startX + i * step + TOP_SLOT_W / 2.0;
         if (scenePos.x() > center) to = i;
     }
     to = qBound(0, to, n - 1);
 
-    if (from != to) mGameState->moveConsumable(from, to);
-    else refreshConsumableSlots();
+    if (from != to) {
+        mPendingConsumableReorder = {from, to};
+        mGameState->moveConsumable(from, to);
+        mPendingConsumableReorder = {-1, -1};
+    } else refreshConsumableSlots();
 }
 
 void MainWindow::onPackChoiceMade(int chosenIdx, QVector<int> selectedPackHandIdx)
@@ -4980,6 +5225,9 @@ void MainWindow::animatePlayedCardsToDiscardThen(std::function<void()> after)
     for (int i = 0; i < cards.size(); ++i) {
         CardItem *c = cards[i];
         if (!c) continue;
+        // 计分结束、卡牌即将飞向弃牌堆——阴影抬升回落到 rest，避免飞行途中
+        // 阴影还停在"悬浮起来"的状态。
+        c->setScoringLifted(false);
         c->setZValue(90 + i);
 
         if (mShatteredPlayedIndices.contains(i)) {
@@ -5139,25 +5387,36 @@ void MainWindow::onHandLevelsChanged()
         return;
     }
 
-    // 取出"等级提高"的牌型。多手同时升级（黑洞 / 同道之星）时只演第一手，
-    // 避免连续 13 次 ~3s 演出把节奏拖死；剩下的牌型 handLevels() 已经写入，下次玩家选它时会正确显示。
-    HandType upgraded = HandType::HighCard;
-    bool found = false;
-    HandLevel prevLv{};
+    // 取出所有"等级提高"的牌型，统计数量。
+    // - 单手升级（行星牌 / TheArm / SpaceJoker）：走 playHandLevelUpAnimation，
+    //   显示具体牌型 + 旧→新 chips/mult 数值。
+    // - 多手升级（黑洞 / 同道之星标签）：走 playAllHandsLevelUpAnimation，
+    //   显示 "All" + chips/mult "+"，对齐原版 card.lua:1153 的 Black Hole 演出。
+    HandType firstUpgraded = HandType::HighCard;
+    HandLevel firstPrevLv{};
+    int upgradedCount = 0;
     for (auto it = nowLevels.constBegin(); it != nowLevels.constEnd(); ++it) {
         HandType t = it.key();
         HandLevel before = mPrevHandLevels.value(t);
         if (it.value().level > before.level) {
-            upgraded = t;
-            prevLv = before;
-            found = true;
-            break;
+            if (upgradedCount == 0) {
+                firstUpgraded = t;
+                firstPrevLv = before;
+            }
+            ++upgradedCount;
         }
     }
     mPrevHandLevels = nowLevels;
-    if (!found) return;
+    if (upgradedCount == 0) return;
     if (mScoringInProgress) return;   // 计分流程中（SpaceJoker / The Arm）让位给得分演出
     if (mHandLevelAnimating) return;  // 上一次升级动画还在跑，新一次仅刷新快照即可
+
+    if (upgradedCount > 1) {
+        playAllHandsLevelUpAnimation();
+        return;
+    }
+    HandType upgraded = firstUpgraded;
+    HandLevel prevLv  = firstPrevLv;
 
     HandLevel newLv = nowLevels.value(upgraded);
     auto base = baseChipsMultFor(upgraded);
@@ -5257,6 +5516,55 @@ void MainWindow::playHandLevelUpAnimation(HandType t, int prevLevel, int newLeve
         if (token != mHandLevelAnimToken) return;
         mHandLevelAnimating = false;
         updateHandPreview();
+    });
+}
+
+void MainWindow::playAllHandsLevelUpAnimation()
+{
+    if (!mLblHandName || !mLblHandLevel || !mLblChips || !mLblMult) return;
+
+    mHandLevelAnimating = true;
+    const int token = ++mHandLevelAnimToken;
+
+    // 第 0 步：对齐 card.lua:1154——handname 改成 "All"，chips/mult 显示
+    // 占位的 "..." ，level 暂时清空。
+    mLblHandName ->setText(QStringLiteral("所有牌型"));
+    mLblHandLevel->setText(QString());
+    mLblHandLevel->setStyleSheet(QStringLiteral("color:#dddddd; background:transparent;"));
+    setLabelScaledText(mLblChips, QStringLiteral("..."), uiPx(42));
+    setLabelScaledText(mLblMult,  QStringLiteral("..."), uiPx(42));
+
+    // 三拍节奏与 playHandLevelUpAnimation 保持一致，色块文本固定为 "+"。
+    const int tBeatMult  = 80;
+    const int tBeatChips = 360;
+    const int tBeatLevel = 660;
+    const int tEnd       = 1180;
+
+    scheduleGame(tBeatMult, [this, token]() {
+        if (token != mHandLevelAnimToken) return;
+        // 倍率框依旧维持 "..."，色块上叠加 "+"——对齐原版 mult='+' StatusText。
+        const QColor cover = QColor("#5db88c");
+        spawnLabelDelta(mLblMult, QStringLiteral("+"), cover);
+    });
+
+    scheduleGame(tBeatChips, [this, token]() {
+        if (token != mHandLevelAnimToken) return;
+        const QColor cover = QColor("#44be9d");
+        spawnLabelDelta(mLblChips, QStringLiteral("+"), cover);
+    });
+
+    scheduleGame(tBeatLevel, [this, token]() {
+        if (token != mHandLevelAnimToken) return;
+        mLblHandLevel->setText(QStringLiteral("+1"));
+        mLblHandLevel->setStyleSheet(
+            QString("color:%1; background:transparent;").arg(handLevelColor(2)));
+        juiceLabelPulse(mLblHandLevel, 1.40, 360);
+    });
+
+    scheduleGame(tEnd, [this, token]() {
+        if (token != mHandLevelAnimToken) return;
+        mHandLevelAnimating = false;
+        updateHandPreview();   // 还原成当前选牌的 preview/默认显示
     });
 }
 

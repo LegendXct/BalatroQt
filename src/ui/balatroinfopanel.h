@@ -29,6 +29,15 @@ public:
         QColor fg = QColor("#ffffff");
     };
 
+    // 一个并排的副信息条目：增强 / 闪箔多彩等 edition / 蜡封——
+    // 原版 generate_card_ui 在描述下方会为每一种额外效果各自生成一个独立的小框。
+    struct SideEntry {
+        QString name;               // 副面板标题（暗底白字）
+        QString body;               // 副面板正文 HTML
+        QVector<Badge> badges;      // 副面板底部小标签（通常 0-1 个）
+        int preferredWidth = 150;
+    };
+
     explicit BalatroInfoPanel(const QFont &cnFont, QWidget *parent = nullptr);
 
     // 设置内容。preferredWidth 为整体面板期望宽度（含外层 padding），实际会按文字自适应高度。
@@ -65,6 +74,34 @@ private:
     QWidget *mBadgesRow = nullptr;
     QHBoxLayout *mBadgesLayout = nullptr;
     QFont   mCNFont;
+};
+
+// 并排展示一组 BalatroInfoPanel——对齐原版 generate_card_ui：playing card 主面板右侧依次
+// 排开"增强 / edition / 蜡封"等独立子面板，让镭射/全息/蜡封各自占一个独立的暗底圆角矩形。
+class BalatroInfoCluster : public QWidget {
+    Q_OBJECT
+public:
+    explicit BalatroInfoCluster(const QFont &cnFont, QWidget *parent = nullptr);
+
+    // 清空全部子面板。
+    void clear();
+
+    // 主面板内容：与 BalatroInfoPanel::setContent 同义。
+    void setMainContent(const QString &name, const QString &body,
+                        const QVector<BalatroInfoPanel::Badge> &badges,
+                        int preferredWidth, bool nameHasWhiteBox);
+
+    // 追加一个副面板（出现在主面板右侧）；按顺序排列。
+    void addSidePanel(const BalatroInfoPanel::SideEntry &entry);
+
+    // 整体重排——会把所有子面板移到水平排列里，并自动 adjustSize。
+    void relayout();
+
+private:
+    QFont mCNFont;
+    QHBoxLayout *mRowLayout = nullptr;
+    BalatroInfoPanel *mMain = nullptr;
+    QVector<BalatroInfoPanel*> mSidePanels;
 };
 
 #endif // BALATROINFOPANEL_H

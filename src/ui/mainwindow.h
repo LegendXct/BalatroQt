@@ -96,6 +96,10 @@ private:
     QSet<int> mShatteredPlayedIndices;
     QVector <int> mSelected; // 选中的手牌下标
     bool mBestPlayHintActive = false; // 第二次点击最佳出牌时恢复原点数/花色顺序
+    // 第一次点最佳出牌前的手牌 uid 顺序快照——第二次点击时直接回到这一顺序，
+    // 这样玩家如果在点最佳出牌之前手动拖动过牌，第二次也能精确恢复到那个排列，
+    // 而不是被强行 re-sort 到点数/花色默认序。
+    QVector<int> mBestPlayHintHandOrder;
 
     RoundEndOverlay *mRoundEndOverlay = nullptr;
 
@@ -108,8 +112,13 @@ private:
     static constexpr int CARD_W = CardItem::WIDTH;
     static constexpr int CARD_H = CardItem::HEIGHT;
 
-    static constexpr int JOKER_Y = 8;
-    static constexpr int JOKER_H = CARD_H + 20;
+    // 顶部小丑 / 消耗槽离屏幕上沿留一段呼吸空间——原版那一列贴到顶部以下约 0.2 倍 CARD_H。
+    static constexpr int JOKER_Y = 28;
+    // 顶部槽位整体高度跟随 JokerItem 显示尺寸（已经从 CARD_H=228 缩到 198）。
+    static constexpr int JOKER_H = JokerItem::HEIGHT + 20;
+    // 顶部小丑 / 消耗槽使用的卡牌显示宽高——专门给那两行布局用，与 CARD_W/CARD_H 区分。
+    static constexpr int TOP_SLOT_W = JokerItem::WIDTH;
+    static constexpr int TOP_SLOT_H = JokerItem::HEIGHT;
     static constexpr int PLAY_Y = JOKER_H + 130;   // 卡牌高度增大后稍微靠上一些
     static constexpr int PLAY_H = CARD_H + 50;
     // 右下角牌组宽度 = CARD_W + 边距，需要随卡牌尺寸放大同步增加。
@@ -154,8 +163,9 @@ private:
 
     QGraphicsTextItem *mConsCountLabel = nullptr;
     QGraphicsRectItem *mPlayBgRect     = nullptr;
-    QVector<QGraphicsRectItem*> mJokerSlotRects;
-    QVector<QGraphicsRectItem*> mConsumableSlotRects;
+    // 升级为 QGraphicsItem* 以容纳圆角矩形（QGraphicsPathItem）。
+    QVector<QGraphicsItem*> mJokerSlotRects;
+    QVector<QGraphicsItem*> mConsumableSlotRects;
     CardItem          *mDeckBackCard   = nullptr;
     QGraphicsRectItem *mDeckStatsItem  = nullptr;  // 牌堆上的"查看牌组"提示
     QGraphicsRectItem *mDeckPeekPanel  = nullptr;  // 出牌阶段悬停时从屏幕顶部滑入的牌型统计面板
@@ -195,6 +205,9 @@ private:
     void playHandLevelUpAnimation(HandType t, int prevLevel, int newLevel,
                                   int prevChips, int newChips,
                                   int prevMult, int newMult);
+    // 黑洞 / 同道之星：一次性提升所有牌型等级时，原版（card.lua:1153）使用
+    // "All Hands" + chips/mult 显示为 "+" 而非具体数值的简化动画。
+    void playAllHandsLevelUpAnimation();
     // 让一个 QLabel 做一次"juice_up"风格的字号脉冲（先放大再回弹），不依赖 layout 位置改动。
     void juiceLabelPulse(QLabel *lbl, double scaleUp = 1.18, int durationMs = 360);
     // 在某个 QLabel 上方短暂浮出一个"+N"色块，对应原版 attention_text(cover=…)。
@@ -221,6 +234,11 @@ private:
     void onJokerDragReleased(JokerItem *item, QPointF scenePos);
     void showJokerInfo(int idx, bool showSellButton = false);
     void hideJokerInfo();
+    // 计算 joker[idx] 的运行时状态后缀（"当前：X1.5 倍率" / "本回合花色：黑桃" 等），
+    // 悬浮 hover 和点击 sell 面板共用。
+    QString jokerRuntimeStateSuffix(int idx) const;
+    // 按 mSelectedJokerIdx 重排所有 joker 的 y——选中那一张抬高 0.2*HEIGHT，其他落回基线。
+    void applyJokerSelectionLift();
 
     void refreshConsumableSlots();
     void layoutConsumableItems(bool animate = true);
@@ -310,7 +328,7 @@ private:
     // 关键：必须是 mPlayPage 的子 QWidget，不要塞进 QGraphicsScene——
     // BalatroInfoPanel 自身带 QGraphicsDropShadowEffect，再套一层 QGraphicsProxyWidget
     // 在某些驱动上会渲染成空白/0×0，导致 hover 完全不显示（商店里的浮窗是子 widget 所以正常）。
-    class BalatroInfoPanel *mHoverTooltip = nullptr;
+    class BalatroInfoCluster *mHoverTooltip = nullptr;
     void ensureHoverTooltip();
     void showHoverTooltipNearScene(class QGraphicsObject *anchor, double anchorWidth);
     void showCardHoverTooltip(CardItem *card);
@@ -361,6 +379,13 @@ private:
     int mLastJokerDragTo = -1;
     int mLastHandCardDragTo = -1;
     int mLastConsumableDragTo = -1;
+
+    // 拖动小丑/消耗结束 → 通过 moveJoker/moveConsumable 触发 refresh，但希望新生成的
+    // item 从"旧 index 的位置"开始 moveTo 到目标，而不是瞬移。
+    // refreshXxxSlots 检测到非 {-1,-1} 时按 from/to 推断 new→old 映射做平滑过渡。
+    struct PendingReorder { int from = -1; int to = -1; };
+    PendingReorder mPendingJokerReorder;
+    PendingReorder mPendingConsumableReorder;
 
     QPointF mPlayBtnHome;
     QPointF mSortBtnHome;

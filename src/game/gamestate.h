@@ -123,6 +123,7 @@ public:
     bool noDiscardsUsedThisRound() const { return mDiscardLeft == mBlindStartingDiscards; }
     Rank mailRank() const { return mMailRank; }
     Suit ancientSuit() const { return mAncientSuit; }
+    Suit castleSuit() const { return mCastleSuit; }
     Rank idolRank() const { return mIdolRank; }
     Suit idolSuit() const { return mIdolSuit; }
 
@@ -201,6 +202,9 @@ public:
     QVector<int> findBestPlay();
     // 把指定手牌按给定顺序移到手牌最前，排序模式切到 Manual。
     void bringHandCardsToFront(const QVector<int> &indices);
+    // 按指定 uid 序列重新排列手牌。最佳出牌"取消"时需要把手牌恢复到玩家最近
+    // 一次手动整理后的顺序，而不是默认点数/花色 sort。
+    void reorderHandByUids(const QVector<int> &uidOrder);
 signals:
     void handChanged();
     void scoreChanged();

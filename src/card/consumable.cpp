@@ -187,9 +187,12 @@ static void deathConvertSelected(UseContext &ctx)
     int a = ctx.selectedHandIdx[0];
     int b = ctx.selectedHandIdx[1];
     if (a < 0 || a >= hand.size() || b < 0 || b >= hand.size() || a == b) return;
-    // 原版 Death：选 2 张，左侧牌变成右侧牌。当前选择向量按位置升序，
-    // 用较左的一张复制较右的一张，保留 UI 上“左变右”的直觉。
+    // 原版 Death：选 2 张，左侧牌变成右侧牌。保留左卡的 uid——否则 hand[a]=hand[b]
+    // 会把 uid 也复制成 B，refreshHand 找不到匹配左卡的 CardItem，会把左卡 deleteLater
+    // 再 spawn 一张新牌从牌堆飞入；视觉上表现为"一张翻转 + 一张飞入"的怪异动画。
+    const int aUid = hand[a].uid;
     hand[a] = hand[b];
+    hand[a].uid = aUid;
     ctx.state.notifyHandChanged();
 }
 
@@ -400,41 +403,42 @@ Consumable createConsumable(ConsumableType type) {
         c.effect = [](UseContext &ctx) { suitSelected(ctx, Suit::Spades, 3); };
         break;
 
+    // 行星牌：把牌型名加 {C:attention} 上色，对齐原版 desc 文案配色。
     case ConsumableType::Planet_Pluto:
-        c.name = "冥王星";   c.description = "升级【高牌】";
+        c.name = "冥王星";   c.description = "升级 {C:attention}高牌";
         c.effect = [](UseContext &ctx) { planetLevelUp(ctx, HandType::HighCard); }; break;
     case ConsumableType::Planet_Mercury:
-        c.name = "水星";     c.description = "升级【对子】";
+        c.name = "水星";     c.description = "升级 {C:attention}对子";
         c.effect = [](UseContext &ctx) { planetLevelUp(ctx, HandType::Pair); }; break;
     case ConsumableType::Planet_Uranus:
-        c.name = "天王星";   c.description = "升级【两对】";
+        c.name = "天王星";   c.description = "升级 {C:attention}两对";
         c.effect = [](UseContext &ctx) { planetLevelUp(ctx, HandType::TwoPair); }; break;
     case ConsumableType::Planet_Venus:
-        c.name = "金星";     c.description = "升级【三条】";
+        c.name = "金星";     c.description = "升级 {C:attention}三条";
         c.effect = [](UseContext &ctx) { planetLevelUp(ctx, HandType::ThreeOfAKind); }; break;
     case ConsumableType::Planet_Saturn:
-        c.name = "土星";     c.description = "升级【顺子】";
+        c.name = "土星";     c.description = "升级 {C:attention}顺子";
         c.effect = [](UseContext &ctx) { planetLevelUp(ctx, HandType::Straight); }; break;
     case ConsumableType::Planet_Jupiter:
-        c.name = "木星";     c.description = "升级【同花】";
+        c.name = "木星";     c.description = "升级 {C:attention}同花";
         c.effect = [](UseContext &ctx) { planetLevelUp(ctx, HandType::Flush); }; break;
     case ConsumableType::Planet_Earth:
-        c.name = "地球";     c.description = "升级【葫芦】";
+        c.name = "地球";     c.description = "升级 {C:attention}葫芦";
         c.effect = [](UseContext &ctx) { planetLevelUp(ctx, HandType::FullHouse); }; break;
     case ConsumableType::Planet_Mars:
-        c.name = "火星";     c.description = "升级【四条】";
+        c.name = "火星";     c.description = "升级 {C:attention}四条";
         c.effect = [](UseContext &ctx) { planetLevelUp(ctx, HandType::FourOfAKind); }; break;
     case ConsumableType::Planet_Neptune:
-        c.name = "海王星";   c.description = "升级【同花顺】";
+        c.name = "海王星";   c.description = "升级 {C:attention}同花顺";
         c.effect = [](UseContext &ctx) { planetLevelUp(ctx, HandType::StraightFlush); }; break;
     case ConsumableType::Planet_PlanetX:
-        c.name = "X 行星";   c.description = "升级【五条】";
+        c.name = "X 行星";   c.description = "升级 {C:attention}五条";
         c.effect = [](UseContext &ctx) { planetLevelUp(ctx, HandType::FiveOfAKind); }; break;
     case ConsumableType::Planet_Ceres:
-        c.name = "谷神星";   c.description = "升级【同花葫芦】";
+        c.name = "谷神星";   c.description = "升级 {C:attention}同花葫芦";
         c.effect = [](UseContext &ctx) { planetLevelUp(ctx, HandType::FlushHouse); }; break;
     case ConsumableType::Planet_Eris:
-        c.name = "厄里斯";   c.description = "升级【同花五条】";
+        c.name = "厄里斯";   c.description = "升级 {C:attention}同花五条";
         c.effect = [](UseContext &ctx) { planetLevelUp(ctx, HandType::FlushFive); }; break;
 
     case ConsumableType::Spectral_Familiar:

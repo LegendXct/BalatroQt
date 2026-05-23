@@ -20,6 +20,8 @@
 #include <QVariantAnimation>
 #include <cmath>
 #include "../utils/shadereffects.h"
+#include "cardshadow.h"
+#include <QGraphicsScene>
 
 QPixmap *CardItem::sDeckSheet = nullptr;
 QPixmap *CardItem::sEnhSheet = nullptr;
@@ -79,6 +81,11 @@ CardItem::CardItem(const CardData &data, QGraphicsItem *parent)
     setAcceptHoverEvents(true);
     setCursor(Qt::PointingHandCursor);
     setTransformOriginPoint(WIDTH / 2.0, HEIGHT / 2.0);
+    // 启用 ItemSendsGeometryChanges，让 itemChange 能收到 pos / transform / scale / rotation
+    // 变化通知，便于把 sibling 阴影项同步。
+    setFlag(QGraphicsItem::ItemSendsGeometryChanges, true);
+    mShadow = new CardShadowItem(WIDTH, HEIGHT, [this]() { return mShadowLift; });
+    mShadow->setZValue(-1000.0);
     QObject::connect(this, &QObject::destroyed, [ptr = this]() { sAnimatedCards.remove(ptr); });
 
     if (cardNeedsShaderTick(mData)) {
@@ -87,9 +94,50 @@ CardItem::CardItem(const CardData &data, QGraphicsItem *parent)
     }
 }
 
+CardItem::~CardItem()
+{
+    if (mShadow) {
+        if (auto *s = mShadow->scene()) s->removeItem(mShadow);
+        delete mShadow;
+        mShadow = nullptr;
+    }
+}
+
+QVariant CardItem::itemChange(GraphicsItemChange change, const QVariant &value)
+{
+    if (change == ItemSceneHasChanged) {
+        QGraphicsScene *s = scene();
+        if (s && mShadow && mShadow->scene() != s) s->addItem(mShadow);
+        if (!s && mShadow && mShadow->scene())
+            mShadow->scene()->removeItem(mShadow);
+    } else if (mShadow) {
+        switch (change) {
+        case ItemPositionHasChanged:   mShadow->setPos(value.toPointF()); break;
+        case ItemScaleHasChanged:      mShadow->setScale(value.toReal()); break;
+        // 注意：不同步 ItemTransformHasChanged。applyTransform 给牌套了 hover 的 3D 透视
+        // 矩阵，如果让阴影也吃这个矩阵，hover 时阴影会被透视投影"拽下来"，看着像突然下移。
+        // 阴影只需要继承 z 旋转（扇形 + jitter + dragTilt），由 applyTransform 末尾显式
+        // mShadow->setRotation() 同步。
+        case ItemOpacityHasChanged:    mShadow->setOpacity(value.toReal()); break;
+        case ItemVisibleHasChanged:    mShadow->setVisible(value.toBool()); break;
+        case ItemZValueHasChanged:     updateShadowZ(); break;
+        default: break;
+        }
+    }
+    return QGraphicsObject::itemChange(change, value);
+}
+
+void CardItem::updateShadowZ()
+{
+    if (!mShadow) return;
+    // 按下 / 拖动 / 计分时阴影升到本牌之下、其他牌之上；否则深沉到 -1000 全场最底。
+    const bool active = mPressed || mDragging || mScoringLifted;
+    mShadow->setZValue(active ? zValue() - 0.5 : -1000.0);
+}
+
 QRectF CardItem::boundingRect() const {
-    // 预留外发光、选中描边，以及悬停时卡牌上方“梅花3 / +3筹码”标签的空间。
-    return QRectF(-12, -78, WIDTH + 24, HEIGHT + 92);
+    // 阴影由 sibling CardShadowItem 单独绘制；本 item 的 bounding 收紧到牌面本体。
+    return QRectF(0, 0, WIDTH, HEIGHT);
 }
 
 QPainterPath CardItem::shape() const {
@@ -106,32 +154,13 @@ QPainterPath CardItem::shape() const {
 
 void CardItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidget *) {
     painter->setRenderHint(QPainter::SmoothPixmapTransform, false);
+    // 阴影由 mShadow（sibling CardShadowItem）单独绘制——z=-1000 保证落在其他牌之下，
+    // 按下/拖动/计分时由 updateShadowZ() 升到本牌之下。这里 paint() 只画牌面本体。
     if (mData.faceUp) paintFront(painter);
     else paintBack(painter);
 
-    if (mHovered || mSelected) {
-        painter->save();
-        painter->setRenderHint(QPainter::Antialiasing, true);
-
-        const QColor mainColor = mSelected ? QColor(255, 211, 72, 245)
-                                           : QColor(31, 183, 255, 245);
-        QColor glowColor = mainColor;
-        glowColor.setAlpha(90);
-
-        // 选中黄色框和悬停蓝色框使用统一粗细；只保留一圈柔光，避免之前黄色框过厚。
-        painter->setBrush(Qt::NoBrush);
-        painter->setPen(QPen(glowColor, 3.2, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-        painter->drawRoundedRect(QRectF(-1.1, -1.1, WIDTH + 2.2, HEIGHT + 2.2), 10, 10);
-        painter->setPen(QPen(mainColor, 1.8, Qt::SolidLine, Qt::RoundCap, Qt::RoundJoin));
-        painter->drawRoundedRect(QRectF(2.0, 2.0, WIDTH - 4.0, HEIGHT - 4.0), 8, 8);
-
-        painter->restore();
-    }
-
-    // 注意：原本这里会调用 drawBalatroHoverTag 在牌头上方绘制一张白色卡名+筹码标签。
-    // 这跟 MainWindow / PackOpenWidget / DeckViewWidget 里那只统一风格的 BalatroInfoPanel
-    // 浮窗冲突——同一张牌悬浮时会出现"上方一只浅色小标签 + 暗色 BalatroInfoPanel"两张 info。
-    // 这里直接去掉内嵌绘制，hover 信息统一交给上层的 BalatroInfoPanel。
+    // hover / selected 不再画蓝/黄描边——原版没有这个轮廓线，状态变化由"抬升 + 阴影距离"
+    // 表达，info 浮窗负责承载文字信息。
 }
 
 QRect CardItem::whiteBaseSrcRect() const {
@@ -269,7 +298,52 @@ void CardItem::setCardData(const CardData &data) {
 
 void CardItem::setCardSelected(bool selected) {
     mSelected = selected;
+    animateShadowLift(currentShadowTarget(), 140);
     update();
+}
+
+void CardItem::setShadowLift(qreal v)
+{
+    v = qBound(0.0, v, 1.0);
+    if (qFuzzyCompare(v + 1.0, mShadowLift + 1.0)) return;
+    mShadowLift = v;
+    if (mShadow) mShadow->update();
+}
+
+void CardItem::setScoringLifted(bool lifted)
+{
+    if (mScoringLifted == lifted) return;
+    mScoringLifted = lifted;
+    updateShadowZ();
+    animateShadowLift(currentShadowTarget(), 180);
+}
+
+qreal CardItem::currentShadowTarget() const
+{
+    // 优先级：计分 > 拖拽 > 选中 > hover > rest。
+    if (mScoringLifted) return 1.0;
+    if (mDragging)      return 0.85;
+    if (mPressed)       return 0.55;
+    if (mSelected)      return 0.45;
+    if (mHovered)       return 0.30;
+    return 0.0;
+}
+
+void CardItem::animateShadowLift(qreal target, int durationMs)
+{
+    auto *anim = findChild<QPropertyAnimation*>(QStringLiteral("CardShadowAnim"),
+                                                 Qt::FindDirectChildrenOnly);
+    if (!anim) {
+        anim = new QPropertyAnimation(this, "shadowLift", this);
+        anim->setObjectName(QStringLiteral("CardShadowAnim"));
+        anim->setEasingCurve(QEasingCurve::OutCubic);
+    } else if (anim->state() == QAbstractAnimation::Running) {
+        anim->stop();
+    }
+    anim->setDuration(durationMs);
+    anim->setStartValue(mShadowLift);
+    anim->setEndValue(qBound(0.0, target, 1.0));
+    anim->start();
 }
 
 void CardItem::moveTo(const QPointF &target, int durationMs) {
@@ -337,6 +411,13 @@ void CardItem::mousePressEvent(QGraphicsSceneMouseEvent *event) {
         mPressScenePos = event->scenePos();
         mLastDragScenePos = event->scenePos();
         mLastDragTimeMs = QDateTime::currentMSecsSinceEpoch();
+        // 按下时把卡牌临时抬到上层并放大，配合阴影 lift 让卡牌看起来"被指尖捏起来"。
+        // 记 mPressRestZ 以便 release 还原（不打断 layoutHandCards 给的 z）。
+        mPressRestZ = zValue();
+        setZValue(500);
+        updateShadowZ();
+        animateScale(1.10, 90);
+        animateShadowLift(currentShadowTarget(), 100);
         event->accept();
     }
     else QGraphicsObject::mousePressEvent(event);
@@ -352,9 +433,11 @@ void CardItem::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
         && QLineF(event->scenePos(), mPressScenePos).length() > kCardDragStartDistance) {
         mDragging = true;
         setZValue(600);
+        updateShadowZ();
         // 开始拖拽前重置速度采样，避免长按时的"前一刻"位置被算成大速度突然倾斜。
         mLastDragScenePos = event->scenePos();
         mLastDragTimeMs = QDateTime::currentMSecsSinceEpoch();
+        animateShadowLift(currentShadowTarget(), 120);
     }
 
     if (mDragging) {
@@ -365,12 +448,13 @@ void CardItem::mouseMoveEvent(QGraphicsSceneMouseEvent *event)
         const qint64 dtMs = qMax<qint64>(1, nowMs - mLastDragTimeMs);
         const double dx = event->scenePos().x() - mLastDragScenePos.x();
         const double vxPerSec = dx * 1000.0 / double(dtMs);
-        // 系数 0.045 deg / (px/s)：移动 ~600 px/s 时约 27 度，更明显的"惯性甩动"手感。
-        double desTilt = vxPerSec * 0.045;
-        if (desTilt > 30.0) desTilt = 30.0;
-        if (desTilt < -30.0) desTilt = -30.0;
-        // 指数平滑系数也偏向 des 多一点，让倾斜跟随手感更紧。
-        mDragTilt = mDragTilt * 0.50 + desTilt * 0.50;
+        // 系数 0.022 deg / (px/s) + 上限 ±15°——比此前 0.045 / ±30° 收敛一半，
+        // 拖动时倾斜更克制，对齐用户反馈9"惯性倾斜削弱一些"。
+        double desTilt = vxPerSec * 0.022;
+        if (desTilt > 15.0) desTilt = 15.0;
+        if (desTilt < -15.0) desTilt = -15.0;
+        // 指数平滑：偏向旧值多一点，让倾斜回正更柔和，不再跟手抖。
+        mDragTilt = mDragTilt * 0.65 + desTilt * 0.35;
         mLastDragScenePos = event->scenePos();
         mLastDragTimeMs = nowMs;
 
@@ -387,6 +471,7 @@ void CardItem::mouseReleaseEvent(QGraphicsSceneMouseEvent *event)
 {
     if (event->button() == Qt::LeftButton && mPressed) {
         mPressed = false;
+        const bool wasDragging = mDragging;
         if (mDragging) {
             mDragging = false;
             // 释放后平滑把拖拽倾斜衰减回 0——对齐原版 velocity.r → 0 的回弹。
@@ -410,6 +495,13 @@ void CardItem::mouseReleaseEvent(QGraphicsSceneMouseEvent *event)
         } else {
             emit clicked(this);
         }
+        // 松手 / 拖拽结束后立即向 hover 或 selected 目标过渡，让阴影"落"下去。
+        animateShadowLift(currentShadowTarget(), 160);
+        // 还原按下时临时抬高的 z 与放大；hover 仍在的话回到 hover 的 1.04 而不是 1.0。
+        if (!wasDragging) setZValue(mPressRestZ);
+        animateScale(mHovered ? 1.04 : 1.0, 140);
+        // 退出 active 状态：阴影 z 回到 -1000。
+        updateShadowZ();
         event->accept();
         return;
     }
@@ -482,14 +574,23 @@ void CardItem::applyTransform()
 
     t.translate(-cx, -cy);
     setTransform(t);
+
+    // 阴影只跟 z 旋转（扇形 + jitter + dragTilt），不吃 hover 透视——避免 hover 时阴影
+    // 被透视投影"拽下来"。位置和缩放各自通过 itemChange 同步。
+    if (mShadow) {
+        mShadow->setTransformOriginPoint(WIDTH / 2.0, HEIGHT / 2.0);
+        mShadow->setRotation(mBaseRotation + mJitterRot + mDragTilt);
+    }
 }
 
 void CardItem::triggerHoverJitter()
 {
-    // 对齐 card.lua: Card:hover() -> juice_up(0.05, 0.03) -> Moveable.juice_up(scale=0.02, rot=±0.012rad ≈ ±0.7°)
-    // 这里用两段短旋转动画：先转到 +/-0.8°，再回 0；并叠加一个 scale 微脉冲。
+    // 加强版 hover 抖动：原版进入悬浮时有一个明显的"弹一下"，之前 0.8° 太弱。
+    // 这里把峰值放大到 ±2.4°，并把回弹做成 over-shoot（先回到 -0.8° 反弹再回 0），
+    // 同时同步一只快速 scale 脉冲（×1.06 → ×1.0）让卡片有"被指尖戳了一下"的弹性。
     const double dir = (QRandomGenerator::global()->bounded(2) == 0) ? -1.0 : 1.0;
-    const double peakRot = 0.8 * dir;
+    const double peakRot = 2.4 * dir;
+    const double overshoot = -0.6 * dir;
 
     auto *rotOut = new QVariantAnimation(this);
     rotOut->setDuration(70);
@@ -502,11 +603,21 @@ void CardItem::triggerHoverJitter()
     });
 
     auto *rotBack = new QVariantAnimation(this);
-    rotBack->setDuration(140);
+    rotBack->setDuration(110);
     rotBack->setStartValue(peakRot);
-    rotBack->setEndValue(0.0);
-    rotBack->setEasingCurve(QEasingCurve::OutQuad);
+    rotBack->setEndValue(overshoot);
+    rotBack->setEasingCurve(QEasingCurve::InOutQuad);
     connect(rotBack, &QVariantAnimation::valueChanged, this, [this](const QVariant &v) {
+        mJitterRot = v.toDouble();
+        applyTransform();
+    });
+
+    auto *rotSettle = new QVariantAnimation(this);
+    rotSettle->setDuration(120);
+    rotSettle->setStartValue(overshoot);
+    rotSettle->setEndValue(0.0);
+    rotSettle->setEasingCurve(QEasingCurve::OutCubic);
+    connect(rotSettle, &QVariantAnimation::valueChanged, this, [this](const QVariant &v) {
         mJitterRot = v.toDouble();
         applyTransform();
     });
@@ -514,7 +625,26 @@ void CardItem::triggerHoverJitter()
     auto *seq = new QSequentialAnimationGroup(this);
     seq->addAnimation(rotOut);
     seq->addAnimation(rotBack);
+    seq->addAnimation(rotSettle);
     seq->start(QAbstractAnimation::DeleteWhenStopped);
+
+    // 配合 scale 微脉冲——hoverEnter 主动画走 1.04，这里在 70ms 内再加一个 1.04→1.08→1.04
+    // 的小爬升，让"弹一下"在视觉上更扎实。
+    auto *scaleAnim = new QSequentialAnimationGroup(this);
+    auto *up = new QPropertyAnimation(this, "scale");
+    up->setDuration(60);
+    up->setStartValue(scale());
+    up->setEndValue(qMax(scale() + 0.04, 1.08));
+    up->setEasingCurve(QEasingCurve::OutQuad);
+    auto *down = new QPropertyAnimation(this, "scale");
+    down->setDuration(150);
+    down->setStartValue(qMax(scale() + 0.04, 1.08));
+    down->setEndValue(1.04);
+    down->setEasingCurve(QEasingCurve::OutQuad);
+    scaleAnim->addAnimation(up);
+    scaleAnim->addAnimation(down);
+    up->setParent(scaleAnim); down->setParent(scaleAnim);
+    scaleAnim->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
 void CardItem::animateScale(qreal target, int durationMs) {
@@ -541,6 +671,7 @@ void CardItem::hoverEnterEvent(QGraphicsSceneHoverEvent *event) {
     // 对齐 card.lua 中 Card:hover() 的 self:juice_up(0.05, 0.03)：进入悬浮时
     // 给一个非常细微的"抖一下"，让卡牌像被指尖触碰一样轻微弹动。
     triggerHoverJitter();
+    animateShadowLift(currentShadowTarget(), 120);
     update();
     emit hoverChanged(this, true);
     QGraphicsObject::hoverEnterEvent(event);
@@ -572,6 +703,7 @@ void CardItem::hoverLeaveEvent(QGraphicsSceneHoverEvent *event) {
     mHoverTiltY = 0;
     // scale 平滑回 1.0；tilt 用直接 setTransform 重置（应用 applyTransform）。
     animateScale(1.0, 130);
+    animateShadowLift(currentShadowTarget(), 160);
     applyTransform();
     update();
     QGraphicsObject::hoverLeaveEvent(event);
