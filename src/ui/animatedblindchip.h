@@ -4,6 +4,8 @@
 #include <QLabel>
 #include <QPixmap>
 
+class QEnterEvent;
+
 // 复现原版 game.lua:1011 的 animation_atli.blind_chips：
 // 把 resources/images/BlindChips.png 当作 21 帧×31 行 (68×68 每帧) 的精灵表，
 // 每个盲注对应一行，按 ~12.5 fps 循环播放所有列。
@@ -20,6 +22,7 @@ public:
     void startDissolve(int durationMs = 700);
 
 protected:
+    void enterEvent(QEnterEvent *e) override;
     void showEvent(QShowEvent *e) override;
     void hideEvent(QHideEvent *e) override;
 

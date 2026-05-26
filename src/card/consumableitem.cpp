@@ -22,6 +22,7 @@
 #include <QHash>
 #include <QStringList>
 #include <cmath>
+#include "../audio/audiomanager.h"
 
 QPixmap *ConsumableItem::sSheet = nullptr;
 
@@ -356,6 +357,9 @@ void ConsumableItem::applyHoverTransform()
 void ConsumableItem::hoverEnterEvent(QGraphicsSceneHoverEvent *e)
 {
     mHovered = true;
+    AudioManager::instance()->play(QStringLiteral("paper1"),
+                                   0.9 + QRandomGenerator::global()->generateDouble() * 0.2,
+                                   0.35);
     setTransformOriginPoint(WIDTH / 2.0, HEIGHT / 2.0);
     animateScale(1.08, 100);
     animateShadowLift(currentShadowTarget(), 120);

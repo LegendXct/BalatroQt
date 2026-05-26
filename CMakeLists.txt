@@ -4,7 +4,7 @@ project(BalatroQt LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets OpenGL OpenGLWidgets)
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets OpenGL OpenGLWidgets Multimedia)
 
 qt_standard_project_setup()
 
@@ -41,6 +41,7 @@ qt_add_executable(BalatroQt
     src/ui/animatedblindchip.h src/ui/animatedblindchip.cpp
     src/ui/balatroinfopanel.h src/ui/balatroinfopanel.cpp
     src/ui/cardtooltipformat.h
+    src/audio/audiomanager.h src/audio/audiomanager.cpp
 )
 
 target_include_directories(BalatroQt
@@ -49,6 +50,7 @@ target_include_directories(BalatroQt
         src/game
         src/ui
         src/utils
+        src/audio
 )
 target_link_libraries(BalatroQt
     PRIVATE
@@ -56,6 +58,7 @@ target_link_libraries(BalatroQt
         Qt6::Widgets
         Qt6::OpenGL
         Qt6::OpenGLWidgets
+        Qt6::Multimedia
 )
 
 qt_add_resources(BalatroQt "textures"
@@ -109,6 +112,18 @@ qt_add_resources(BalatroQt "fonts"
     FILES
         resources/fonts/m6x11plus.ttf
         resources/fonts/NotoSansSC-Bold.ttf
+)
+
+file(GLOB BALATRO_AUDIO_FILES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/resources/*.ogg"
+    "${CMAKE_CURRENT_SOURCE_DIR}/resources/sounds/*.ogg"
+)
+
+qt_add_resources(BalatroQt "audio"
+    PREFIX "/sounds"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources"
+    FILES
+        ${BALATRO_AUDIO_FILES}
 )
 
 include(GNUInstallDirs)

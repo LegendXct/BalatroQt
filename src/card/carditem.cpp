@@ -19,6 +19,7 @@
 #include <QRandomGenerator>
 #include <QVariantAnimation>
 #include <cmath>
+#include "../audio/audiomanager.h"
 #include "../utils/shadereffects.h"
 #include "cardshadow.h"
 #include <QGraphicsScene>
@@ -666,6 +667,9 @@ void CardItem::animateScale(qreal target, int durationMs) {
 
 void CardItem::hoverEnterEvent(QGraphicsSceneHoverEvent *event) {
     mHovered = true;
+    AudioManager::instance()->play(QStringLiteral("paper1"),
+                                   0.9 + QRandomGenerator::global()->generateDouble() * 0.2,
+                                   0.35);
     // 不再直接 setScale 让放大瞬切——平滑过渡 90ms，避免选中升起动画同时遇上瞬间缩放产生顿挫感。
     animateScale(1.04, 90);
     // 对齐 card.lua 中 Card:hover() 的 self:juice_up(0.05, 0.03)：进入悬浮时

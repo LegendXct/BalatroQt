@@ -1,5 +1,6 @@
 #include "blindselectwidget.h"
 #include "animatedblindchip.h"
+#include "../audio/audiomanager.h"
 #include "../game/bossblind.h"
 #include "../utils/constants.h"
 #include <QVBoxLayout>
@@ -14,6 +15,7 @@
 #include <QGuiApplication>
 #include <QScreen>
 #include <QCursor>
+#include <QRandomGenerator>
 #include <cmath>
 
 
@@ -334,7 +336,10 @@ void BlindSelectWidget::buildUi()
             "QPushButton:disabled { background:#333; color:#777; }"
         );
         connect(b.bossRerollBtn, &QPushButton::clicked, this, [this]() {
-            if (mGS && mGS->rerollBoss()) refresh();
+            if (mGS && mGS->rerollBoss()) {
+                AudioManager::instance()->play(QStringLiteral("other1"), 1.0, 1.0);
+                refresh();
+            }
         });
         bpvbl->addWidget(b.bossRerollBtn);
 
@@ -394,6 +399,12 @@ bool BlindSelectWidget::eventFilter(QObject *obj, QEvent *event)
     if (event->type() == QEvent::Enter) {
         QWidget *w = qobject_cast<QWidget*>(obj);
         if (w && w->property("blindTagIdx").isValid()) {
+            AudioManager::instance()->play(QStringLiteral("paper1"),
+                                           0.55 + QRandomGenerator::global()->generateDouble() * 0.1,
+                                           0.42);
+            AudioManager::instance()->play(QStringLiteral("tarot2"),
+                                           0.55 + QRandomGenerator::global()->generateDouble() * 0.1,
+                                           0.09);
             showTagPopup(w->property("blindTagIdx").toInt(), w);
             return false;
         }

@@ -1,6 +1,7 @@
 #include "shopwidget.h"
 #include "../card/consumableitem.h"
 #include "../card/jokeritem.h"
+#include "../audio/audiomanager.h"
 #include "cardtooltipformat.h"
 #include "balatroinfopanel.h"
 #include <QRandomGenerator>
@@ -80,6 +81,26 @@ static QString editionDescription(Edition e)
     }
 }
 
+static double shopAudioPitchJitter(double spread = 0.04)
+{
+    const double r = QRandomGenerator::global()->generateDouble() * 2.0 - 1.0;
+    return 1.0 + r * spread;
+}
+
+static QString soundForOfferKind(OfferKind kind)
+{
+    switch (kind) {
+    case OfferKind::Tarot:       return QStringLiteral("tarot1");
+    case OfferKind::Planet:      return QStringLiteral("timpani");
+    case OfferKind::Spectral:    return QStringLiteral("magic_crumple");
+    case OfferKind::Pack:        return QStringLiteral("cardFan2");
+    case OfferKind::Voucher:     return QStringLiteral("card3");
+    case OfferKind::PlayingCard: return QStringLiteral("cardSlide1");
+    case OfferKind::Joker:       return QStringLiteral("card1");
+    }
+    return QStringLiteral("card1");
+}
+
 
 namespace {
 class ShopCardButton : public QPushButton
@@ -94,6 +115,7 @@ public:
         setAttribute(Qt::WA_TranslucentBackground, true);
         setAttribute(Qt::WA_NoSystemBackground, true);
         setAutoFillBackground(false);
+        setProperty("balatroAudio", QStringLiteral("card1"));
     }
 
     void setDisplayPixmap(const QPixmap &pix)
@@ -148,6 +170,9 @@ protected:
     void enterEvent(QEnterEvent *event) override
     {
         mHovered = true;
+        AudioManager::instance()->play(QStringLiteral("paper1"),
+                                       0.9 + QRandomGenerator::global()->generateDouble() * 0.2,
+                                       0.35);
         QPushButton::enterEvent(event);
         triggerHoverJitter();
         update();
@@ -592,6 +617,8 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
     // hover 1.045 时仍在 button rect 内不被裁。
     ou.cardBtn->setFixedSize(dp(btnW), dp(btnH));
     scb->setVisibleCardSize(QSize(dp(slotW), dp(slotH)));
+    ou.cardBtn->setProperty("balatroAudio", isBooster ? QStringLiteral("cardFan2")
+                                                       : QStringLiteral("card1"));
     ou.cardBtn->setCursor(Qt::PointingHandCursor);
     ou.cardBtn->installEventFilter(this);
     ou.cardBtn->setStyleSheet(
@@ -1572,6 +1599,8 @@ bool ShopWidget::moveOfferInGroup(DragGroup group, int from, int to)
             else if (from > to && mSelectedBoosterSlot >= to && mSelectedBoosterSlot < from) ++mSelectedBoosterSlot;
         }
     }
+    if (ok && from != to)
+        AudioManager::instance()->play(QStringLiteral("cardSlide1"), shopAudioPitchJitter(0.03), 0.62);
     return ok;
 }
 
@@ -1909,19 +1938,40 @@ void ShopWidget::onBuyShop(int slot) {
         emit shopItemBoughtForAnimation(flyPix, flyCenter, targetArea);
 
     if (mGS->buyShopOffer(slot)) {
+        QTimer::singleShot(100, this, [cost = offerBeforeBuy.cost]() {
+            AudioManager::instance()->play(QStringLiteral("card1"), 1.0, 1.0);
+            if (cost != 0)
+                AudioManager::instance()->play(QStringLiteral("coin1"), 1.0, 1.0);
+        });
         if (!needsSlotFlyIn && targetArea != 0 && !flyPix.isNull())
             emit shopItemBoughtForAnimation(flyPix, flyCenter, targetArea);
         mSelectedShopSlot = -1;
         refresh();
     } else if (needsSlotFlyIn) {
+        AudioManager::instance()->play(QStringLiteral("cancel"), 1.0, 0.65);
         emit shopItemBoughtForAnimation(QPixmap(), QPoint(), 0); // 购买失败时清掉预备动画
     }
 }
 
 void ShopWidget::onBuyAndUseShop(int slot) {
+    const auto offers = mGS->shop().shopOffers();
+    const int cost = (slot >= 0 && slot < offers.size()) ? offers[slot].cost : 0;
+    const QString useSound = (slot >= 0 && slot < offers.size())
+        ? soundForOfferKind(offers[slot].kind)
+        : QStringLiteral("tarot1");
     if (mGS->buyAndUseShopConsumable(slot, {})) {
+        QTimer::singleShot(100, this, [cost]() {
+            AudioManager::instance()->play(QStringLiteral("card1"), 1.0, 1.0);
+            if (cost != 0)
+                AudioManager::instance()->play(QStringLiteral("coin1"), 1.0, 1.0);
+        });
+        QTimer::singleShot(180, this, [useSound]() {
+            AudioManager::instance()->play(useSound, 1.0, 1.0);
+        });
         mSelectedShopSlot = -1;
         refresh();
+    } else {
+        AudioManager::instance()->play(QStringLiteral("cancel"), 1.0, 0.65);
     }
 }
 
@@ -1930,8 +1980,15 @@ void ShopWidget::onBuyAndUseShop(int slot) {
 void ShopWidget::onBuyVoucher(int slot) {
     if (slot < 0 || slot >= mVoucherUi.size()) {
         if (mGS->buyVoucherOffer(slot)) {
+            AudioManager::instance()->play(QStringLiteral("coin1"), 1.0, 1.0);
+            QTimer::singleShot(400, this, []() {
+                AudioManager::instance()->play(QStringLiteral("card1"), 1.0, 1.0);
+                AudioManager::instance()->play(QStringLiteral("coin1"), 1.0, 1.0);
+            });
             mSelectedVoucherSlot = -1;
             refresh();
+        } else {
+            AudioManager::instance()->play(QStringLiteral("cancel"), 1.0, 0.65);
         }
         return;
     }
@@ -2044,8 +2101,15 @@ void ShopWidget::onBuyVoucher(int slot) {
         seq->start(QAbstractAnimation::DeleteWhenStopped);
     }
     if (mGS->buyVoucherOffer(slot)) {
+        AudioManager::instance()->play(QStringLiteral("coin1"), 1.0, 1.0);
+        QTimer::singleShot(400, this, []() {
+            AudioManager::instance()->play(QStringLiteral("card1"), 1.0, 1.0);
+            AudioManager::instance()->play(QStringLiteral("coin1"), 1.0, 1.0);
+        });
         mSelectedVoucherSlot = -1;
         refresh();
+    } else {
+        AudioManager::instance()->play(QStringLiteral("cancel"), 1.0, 0.65);
     }
 }
 
@@ -2056,7 +2120,13 @@ void ShopWidget::onBuyBooster(int slot) {
     emit packBuyRequested(slot);   // 让 MainWindow 唤起开包界面
 }
 
-void ShopWidget::onReroll()        { mGS->rerollShop(); refresh(); }
+void ShopWidget::onReroll()
+{
+    mGS->rerollShop();
+    AudioManager::instance()->play(QStringLiteral("coin2"), 1.0, 1.0);
+    AudioManager::instance()->play(QStringLiteral("other1"), 1.0, 1.0);
+    refresh();
+}
 
 void ShopWidget::resizeEvent(QResizeEvent *e)
 {

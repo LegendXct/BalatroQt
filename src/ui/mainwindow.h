@@ -6,6 +6,7 @@
 #include <QGraphicsView>
 #include <QGraphicsTextItem>
 #include <QGraphicsRectItem>
+#include <QGraphicsPathItem>
 #include <QGraphicsProxyWidget>
 #include <QWidget>
 #include <QLabel>
@@ -46,6 +47,8 @@ class QProgressBar;
 class QGraphicsDropShadowEffect;
 class QPropertyAnimation;
 class QGraphicsObject;
+class FlameShaderWidget;
+class BalatroInfoCluster;
 
 class MainWindow : public QMainWindow
 {
@@ -96,10 +99,9 @@ private:
     QSet<int> mShatteredPlayedIndices;
     QVector <int> mSelected; // 选中的手牌下标
     bool mBestPlayHintActive = false; // 第二次点击最佳出牌时恢复原点数/花色顺序
-    // 第一次点最佳出牌前的手牌 uid 顺序快照——第二次点击时直接回到这一顺序，
-    // 这样玩家如果在点最佳出牌之前手动拖动过牌，第二次也能精确恢复到那个排列，
-    // 而不是被强行 re-sort 到点数/花色默认序。
     QVector<int> mBestPlayHintHandOrder;
+    QVector<int> mBestPlayRestoreHandUids;
+    HandSortMode mBestPlayRestoreSortMode = HandSortMode::ByRank;
 
     RoundEndOverlay *mRoundEndOverlay = nullptr;
 
@@ -111,14 +113,11 @@ private:
     int mSceneH = 1080;
     static constexpr int CARD_W = CardItem::WIDTH;
     static constexpr int CARD_H = CardItem::HEIGHT;
-
-    // 顶部小丑 / 消耗槽离屏幕上沿留一段呼吸空间——原版那一列贴到顶部以下约 0.2 倍 CARD_H。
-    static constexpr int JOKER_Y = 28;
-    // 顶部槽位整体高度跟随 JokerItem 显示尺寸（已经从 CARD_H=228 缩到 198）。
-    static constexpr int JOKER_H = JokerItem::HEIGHT + 20;
-    // 顶部小丑 / 消耗槽使用的卡牌显示宽高——专门给那两行布局用，与 CARD_W/CARD_H 区分。
     static constexpr int TOP_SLOT_W = JokerItem::WIDTH;
     static constexpr int TOP_SLOT_H = JokerItem::HEIGHT;
+
+    static constexpr int JOKER_Y = 8;
+    static constexpr int JOKER_H = CARD_H + 20;
     static constexpr int PLAY_Y = JOKER_H + 130;   // 卡牌高度增大后稍微靠上一些
     static constexpr int PLAY_H = CARD_H + 50;
     // 右下角牌组宽度 = CARD_W + 边距，需要随卡牌尺寸放大同步增加。
@@ -163,9 +162,8 @@ private:
 
     QGraphicsTextItem *mConsCountLabel = nullptr;
     QGraphicsRectItem *mPlayBgRect     = nullptr;
-    // 升级为 QGraphicsItem* 以容纳圆角矩形（QGraphicsPathItem）。
-    QVector<QGraphicsItem*> mJokerSlotRects;
-    QVector<QGraphicsItem*> mConsumableSlotRects;
+    QVector<QGraphicsPathItem*> mJokerSlotRects;
+    QVector<QGraphicsPathItem*> mConsumableSlotRects;
     CardItem          *mDeckBackCard   = nullptr;
     QGraphicsRectItem *mDeckStatsItem  = nullptr;  // 牌堆上的"查看牌组"提示
     QGraphicsRectItem *mDeckPeekPanel  = nullptr;  // 出牌阶段悬停时从屏幕顶部滑入的牌型统计面板
@@ -205,8 +203,6 @@ private:
     void playHandLevelUpAnimation(HandType t, int prevLevel, int newLevel,
                                   int prevChips, int newChips,
                                   int prevMult, int newMult);
-    // 黑洞 / 同道之星：一次性提升所有牌型等级时，原版（card.lua:1153）使用
-    // "All Hands" + chips/mult 显示为 "+" 而非具体数值的简化动画。
     void playAllHandsLevelUpAnimation();
     // 让一个 QLabel 做一次"juice_up"风格的字号脉冲（先放大再回弹），不依赖 layout 位置改动。
     void juiceLabelPulse(QLabel *lbl, double scaleUp = 1.18, int durationMs = 360);
@@ -234,11 +230,6 @@ private:
     void onJokerDragReleased(JokerItem *item, QPointF scenePos);
     void showJokerInfo(int idx, bool showSellButton = false);
     void hideJokerInfo();
-    // 计算 joker[idx] 的运行时状态后缀（"当前：X1.5 倍率" / "本回合花色：黑桃" 等），
-    // 悬浮 hover 和点击 sell 面板共用。
-    QString jokerRuntimeStateSuffix(int idx) const;
-    // 按 mSelectedJokerIdx 重排所有 joker 的 y——选中那一张抬高 0.2*HEIGHT，其他落回基线。
-    void applyJokerSelectionLift();
 
     void refreshConsumableSlots();
     void layoutConsumableItems(bool animate = true);
@@ -328,13 +319,14 @@ private:
     // 关键：必须是 mPlayPage 的子 QWidget，不要塞进 QGraphicsScene——
     // BalatroInfoPanel 自身带 QGraphicsDropShadowEffect，再套一层 QGraphicsProxyWidget
     // 在某些驱动上会渲染成空白/0×0，导致 hover 完全不显示（商店里的浮窗是子 widget 所以正常）。
-    class BalatroInfoCluster *mHoverTooltip = nullptr;
+    BalatroInfoCluster *mHoverTooltip = nullptr;
     void ensureHoverTooltip();
     void showHoverTooltipNearScene(class QGraphicsObject *anchor, double anchorWidth);
     void showCardHoverTooltip(CardItem *card);
     void showJokerHoverTooltip(int jokerIdx);
     void showConsumableHoverTooltip(int consumableIdx);
     void hideHoverTooltip();
+    QString jokerRuntimeStateSuffix(int idx) const;
 
     QWidget           *mPlayPage          = nullptr;     // 对局页（包 mLeftPanel + mView）
     BlindSelectWidget *mBlindSelectWidget = nullptr;
@@ -365,10 +357,22 @@ private:
     // 不再用单次触发布尔,真正按"当前 displayed chips × mult"实时驱动。
     QWidget *mChipFlame = nullptr;       // 蓝色筹码方块上的火焰
     QWidget *mMultFlame = nullptr;       // 红色倍率方块上的火焰
+    QWidget *mChipScorePlate = nullptr;
+    QWidget *mMultScorePlate = nullptr;
     double   mChipFlameTarget = 0.0;
     double   mMultFlameTarget = 0.0;
     double   mChipFlameReal   = 0.0;
     double   mMultFlameReal   = 0.0;
+    double   mChipFlameVelocity = 0.0;
+    double   mMultFlameVelocity = 0.0;
+    double   mAudioChipFlameReal = 0.0;
+    double   mAudioMultFlameReal = 0.0;
+    double   mAudioChipFlameVelocity = 0.0;
+    double   mAudioMultFlameVelocity = 0.0;
+    double   mAudioChipFlameChange = 0.0;
+    double   mAudioMultFlameChange = 0.0;
+    double   mChipFlameTimer = 0.0;
+    double   mMultFlameTimer = 0.0;
     QTimer  *mFlameTick = nullptr;
     QWidget *mChipsRowWidget = nullptr;      // 引用 chipsRow 用于定位火焰
     void triggerSplashShader();              // 原版 splash.fs 全屏 GPU 溅射(占位)
@@ -379,11 +383,10 @@ private:
     int mLastJokerDragTo = -1;
     int mLastHandCardDragTo = -1;
     int mLastConsumableDragTo = -1;
-
-    // 拖动小丑/消耗结束 → 通过 moveJoker/moveConsumable 触发 refresh，但希望新生成的
-    // item 从"旧 index 的位置"开始 moveTo 到目标，而不是瞬移。
-    // refreshXxxSlots 检测到非 {-1,-1} 时按 from/to 推断 new→old 映射做平滑过渡。
-    struct PendingReorder { int from = -1; int to = -1; };
+    struct PendingReorder {
+        int from = -1;
+        int to = -1;
+    };
     PendingReorder mPendingJokerReorder;
     PendingReorder mPendingConsumableReorder;
 
@@ -393,9 +396,10 @@ private:
     QPointF mBestPlayBtnHome;
 
     void updateHandPreview();
-    void playScoreEvent(const ScoreEvent &ev);
+    void playScoreEvent(const ScoreEvent &ev, double percent = -1.0);
     void animateScoreTotalThenFinalize(double gained, int delayAfterEvents);
     void animatePlayedCardsToDiscardThen(std::function<void()> after);
+    void applyJokerSelectionLift();
     void showGameOverOverlay(bool won);
     void hideGameOverOverlay();
     void resetTransientOverlaysForNewRun();

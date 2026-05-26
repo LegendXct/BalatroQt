@@ -40,9 +40,11 @@
 #include <QGridLayout>
 #include <QFrame>
 #include <QAbstractItemView>
+#include <QRandomGenerator>
 #include <cmath>
 #include <limits>
 #include "../utils/shadereffects.h"
+#include "../audio/audiomanager.h"
 #include "balatroinfopanel.h"
 #include "cardtooltipformat.h"
 
@@ -99,6 +101,339 @@ static int overlappedCardStep(int totalW, int cardW, int count, int maxStep)
     // 对齐原版 CardArea：数量超过槽位时压缩步距形成重叠，而不是把整排撑出槽位。
     // 下限留到 18，避免负片/额外槽位叠很多张时仍被最小步距撑出槽位。
     return qBound(18, tightStep, maxStep);
+}
+
+static double audioPitchJitter(double spread = 0.04)
+{
+    const double r = QRandomGenerator::global()->generateDouble() * 2.0 - 1.0;
+    return 1.0 + r * spread;
+}
+
+static QString musicTrackForPack(PackKind kind)
+{
+    return kind == PackKind::Celestial ? QStringLiteral("music3")
+                                       : QStringLiteral("music2");
+}
+
+static QString soundForPackChoice(PackKind kind)
+{
+    switch (kind) {
+    case PackKind::Arcana:    return QStringLiteral("tarot1");
+    case PackKind::Celestial: return QStringLiteral("timpani");
+    case PackKind::Spectral:  return QStringLiteral("magic_crumple");
+    case PackKind::Buffoon:   return QStringLiteral("card1");
+    case PackKind::Standard:  return QStringLiteral("cardSlide1");
+    }
+    return QStringLiteral("card1");
+}
+
+static QString soundForConsumable(ConsumableType type)
+{
+    switch (kindOf(type)) {
+    case ConsumableKind::Tarot:    return QStringLiteral("tarot1");
+    case ConsumableKind::Planet:   return QString();
+    case ConsumableKind::Spectral: return QStringLiteral("magic_crumple");
+    }
+    return QStringLiteral("generic1");
+}
+
+static bool usesOriginalTarotFlip(ConsumableType type)
+{
+    switch (type) {
+    case ConsumableType::Tarot_Magician:
+    case ConsumableType::Tarot_Empress:
+    case ConsumableType::Tarot_Hierophant:
+    case ConsumableType::Tarot_Lovers:
+    case ConsumableType::Tarot_Chariot:
+    case ConsumableType::Tarot_Justice:
+    case ConsumableType::Tarot_Strength:
+    case ConsumableType::Tarot_Death:
+    case ConsumableType::Tarot_Devil:
+    case ConsumableType::Tarot_Tower:
+    case ConsumableType::Tarot_Star:
+    case ConsumableType::Tarot_Moon:
+    case ConsumableType::Tarot_Sun:
+    case ConsumableType::Tarot_World:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static double originalRandomPitch(double base, double range)
+{
+    return base + QRandomGenerator::global()->generateDouble() * range;
+}
+
+static void playSoundLater(QObject *context, int delayMs,
+                           const QString &code, double pitch = 1.0, double volume = 1.0)
+{
+    QPointer<QObject> guard(context);
+    QTimer::singleShot(qMax(0, delayMs), context, [guard, code, pitch, volume]() {
+        if (!guard) return;
+        AudioManager::instance()->play(code, pitch, volume);
+    });
+}
+
+static void playOriginalDrawCardSound(QObject *context, int index, int count,
+                                      bool down, int delayMs = 100, double volume = 1.0)
+{
+    if (count <= 0) return;
+    double percent = double(index + 1) * 100.0 / double(count);
+    if (down) percent = 1.0 - percent;
+    playSoundLater(context, delayMs, QStringLiteral("card1"),
+                   0.85 + percent * 0.2 / 100.0, 0.6 * volume);
+}
+
+static void playOriginalDissolveSound(QObject *context, int delayMs = 0)
+{
+    QPointer<QObject> guard(context);
+    QTimer::singleShot(qMax(0, delayMs), context, [guard]() {
+        if (!guard) return;
+        AudioManager::instance()->play(QStringLiteral("whoosh2"), originalRandomPitch(0.9, 0.2), 0.5);
+        AudioManager::instance()->play(QStringLiteral("crumple%1").arg(1 + QRandomGenerator::global()->bounded(5)),
+                                       originalRandomPitch(0.9, 0.2), 0.5);
+    });
+}
+
+static void playOriginalMaterializeSound(QObject *context, int delayMs = 0)
+{
+    QPointer<QObject> guard(context);
+    QTimer::singleShot(qMax(0, delayMs), context, [guard]() {
+        if (!guard) return;
+        AudioManager::instance()->play(QStringLiteral("whoosh1"), originalRandomPitch(0.6, 0.1), 0.3);
+        AudioManager::instance()->play(QStringLiteral("crumple%1").arg(1 + QRandomGenerator::global()->bounded(5)),
+                                       originalRandomPitch(1.2, 0.2), 0.8);
+    });
+}
+
+static void playOriginalBlindWiggleSound(QObject *context, int delayMs = 0)
+{
+    playSoundLater(context, delayMs, QStringLiteral("tarot2"), 1.0, 0.4);
+    playSoundLater(context, delayMs + 60, QStringLiteral("tarot2"), 0.76, 0.4);
+}
+
+static void playOriginalTagYepSound(QObject *context, int delayMs = 0)
+{
+    QPointer<QObject> guard(context);
+    QTimer::singleShot(qMax(0, delayMs), context, [guard]() {
+        if (!guard) return;
+        AudioManager::instance()->play(QStringLiteral("generic1"), originalRandomPitch(0.9, 0.1), 0.8);
+        AudioManager::instance()->play(QStringLiteral("holo1"), originalRandomPitch(1.2, 0.1), 0.4);
+    });
+}
+
+static void playOriginalStatusGenericSound(QObject *context, int delayMs = 0)
+{
+    QPointer<QObject> guard(context);
+    QTimer::singleShot(qMax(0, delayMs), context, [guard]() {
+        if (!guard) return;
+        const double percent = 0.9 + QRandomGenerator::global()->generateDouble() * 0.2;
+        AudioManager::instance()->play(QStringLiteral("generic1"), 0.8 + percent * 0.2, 1.0);
+    });
+}
+
+static void playOriginalEditionSound(QObject *context, Edition edition, int delayMs = 0)
+{
+    switch (edition) {
+    case Edition::Foil:
+        playSoundLater(context, delayMs, QStringLiteral("foil1"), 1.2, 0.4);
+        break;
+    case Edition::Holographic:
+        playSoundLater(context, delayMs, QStringLiteral("holo1"), 1.2 * 1.58, 0.4);
+        break;
+    case Edition::Polychrome:
+        playSoundLater(context, delayMs, QStringLiteral("polychrome1"), 1.2, 0.7);
+        break;
+    case Edition::Negative:
+        playSoundLater(context, delayMs, QStringLiteral("negative"), 1.5, 0.4);
+        break;
+    case Edition::None:
+        break;
+    }
+}
+
+static Edition changedSelectedHandEdition(const QVector<CardData> &before,
+                                          const QVector<CardData> &after,
+                                          const QVector<int> &selected)
+{
+    for (int idx : selected) {
+        if (idx < 0 || idx >= before.size() || idx >= after.size()) continue;
+        if (before[idx].edition != after[idx].edition)
+            return after[idx].edition;
+    }
+    return Edition::None;
+}
+
+static Edition changedJokerEdition(const QVector<Joker> &before, const QVector<Joker> &after)
+{
+    const int n = qMin(before.size(), after.size());
+    for (int i = 0; i < n; ++i) {
+        if (before[i].edition != after[i].edition)
+            return after[i].edition;
+    }
+    for (const Joker &j : after) {
+        if (j.edition != Edition::None)
+            return j.edition;
+    }
+    return Edition::None;
+}
+
+static bool isOriginalSealConsumable(ConsumableType type)
+{
+    return type == ConsumableType::Spectral_Talisman
+        || type == ConsumableType::Spectral_DejaVu
+        || type == ConsumableType::Spectral_Trance
+        || type == ConsumableType::Spectral_Medium;
+}
+
+static bool isOriginalTimpaniConsumable(ConsumableType type)
+{
+    switch (type) {
+    case ConsumableType::Tarot_Fool:
+    case ConsumableType::Tarot_Hermit:
+    case ConsumableType::Tarot_Temperance:
+    case ConsumableType::Tarot_Emperor:
+    case ConsumableType::Tarot_HighPriestess:
+    case ConsumableType::Tarot_Judgement:
+    case ConsumableType::Spectral_Soul:
+    case ConsumableType::Spectral_Wraith:
+        return true;
+    default:
+        return false;
+    }
+}
+
+static bool isOriginalDestroyConsumable(ConsumableType type)
+{
+    return type == ConsumableType::Tarot_HangedMan
+        || type == ConsumableType::Spectral_Familiar
+        || type == ConsumableType::Spectral_Grim
+        || type == ConsumableType::Spectral_Incantation
+        || type == ConsumableType::Spectral_Immolate;
+}
+
+static void playOriginalCardFlipSequence(QObject *context, int count, int startDelayMs = 400)
+{
+    if (count <= 0) return;
+    playSoundLater(context, startDelayMs, QStringLiteral("tarot1"), 1.0, 1.0);
+    auto pitchFor = [](int index, int count, bool firstFlip) {
+        const double denom = count - 0.998;
+        const double percent = (index + 0.001) / denom * 0.3;
+        return firstFlip ? (1.15 - percent) : (0.85 + percent);
+    };
+    for (int i = 0; i < count; ++i)
+        playSoundLater(context, startDelayMs + 150 * (i + 1),
+                       QStringLiteral("card1"), pitchFor(i, count, true), 1.0);
+    const int secondStart = startDelayMs + 150 * count + 200;
+    for (int i = 0; i < count; ++i)
+        playSoundLater(context, secondStart + 150 * (i + 1),
+                       QStringLiteral("tarot2"), pitchFor(i, count, false), 0.6);
+}
+
+static bool playOriginalConsumableAudio(QObject *context,
+                                        ConsumableType type,
+                                        const QVector<int> &selected,
+                                        const QVector<CardData> &handBefore,
+                                        const QVector<CardData> &handAfter,
+                                        const QVector<Joker> &jokersBefore,
+                                        const QVector<Joker> &jokersAfter,
+                                        const QVector<Consumable> &consumablesBefore,
+                                        const QVector<Consumable> &consumablesAfter,
+                                        int goldBefore,
+                                        int goldAfter,
+                                        bool allowSelectedTarotFlip)
+{
+    if (allowSelectedTarotFlip && usesOriginalTarotFlip(type)) {
+        playOriginalCardFlipSequence(context, selected.size(), 400);
+        return true;
+    }
+
+    if (kindOf(type) == ConsumableKind::Planet || type == ConsumableType::Spectral_BlackHole) {
+        return true;
+    }
+
+    if (isOriginalSealConsumable(type)) {
+        playSoundLater(context, 0, QStringLiteral("tarot1"), 1.0, 1.0);
+        playSoundLater(context, 100, QStringLiteral("gold_seal"), 1.2, 0.4);
+        return true;
+    }
+
+    if (type == ConsumableType::Spectral_Aura) {
+        playOriginalEditionSound(context, changedSelectedHandEdition(handBefore, handAfter, selected), 400);
+        return true;
+    }
+
+    if (type == ConsumableType::Spectral_Sigil || type == ConsumableType::Spectral_Ouija) {
+        playOriginalCardFlipSequence(context, handBefore.size(), 400);
+        return true;
+    }
+
+    if (isOriginalDestroyConsumable(type)) {
+        playSoundLater(context, 400, QStringLiteral("tarot1"), 1.0, 1.0);
+        int dissolveSounds = 0;
+        if (type == ConsumableType::Tarot_HangedMan)
+            dissolveSounds = qMax(0, selected.size() - 1);
+        else if (type == ConsumableType::Spectral_Familiar
+                 || type == ConsumableType::Spectral_Grim
+                 || type == ConsumableType::Spectral_Incantation)
+            dissolveSounds = handBefore.isEmpty() ? 0 : 1;
+        else if (type == ConsumableType::Spectral_Immolate)
+            dissolveSounds = qMax(0, qMin(5, handBefore.size()) - 1);
+
+        for (int i = 0; i < dissolveSounds; ++i)
+            playOriginalDissolveSound(context, 600 + i * 30);
+
+        if (type == ConsumableType::Spectral_Familiar
+            || type == ConsumableType::Spectral_Grim
+            || type == ConsumableType::Spectral_Incantation)
+            playOriginalMaterializeSound(context, 1100);
+
+        if (goldAfter != goldBefore)
+            playSoundLater(context, 900, QStringLiteral("coin1"), 1.0, 1.0);
+        return true;
+    }
+
+    if (isOriginalTimpaniConsumable(type)) {
+        const int createdConsumables = qMax(0, consumablesAfter.size() - qMax(0, consumablesBefore.size() - 1));
+        const int createdJokers = qMax(0, jokersAfter.size() - jokersBefore.size());
+        const int repeats = qMax(1, qMax(createdConsumables, createdJokers));
+        for (int i = 0; i < repeats; ++i)
+            playSoundLater(context, 400, QStringLiteral("timpani"), 1.0, 1.0);
+        if (goldAfter != goldBefore)
+            playSoundLater(context, 400, QStringLiteral("coin1"), 1.0, 1.0);
+        return true;
+    }
+
+    if (type == ConsumableType::Tarot_Wheel
+        || type == ConsumableType::Spectral_Ectoplasm
+        || type == ConsumableType::Spectral_Hex) {
+        const Edition edition = changedJokerEdition(jokersBefore, jokersAfter);
+        if (edition != Edition::None) {
+            playOriginalEditionSound(context, edition, 400);
+            if (type == ConsumableType::Spectral_Hex && jokersBefore.size() > 1)
+                playOriginalDissolveSound(context, 420);
+        } else if (type == ConsumableType::Tarot_Wheel) {
+            playSoundLater(context, 400, QStringLiteral("tarot2"), 1.0, 0.4);
+            playSoundLater(context, 460, QStringLiteral("tarot2"), 0.76, 0.4);
+        }
+        return true;
+    }
+
+    if (type == ConsumableType::Spectral_Ankh) {
+        if (jokersAfter.size() > jokersBefore.size())
+            playOriginalMaterializeSound(context, 400);
+        if (jokersBefore.size() > 1)
+            playOriginalDissolveSound(context, 750);
+        return true;
+    }
+
+    if (type == ConsumableType::Spectral_Cryptid) {
+        playOriginalMaterializeSound(context, 0);
+        return true;
+    }
+
+    return false;
 }
 }
 
@@ -572,6 +907,9 @@ MainWindow::MainWindow(QWidget *parent)
     });
 
     setupConnections();
+    AudioManager::instance()->initialize();
+    AudioManager::instance()->setPitchMod(1.0);
+    AudioManager::instance()->setDesiredMusic(QStringLiteral("music1"));
     mPlayPage->installEventFilter(this);
 
     QTimer::singleShot(0, this, [this]() {
@@ -926,6 +1264,34 @@ void MainWindow::setupLeftPanel() {
         };
         ease(mChipFlameReal, mChipFlameTarget);
         ease(mMultFlameReal, mMultFlameTarget);
+
+        const double earned = mDisplayedChips * mDisplayedMult;
+        const double required = mGameState ? mGameState->targetScore() : 0.0;
+        double audioTarget = 0.0;
+        if (required > 0.0 && std::isfinite(earned) && earned >= required) {
+            audioTarget = std::max(0.0, std::log(std::max(earned, 1.0)) / std::log(5.0) - 2.0);
+        } else if (required > 0.0 && std::isinf(earned)) {
+            audioTarget = 10.0;
+        }
+
+        auto updateAudioFlame = [dt, audioTarget](double &real,
+                                                  double &velocity,
+                                                  double &change) {
+            const double exptime = std::exp(-0.4 * dt);
+            if (velocity < 0.0) velocity *= (1.0 - 10.0 * dt);
+            velocity = (1.0 - exptime) * (audioTarget - real) * dt * 25.0
+                       + exptime * velocity;
+            real = std::max(0.0, real + velocity);
+            change = change * (1.0 - 4.0 * dt)
+                     + (4.0 * dt) * (real < audioTarget ? 1.0 : 0.0) * real;
+        };
+        updateAudioFlame(mAudioChipFlameReal, mAudioChipFlameVelocity, mAudioChipFlameChange);
+        updateAudioFlame(mAudioMultFlameReal, mAudioMultFlameVelocity, mAudioMultFlameChange);
+        AudioManager::instance()->setScoreAmbient(earned,
+                                                  required,
+                                                  mAudioChipFlameReal,
+                                                  mAudioChipFlameChange,
+                                                  mAudioMultFlameChange);
 
         auto applyVis = [](QWidget *w, double real) {
             if (!w) return;
@@ -2260,6 +2626,7 @@ void MainWindow::refreshCounters() {
 void MainWindow::onDeckClicked(CardItem *)
 {
     if (!mDeckViewWidget || !mPlayPage) return;
+    AudioManager::instance()->play(QStringLiteral("cardFan2"), audioPitchJitter(0.03), 0.65);
     // 标记必须在 open() 之前置位：show() 一瞬间 QGraphicsScene 会把 hoverLeaveEvent
     // 投给牌堆 CardItem；如果不屏蔽，按钮 / 面板会立刻"收回再展开"，造成反复滑动。
     mDeckViewOpen = true;
@@ -2545,7 +2912,8 @@ void MainWindow::onCardClicked(CardItem *card) {
     const bool isForced = mGameState->ceruleanForcedUid() > 0
                           && card->cardData().uid == mGameState->ceruleanForcedUid();
 
-    if (mSelected.contains(idx)) {
+    const bool wasSelected = mSelected.contains(idx);
+    if (wasSelected) {
         if (isForced) return;
         mSelected.removeAll(idx);
         card->setCardSelected(false);
@@ -2556,6 +2924,9 @@ void MainWindow::onCardClicked(CardItem *card) {
         }
     }
 
+    AudioManager::instance()->play(wasSelected ? QStringLiteral("cardSlide2")
+                                               : QStringLiteral("cardSlide1"),
+                                   1.0, wasSelected ? 0.3 : 1.0);
     layoutHandCards();
     refreshCounters();
     updateHandPreview();
@@ -3013,6 +3384,7 @@ void MainWindow::onHandCardDragReleased(CardItem *card, QPointF scenePos)
     to = qBound(0, to, n - 1);
 
     if (from != to) {
+        AudioManager::instance()->play(QStringLiteral("cardSlide1"), audioPitchJitter(0.03), 0.62);
         mBestPlayHintActive = false;
         QVector<int> newSelected;
         for (int s : mSelected) {
@@ -3078,6 +3450,19 @@ void MainWindow::onPlayClicked() {
     mBestPlayHintActive = false;
     if (mScoringInProgress) return;
     if (mSelected.isEmpty()) return;
+    if (mGameState->blindType() == BlindType::Boss
+        && !mGameState->hasJokerType(JokerType::Chicot)) {
+        if (mGameState->bossEffect() == BossEffect::TheHook) {
+            const int hookCount = qMin(2, mGameState->hand().size());
+            for (int i = 0; i < hookCount; ++i)
+                AudioManager::instance()->play(QStringLiteral("card1"), 1.0, 1.0);
+        } else if (mGameState->bossEffect() == BossEffect::TheTooth) {
+            for (int i = 0; i < mSelected.size(); ++i)
+                playSoundLater(this, 200 + 230 * i, QStringLiteral("coin1"), 1.0, 1.0);
+        }
+    }
+    for (int i = 0; i < mSelected.size(); ++i)
+        playOriginalDrawCardSound(this, i, mSelected.size(), false);
     mScoringInProgress = true;
     if (mBtnPlay) mBtnPlay->setEnabled(false);
     if (mBtnDiscard) mBtnDiscard->setEnabled(false);
@@ -3123,6 +3508,8 @@ void MainWindow::onDiscardClicked() {
     mBestPlayHintActive = false;
     if (mScoringInProgress) return;
     if (mSelected.isEmpty()) return;
+    for (int i = 0; i < mSelected.size(); ++i)
+        playOriginalDrawCardSound(this, i, mSelected.size(), true);
 
     QVector<int> sortedIdx = mSelected;
     std::sort(sortedIdx.begin(), sortedIdx.end());
@@ -3158,12 +3545,27 @@ void MainWindow::onHandPlayed()
 {
     const HandResult &r = mGameState->lastResult();
     mShatteredPlayedIndices.clear();
+    const bool handNameChanged = mLblHandName && (mLblHandName->text() != r.name);
+
+    if (r.name.contains(QStringLiteral("Boss"))) {
+        AudioManager::instance()->play(QStringLiteral("whoosh1"), 0.55, 0.62);
+        for (int i = 1; i <= 4; ++i) {
+            scheduleGame(100 * (i - 1), [i]() {
+                AudioManager::instance()->play(QStringLiteral("cancel"), 0.7 + 0.05 * i, 0.7);
+            });
+        }
+    }
 
     mLblHandName ->setText(r.name);
     mLblHandLevel->setText(QString("等级%1").arg(r.level));
     mLblHandLevel->setStyleSheet(QString("color:%1; background:transparent;").arg(handLevelColor(r.level)));
 
     resetScoreFlame();
+    if (handNameChanged) {
+        scheduleGame(400, []() {
+            AudioManager::instance()->play(QStringLiteral("button"), 1.0, 0.4);
+        });
+    }
 
     mDisplayedChips = r.baseChips;
     mDisplayedMult  = r.baseMult;
@@ -3201,10 +3603,12 @@ void MainWindow::onHandPlayed()
     for (int i = 0; i < scoringIndices.size(); ++i) {
         int idx = scoringIndices[i];
         int delay = playArrivalMs + i * staggerStepMs;
-        scheduleGame(delay, [this, idx, upDurationMs]() {
+        const double highlightPitch = 0.85 + ((i + 1.0) - 0.999) / 5.0 * 0.2;
+        scheduleGame(delay, [this, idx, upDurationMs, highlightPitch]() {
             if (idx < 0 || idx >= mPlayedCards.size()) return;
             CardItem *c = mPlayedCards[idx];
             if (!c) return;
+            AudioManager::instance()->play(QStringLiteral("cardSlide1"), highlightPitch, 1.0);
             // 上升 0.2 * CARD_H (HIGHLIGHT_H 原版常量),保持升起状态不下落。
             QPointF target = c->pos() + QPointF(0, -int(CARD_H * 0.2));
             c->moveTo(target, upDurationMs);
@@ -3224,8 +3628,9 @@ void MainWindow::onHandPlayed()
     for (int ei = 0; ei < r.events.size(); ++ei) {
         const ScoreEvent ev = r.events[ei];
         int delay = delayBase + ei * delayStep;
-        scheduleGame(delay, [this, ev]() {
-            playScoreEvent(ev);
+        const double percent = 0.3 + 0.08 * ei;
+        scheduleGame(delay, [this, ev, percent]() {
+            playScoreEvent(ev, percent);
         });
     }
 
@@ -3243,11 +3648,13 @@ void MainWindow::onHandPlayed()
 void MainWindow::onSortByNum() {
     mBestPlayHintActive = false;
     mGameState->sortHandByRank();
+    AudioManager::instance()->play(QStringLiteral("paper1"), 1.0, 1.0);
 }
 
 void MainWindow::onSortBySuit() {
     mBestPlayHintActive = false;
     mGameState->sortHandBySuit();
+    AudioManager::instance()->play(QStringLiteral("paper1"), 1.0, 1.0);
 }
 
 void MainWindow::onBestPlayHint() {
@@ -3269,6 +3676,7 @@ void MainWindow::onBestPlayHint() {
             mGameState->reorderHandByUids(mBestPlayHintHandOrder);
         mBestPlayHintHandOrder.clear();
 
+        AudioManager::instance()->play(QStringLiteral("cardSlide2"), audioPitchJitter(0.03), 0.55);
         layoutHandCards();
         refreshCounters();
         updateHandPreview();
@@ -3289,6 +3697,7 @@ void MainWindow::onBestPlayHint() {
     // 把最佳出牌按最优顺序移到手牌最前；handChanged 会同步重建 mHandCards。
     mGameState->bringHandCardsToFront(best);
     mBestPlayHintActive = true;
+    AudioManager::instance()->play(QStringLiteral("cardSlide1"), audioPitchJitter(0.03), 0.55);
 
     // 重建后最佳出牌就在最前面，选中前 k 张。
     mSelected.clear();
@@ -3308,6 +3717,8 @@ void MainWindow::onGameOver(bool won)
     if (mGameOverHandled) return;
     mGameOverHandled = true;
     mScoringInProgress = false;
+    AudioManager::instance()->setPitchMod(0.5);
+    AudioManager::instance()->play(won ? QStringLiteral("win") : QStringLiteral("gong"), 1.0, 0.90);
     if (mBtnPlay) mBtnPlay->setEnabled(false);
     if (mBtnDiscard) mBtnDiscard->setEnabled(false);
     showGameOverOverlay(won);
@@ -3646,7 +4057,19 @@ void MainWindow::showJokerInfo(int idx, bool showSellButton)
     disconnect(mJokerSellButton, nullptr, this, nullptr);
     connect(mJokerSellButton, &QPushButton::clicked, this, [this]() {
         if (mSelectedJokerIdx < 0) return;
+        const bool bossDisableSound =
+            mSelectedJokerIdx < mGameState->jokers().size()
+            && mGameState->jokers()[mSelectedJokerIdx].type == JokerType::Luchador
+            && mGameState->bossEffect() != BossEffect::None;
         if (mGameState->sellJoker(mSelectedJokerIdx)) {
+            if (bossDisableSound) {
+                playOriginalStatusGenericSound(this);
+                playOriginalBlindWiggleSound(this);
+            }
+            QTimer::singleShot(200, this, []() {
+                AudioManager::instance()->play(QStringLiteral("coin2"), 1.0, 1.0);
+                AudioManager::instance()->play(QStringLiteral("coin1"), 1.0, 1.0);
+            });
             mSelectedJokerIdx = -1;
             hideJokerInfo();
             if (mPackOpenWidget && mPackOpenWidget->isVisible())
@@ -3698,6 +4121,9 @@ void MainWindow::onJokerPressed(JokerItem *item, Qt::MouseButton btn)
 
     // 切换选中：再次点同一张 = 取消选中并落下；点新张则把旧的落下、新的抬起。
     const int prevSelected = mSelectedJokerIdx;
+    AudioManager::instance()->play(prevSelected == idx ? QStringLiteral("cardSlide2")
+                                                       : QStringLiteral("cardSlide1"),
+                                   1.0, prevSelected == idx ? 0.3 : 1.0);
     if (mSelectedJokerIdx == idx) {
         mSelectedJokerIdx = -1;
         hideJokerInfo();
@@ -3815,6 +4241,7 @@ void MainWindow::onJokerDragReleased(JokerItem *item, QPointF scenePos)
     if (from != to) {
         // 标记给 refreshJokerSlots：刚发生 from→to 的拖动复位，新生成的 joker item 应当
         // 从旧 index 的 position 开始 moveTo 目标，避免瞬移。
+        AudioManager::instance()->play(QStringLiteral("cardSlide1"), audioPitchJitter(0.03), 0.62);
         mPendingJokerReorder = {from, to};
         mGameState->moveJoker(from, to);
         mPendingJokerReorder = {-1, -1};
@@ -3828,6 +4255,7 @@ void MainWindow::showConsumableAction(int idx)
     if (idx < 0 || idx >= cs.size() || idx >= mConsumableItems.size()) return;
     mSelectedConsumableIdx = idx;
     const Consumable &c = cs[idx];
+    AudioManager::instance()->play(QStringLiteral("cardSlide1"), 1.0, 1.0);
     layoutConsumableItems(true);
 
     if (!mConsumableActionPanel) {
@@ -3882,13 +4310,16 @@ void MainWindow::showConsumableAction(int idx)
             sel.erase(std::unique(sel.begin(), sel.end()), sel.end());
 
             const Consumable &c = mGameState->consumables()[idx];
+            const ConsumableType type = c.type;
+            const QString useSound = soundForConsumable(c.type);
             if ((c.needsSelection > 0 && sel.size() < c.needsSelection) ||
                 (c.type == ConsumableType::Tarot_Fool && !mGameState->canUseFool())) {
+                AudioManager::instance()->play(QStringLiteral("cancel"), 1.0, 0.65);
                 flashConsumableActionError();
                 return;
             }
 
-            animateConsumableUseThen(idx, [this, idx, sel]() {
+            animateConsumableUseThen(idx, [this, idx, sel, type, useSound]() {
                 // 对齐原版 card.lua:1106-1149 —— 当塔罗 / 幻灵牌作用到选中手牌时：
                 //   1) 选中的牌先 flip 到背面（240ms 动画 + 0.15s 间隔）
                 //   2) 应用增强/花色/点数变化
@@ -3897,10 +4328,31 @@ void MainWindow::showConsumableAction(int idx)
                 // 该消耗牌是否消耗选中的手牌（如奖励/倍率/换花色等塔罗）。
                 const bool usesSelection = (idx >= 0 && idx < cs.size())
                                            && cs[idx].needsSelection > 0;
-                const bool needsHandFlip = usesSelection && !sel.isEmpty();
+                const bool needsHandFlip = usesSelection
+                                           && !sel.isEmpty()
+                                           && usesOriginalTarotFlip(type);
 
-                auto doUseAndRefresh = [this, idx, sel, usesSelection]() {
+                auto doUseAndRefresh = [this, idx, sel, type, usesSelection, needsHandFlip, useSound]() {
+                    const QVector<CardData> handBefore = mGameState->hand();
+                    const QVector<Joker> jokersBefore = mGameState->jokers();
+                    const QVector<Consumable> consumablesBefore = mGameState->consumables();
+                    const int goldBefore = mGameState->gold();
                     if (mGameState->useConsumable(idx, sel)) {
+                        const bool handled = needsHandFlip || playOriginalConsumableAudio(
+                            this,
+                            type,
+                            sel,
+                            handBefore,
+                            mGameState->hand(),
+                            jokersBefore,
+                            mGameState->jokers(),
+                            consumablesBefore,
+                            mGameState->consumables(),
+                            goldBefore,
+                            mGameState->gold(),
+                            false);
+                        if (!handled && !useSound.isEmpty())
+                            AudioManager::instance()->play(useSound, 1.0, 1.0);
                         mSelectedConsumableIdx = -1;
                         hideConsumableAction();
                         // 仅消耗选中手牌的塔罗才清空选择；命运之轮等不选牌的
@@ -3912,6 +4364,7 @@ void MainWindow::showConsumableAction(int idx)
                         refreshCounters();
                         if (mShopWidget && mShopWidget->isVisible()) mShopWidget->refresh();
                     } else {
+                        AudioManager::instance()->play(QStringLiteral("cancel"), 1.0, 0.65);
                         flashConsumableActionError();
                         refreshConsumableSlots();
                     }
@@ -3934,16 +4387,43 @@ void MainWindow::showConsumableAction(int idx)
                 mSuppressHandReveal = true;
 
                 // 1) flip 翻到背面。flip() 内部用 scale 1→0→1 动画，整段 240ms。
-                for (auto &t : targets) if (t) t->flip();
+                const int targetCount = targets.size();
+                auto flipPitch = [](int index, int count, bool firstFlip) {
+                    const double denom = count - 0.998;
+                    const double percent = (index + 0.001) / denom * 0.3;
+                    return firstFlip ? (1.15 - percent) : (0.85 + percent);
+                };
+
+                AudioManager::instance()->play(QStringLiteral("tarot1"), 1.0, 1.0);
+
+                for (int i = 0; i < targetCount; ++i) {
+                    QPointer<CardItem> target = targets[i];
+                    const double pitch = flipPitch(i, targetCount, true);
+                    QTimer::singleShot(150 * (i + 1), this, [target, pitch]() {
+                        if (!target) return;
+                        target->flip();
+                        AudioManager::instance()->play(QStringLiteral("card1"), pitch, 1.0);
+                    });
+                }
 
                 // 2) 等翻面动画过半后开始改 CardData（此时正在显示 "0" scale，玩家看不到差异）。
-                QTimer::singleShot(150, this, [this, doUseAndRefresh, targets]() {
+                QTimer::singleShot(150 * targetCount + 200, this, [this, doUseAndRefresh, targets, targetCount, flipPitch]() {
                     doUseAndRefresh();
                     // 3) 等 doUse 完成 + 小延迟后，再把牌翻回正面。setCardData 已经保留了 faceUp=false，
                     // 所以现在 mHandCards 里对应的 CardItem 还是背面。
-                    QTimer::singleShot(180, this, [this, targets]() {
-                        for (const auto &t : targets) if (t) t->flip();
-                        mSuppressHandReveal = false;
+                    QTimer::singleShot(0, this, [this, targets, targetCount, flipPitch]() {
+                        for (int i = 0; i < targetCount; ++i) {
+                            QPointer<CardItem> target = targets[i];
+                            const double pitch = flipPitch(i, targetCount, false);
+                            QTimer::singleShot(150 * (i + 1), this, [target, pitch]() {
+                                if (!target) return;
+                                target->flip();
+                                AudioManager::instance()->play(QStringLiteral("tarot2"), pitch, 0.6);
+                            });
+                        }
+                        QTimer::singleShot(150 * targetCount + 20, this, [this]() {
+                            mSuppressHandReveal = false;
+                        });
                     });
                 });
             });
@@ -3951,6 +4431,10 @@ void MainWindow::showConsumableAction(int idx)
         connect(mConsumableSellButton, &QPushButton::clicked, this, [this]() {
             if (mSelectedConsumableIdx < 0) return;
             if (mGameState->sellConsumable(mSelectedConsumableIdx)) {
+                QTimer::singleShot(200, this, []() {
+                    AudioManager::instance()->play(QStringLiteral("coin2"), 1.0, 1.0);
+                    AudioManager::instance()->play(QStringLiteral("coin1"), 1.0, 1.0);
+                });
                 mSelectedConsumableIdx = -1;
                 hideConsumableAction();
                 refreshConsumableSlots();
@@ -4220,6 +4704,10 @@ void MainWindow::onConsumablePressed(ConsumableItem *item, Qt::MouseButton btn)
 
     if (btn == Qt::RightButton) {
         mGameState->sellConsumable(idx);
+        QTimer::singleShot(200, this, []() {
+            AudioManager::instance()->play(QStringLiteral("coin2"), 1.0, 1.0);
+            AudioManager::instance()->play(QStringLiteral("coin1"), 1.0, 1.0);
+        });
         hideConsumableAction();
         if (mShopWidget && mShopWidget->isVisible()) mShopWidget->refresh();
         return;
@@ -4227,8 +4715,29 @@ void MainWindow::onConsumablePressed(ConsumableItem *item, Qt::MouseButton btn)
 
     if (mPackOpenWidget && mPackOpenWidget->isVisible() && !mPendingPackHand.isEmpty()) {
         QVector<int> packSel = mPackOpenWidget->selectedHandIndices();
-        animateConsumableUseThen(idx, [this, idx, packSel]() {
+        const ConsumableType type = mGameState->consumables()[idx].type;
+        const QString useSound = soundForConsumable(type);
+        animateConsumableUseThen(idx, [this, idx, packSel, type, useSound]() {
+            const QVector<CardData> packBefore = mPendingPackHand;
+            const QVector<Joker> jokersBefore = mGameState->jokers();
+            const QVector<Consumable> consumablesBefore = mGameState->consumables();
+            const int goldBefore = mGameState->gold();
             if (mGameState->useConsumableOnPackHand(idx, packSel, mPendingPackHand)) {
+                const bool handled = playOriginalConsumableAudio(
+                    this,
+                    type,
+                    packSel,
+                    packBefore,
+                    mPendingPackHand,
+                    jokersBefore,
+                    mGameState->jokers(),
+                    consumablesBefore,
+                    mGameState->consumables(),
+                    goldBefore,
+                    mGameState->gold(),
+                    true);
+                if (!handled && !useSound.isEmpty())
+                    AudioManager::instance()->play(useSound, 1.0, 1.0);
                 mPackOpenWidget->setPackHand(mPendingPackHand);
                 mPackOpenWidget->setInventoryConsumables(mGameState->consumables());
                 refreshConsumableSlots();
@@ -4236,6 +4745,7 @@ void MainWindow::onConsumablePressed(ConsumableItem *item, Qt::MouseButton btn)
                 refreshCounters();
                 if (mShopWidget && mShopWidget->isVisible()) mShopWidget->refresh();
             } else {
+                AudioManager::instance()->play(QStringLiteral("cancel"), 1.0, 0.65);
                 flashConsumableActionError();
                 refreshConsumableSlots();
             }
@@ -4246,6 +4756,7 @@ void MainWindow::onConsumablePressed(ConsumableItem *item, Qt::MouseButton btn)
     if (btn == Qt::LeftButton) {
         // 再次点击已选中的消耗牌 → 取消选中（与手牌选中行为一致）。
         if (idx == mSelectedConsumableIdx) {
+            AudioManager::instance()->play(QStringLiteral("cardSlide2"), 1.0, 0.3);
             hideConsumableAction();
         } else {
             showConsumableAction(idx);
@@ -4319,6 +4830,7 @@ void MainWindow::onConsumableDragReleased(ConsumableItem *item, QPointF scenePos
     to = qBound(0, to, n - 1);
 
     if (from != to) {
+        AudioManager::instance()->play(QStringLiteral("cardSlide1"), audioPitchJitter(0.03), 0.62);
         mPendingConsumableReorder = {from, to};
         mGameState->moveConsumable(from, to);
         mPendingConsumableReorder = {-1, -1};
@@ -4329,7 +4841,47 @@ void MainWindow::onPackChoiceMade(int chosenIdx, QVector<int> selectedPackHandId
 {
     const bool buffoonChoice = (chosenIdx >= 0 && mPendingPack.kind == PackKind::Buffoon);
     if (chosenIdx >= 0) {
-        mGameState->applyPackChoice(mPendingPack, chosenIdx, selectedPackHandIdx, mPendingPackHand);
+        ConsumableType usedType = ConsumableType::Tarot_Fool;
+        const bool consumableChoice =
+            (mPendingPack.kind == PackKind::Arcana
+             || mPendingPack.kind == PackKind::Celestial
+             || mPendingPack.kind == PackKind::Spectral)
+            && chosenIdx < mPendingPack.consumables.size();
+        if (consumableChoice)
+            usedType = mPendingPack.consumables[chosenIdx];
+
+        const QVector<CardData> packBefore = mPendingPackHand;
+        const QVector<Joker> jokersBefore = mGameState->jokers();
+        const QVector<Consumable> consumablesBefore = mGameState->consumables();
+        const int goldBefore = mGameState->gold();
+
+        const bool ok = mGameState->applyPackChoice(mPendingPack, chosenIdx,
+                                                    selectedPackHandIdx, mPendingPackHand);
+        if (ok) {
+            if (mPendingPack.kind == PackKind::Standard || mPendingPack.kind == PackKind::Buffoon) {
+                AudioManager::instance()->play(QStringLiteral("card1"), 0.8, 0.6);
+                AudioManager::instance()->play(QStringLiteral("generic1"), 1.0, 1.0);
+            } else if (consumableChoice) {
+                const QString fallback = soundForConsumable(usedType);
+                const bool handled = playOriginalConsumableAudio(
+                    this,
+                    usedType,
+                    selectedPackHandIdx,
+                    packBefore,
+                    mPendingPackHand,
+                    jokersBefore,
+                    mGameState->jokers(),
+                    consumablesBefore,
+                    mGameState->consumables(),
+                    goldBefore,
+                    mGameState->gold(),
+                    true);
+                if (!handled && !fallback.isEmpty())
+                    AudioManager::instance()->play(fallback, 1.0, 1.0);
+            }
+        } else {
+            AudioManager::instance()->play(QStringLiteral("cancel"), 1.0, 0.65);
+        }
         mPackOpenWidget->setPackHand(mPendingPackHand);
         mPackOpenWidget->setInventoryConsumables(mGameState->consumables());
     }
@@ -4346,12 +4898,40 @@ void MainWindow::onPackChoiceMade(int chosenIdx, QVector<int> selectedPackHandId
 
 void MainWindow::onInventoryConsumableUseRequested(int inventoryIdx, QVector<int> selectedPackHandIdx)
 {
+    const bool hasConsumable = inventoryIdx >= 0 && inventoryIdx < mGameState->consumables().size();
+    const ConsumableType type = hasConsumable
+        ? mGameState->consumables()[inventoryIdx].type
+        : ConsumableType::Tarot_Fool;
+    const QString useSound = hasConsumable
+        ? soundForConsumable(type)
+        : QStringLiteral("cancel");
+    const QVector<CardData> packBefore = mPendingPackHand;
+    const QVector<Joker> jokersBefore = mGameState->jokers();
+    const QVector<Consumable> consumablesBefore = mGameState->consumables();
+    const int goldBefore = mGameState->gold();
     if (mGameState->useConsumableOnPackHand(inventoryIdx, selectedPackHandIdx, mPendingPackHand)) {
+        const bool handled = playOriginalConsumableAudio(
+            this,
+            type,
+            selectedPackHandIdx,
+            packBefore,
+            mPendingPackHand,
+            jokersBefore,
+            mGameState->jokers(),
+            consumablesBefore,
+            mGameState->consumables(),
+            goldBefore,
+            mGameState->gold(),
+            true);
+        if (!handled && !useSound.isEmpty())
+            AudioManager::instance()->play(useSound, 1.0, 1.0);
         mPackOpenWidget->setPackHand(mPendingPackHand);
         mPackOpenWidget->setInventoryConsumables(mGameState->consumables());
         refreshConsumableSlots();
         refreshGold();
         refreshCounters();
+    } else {
+        AudioManager::instance()->play(QStringLiteral("cancel"), 1.0, 0.65);
     }
 }
 
@@ -4365,6 +4945,8 @@ void MainWindow::onPackFinished()
 
     if (mPackFromTag) {
         mPackFromTag = false;
+        AudioManager::instance()->setPitchMod(1.0);
+        AudioManager::instance()->setDesiredMusic(QStringLiteral("music1"));
         // 包来自标签：包关闭即视为对应标签"已被使用"，把它从右侧标签列移除。
         switch (mPendingPack.kind) {
         case PackKind::Standard:  removeObtainedTag(TagType::Standard); break;
@@ -4391,12 +4973,15 @@ void MainWindow::onPackFinished()
 
 void MainWindow::onSelectBlindClicked()
 {
+    AudioManager::instance()->setPitchMod(1.0);
     mGameState->selectCurrentBlind();
 }
 
 void MainWindow::onLeaveShopClicked()
 {
     mShopWidget->hide();
+    AudioManager::instance()->setPitchMod(1.0);
+    AudioManager::instance()->setDesiredMusic(QStringLiteral("music1"));
     mGameState->leaveShop();
     refreshConsumableSlots();
 }
@@ -4433,6 +5018,11 @@ QRect MainWindow::shopOverlayRect() const
 
 void MainWindow::showShopOverlay()
 {
+    AudioManager::instance()->setPitchMod(1.0);
+    AudioManager::instance()->setDesiredMusic(QStringLiteral("music4"));
+    QTimer::singleShot(320, this, []() {
+        AudioManager::instance()->play(QStringLiteral("cardFan2"), 1.0, 1.0);
+    });
     if (mDynamicBg) mDynamicBg->setMood(DynamicBackgroundItem::Mood::Shop);
     if (!mShopWidget || !mPlayPage) return;
     mShopWidget->refresh();
@@ -4631,6 +5221,12 @@ void MainWindow::openImmediateTagPack(PackKind kind)
     }
 
     mPackFromTag = true;
+    AudioManager::instance()->setPitchMod(1.0);
+    AudioManager::instance()->setDesiredMusic(musicTrackForPack(kind));
+    playOriginalMaterializeSound(this);
+    playSoundLater(this, 400, QStringLiteral("explosion_buildup1"), 1.0, 1.0);
+    playSoundLater(this, 1570, QStringLiteral("explosion_release1"), 1.0, 1.0);
+    playOriginalMaterializeSound(this, 1700);
     setBackgroundMoodForPack(kind);
     if (mBlindSelectWidget) mBlindSelectWidget->hide();
     if (mShopWidget) mShopWidget->hide();
@@ -4643,6 +5239,8 @@ void MainWindow::openImmediateTagPack(PackKind kind)
 
 void MainWindow::onBlindSelectEntered()
 {
+    AudioManager::instance()->setPitchMod(1.0);
+    AudioManager::instance()->setDesiredMusic(QStringLiteral("music1"));
     if (mDynamicBg) mDynamicBg->setMood(DynamicBackgroundItem::Mood::BlindSelect);
     setContextPage(0);
     setPlayPhaseVisible(false);
@@ -4677,6 +5275,24 @@ void MainWindow::onBlindSelectEntered()
 
 void MainWindow::onBlindStarted()
 {
+    AudioManager::instance()->setPitchMod(1.0);
+    AudioManager::instance()->setDesiredMusic(
+        mGameState->blindType() == BlindType::Boss ? QStringLiteral("music5")
+                                                   : QStringLiteral("music1"));
+    AudioManager::instance()->play(QStringLiteral("chips1"), originalRandomPitch(0.55, 0.1), 0.42);
+    AudioManager::instance()->play(QStringLiteral("gold_seal"), originalRandomPitch(1.85, 0.1), 0.26);
+    if (mGameState->blindType() == BlindType::Boss && mGameState->hasJokerType(JokerType::Chicot)) {
+        AudioManager::instance()->play(QStringLiteral("timpani"), 1.0, 1.0);
+        playOriginalStatusGenericSound(this);
+        playOriginalBlindWiggleSound(this);
+    }
+    if (mGameState->blindType() == BlindType::Boss
+        && mGameState->bossEffect() == BossEffect::AmberAcorn
+        && mGameState->jokers().size() > 1) {
+        playSoundLater(this, 200, QStringLiteral("cardSlide1"), 0.85, 1.0);
+        playSoundLater(this, 350, QStringLiteral("cardSlide1"), 1.15, 1.0);
+        playSoundLater(this, 500, QStringLiteral("cardSlide1"), 1.0, 1.0);
+    }
     // Boss 盲注切到专属红底；其余沿用默认绿底。
     if (mDynamicBg) setBackgroundMoodForPhase();
     clearFloatingScores();
@@ -4757,6 +5373,7 @@ void MainWindow::onNextBlindClicked()
     // 回合胜利时只展示结算窗口，不提前修改金币数字。
     if (mRoundEndOverlay && mRoundEndOverlay->isVisible()) {
         mGameState->claimRoundPayout();
+        AudioManager::instance()->play(QStringLiteral("coin7"), 1.0, 1.0);
         refreshGold();
     }
 
@@ -4775,6 +5392,7 @@ void MainWindow::onNextBlindClicked()
 
 void MainWindow::onRoundWon(int blindReward, int handBonus, int interest)
 {
+    AudioManager::instance()->play(QStringLiteral("cardFan2"), 1.0, 1.0);
     refreshGold();
 
     int chipRow = 0;
@@ -4821,7 +5439,23 @@ void MainWindow::onRoundWon(int blindReward, int handBonus, int interest)
 
 void MainWindow::onPackBuyRequested(int slot)
 {
-    if (!mGameState->buyPack(slot, mPendingPack)) return;
+    const auto boosterOffers = mGameState->shop().boosterOffers();
+    const int packCost = (slot >= 0 && slot < boosterOffers.size()) ? boosterOffers[slot].cost : 0;
+    if (!mGameState->buyPack(slot, mPendingPack)) {
+        AudioManager::instance()->play(QStringLiteral("cancel"), 1.0, 0.65);
+        return;
+    }
+    AudioManager::instance()->setPitchMod(1.0);
+    AudioManager::instance()->setDesiredMusic(musicTrackForPack(mPendingPack.kind));
+    if (packCost != 0)
+        AudioManager::instance()->play(QStringLiteral("coin1"), 1.0, 1.0);
+    QTimer::singleShot(400, this, []() {
+        AudioManager::instance()->play(QStringLiteral("explosion_buildup1"), 1.0, 1.0);
+    });
+    QTimer::singleShot(1570, this, []() {
+        AudioManager::instance()->play(QStringLiteral("explosion_release1"), 1.0, 1.0);
+    });
+    playOriginalMaterializeSound(this, 1700);
 
     if (mShopWidget) {
         auto *anim = new QPropertyAnimation(mShopWidget, "pos", this);
@@ -4879,6 +5513,8 @@ void MainWindow::resetTransientOverlaysForNewRun()
     mScoringInProgress = false;
     mEndRoundAnimationDelay = 260;
     resetScoreFlame();
+    AudioManager::instance()->setPitchMod(1.0);
+    AudioManager::instance()->setDesiredMusic(QStringLiteral("music1"));
     if (mDynamicBg) mDynamicBg->setMood(DynamicBackgroundItem::Mood::BlindSelect);
 }
 
@@ -4966,16 +5602,17 @@ void MainWindow::onSkipBlind(int /*idx*/)
     TagType gained = mGameState->lastSkippedTag();
     TagData td = tagData(gained);
     addObtainedTag(gained, td.spritePos.x(), td.spritePos.y());
+    AudioManager::instance()->play(QStringLiteral("generic1"), 1.0, 1.0);
     refreshGold();
     refreshConsumableSlots();
     refreshJokerSlots();
 
     switch (gained) {
-    case TagType::Standard: openImmediateTagPack(PackKind::Standard); break;
-    case TagType::Charm:    openImmediateTagPack(PackKind::Arcana); break;
-    case TagType::Meteor:   openImmediateTagPack(PackKind::Celestial); break;
-    case TagType::Buffoon:  openImmediateTagPack(PackKind::Buffoon); break;
-    case TagType::Ethereal: openImmediateTagPack(PackKind::Spectral); break;
+    case TagType::Standard: playOriginalTagYepSound(this, 700); openImmediateTagPack(PackKind::Standard); break;
+    case TagType::Charm:    playOriginalTagYepSound(this, 700); openImmediateTagPack(PackKind::Arcana); break;
+    case TagType::Meteor:   playOriginalTagYepSound(this, 700); openImmediateTagPack(PackKind::Celestial); break;
+    case TagType::Buffoon:  playOriginalTagYepSound(this, 700); openImmediateTagPack(PackKind::Buffoon); break;
+    case TagType::Ethereal: playOriginalTagYepSound(this, 700); openImmediateTagPack(PackKind::Spectral); break;
     default: break;
     }
 }
@@ -5109,6 +5746,13 @@ void MainWindow::resetScoreFlame()
     mMultFlameTarget = 0.0;
     mChipFlameReal = 0.0;
     mMultFlameReal = 0.0;
+    mAudioChipFlameReal = 0.0;
+    mAudioMultFlameReal = 0.0;
+    mAudioChipFlameVelocity = 0.0;
+    mAudioMultFlameVelocity = 0.0;
+    mAudioChipFlameChange = 0.0;
+    mAudioMultFlameChange = 0.0;
+    AudioManager::instance()->setScoreAmbient(0.0, 0.0, 0.0, 0.0, 0.0);
     if (mChipFlame) { mChipFlame->hide(); mChipFlame->update(); }
     if (mMultFlame) { mMultFlame->hide(); mMultFlame->update(); }
     const QString chipBase = "background:#009dff; color:white; border-radius:8px; padding:4px 8px;";
@@ -5184,6 +5828,15 @@ void MainWindow::animateScoreTotalThenFinalize(double gained, int /*delayAfterEv
     double before = mGameState->score();
     double after = before + gained;
     if (!std::isfinite(after)) after = std::numeric_limits<double>::infinity();
+
+    scheduleGame(400, []() {
+        AudioManager::instance()->play(QStringLiteral("button"), 0.9, 0.6);
+    });
+    if (gained > 0 || std::isinf(gained)) {
+        scheduleGame(1200, []() {
+            AudioManager::instance()->play(QStringLiteral("chips2"), 1.0, 1.0);
+        });
+    }
 
     auto *anim = new QVariantAnimation(this);
     mScoreCountAnim = anim;   // 跟踪它，打开菜单时可暂停/恢复
@@ -5457,6 +6110,21 @@ void MainWindow::playHandLevelUpAnimation(HandType t, int prevLevel, int newLeve
     const int tBeatLevel = 660;
     const int tEnd       = 1180;
 
+    AudioManager::instance()->play(QStringLiteral("button"), 0.8, 0.7);
+    scheduleGame(200, [this, token]() {
+        if (token != mHandLevelAnimToken) return;
+        AudioManager::instance()->play(QStringLiteral("tarot1"), 1.0, 1.0);
+    });
+    scheduleGame(1100, [this, token]() {
+        if (token != mHandLevelAnimToken) return;
+        AudioManager::instance()->play(QStringLiteral("tarot1"), 1.0, 1.0);
+    });
+    scheduleGame(2000, [this, token]() {
+        if (token != mHandLevelAnimToken) return;
+        AudioManager::instance()->play(QStringLiteral("tarot1"), 1.0, 1.0);
+        AudioManager::instance()->play(QStringLiteral("button"), 0.9, 0.7);
+    });
+
     const int deltaMult  = newMult  - prevMult;
     const int deltaChips = newChips - prevChips;
 
@@ -5514,6 +6182,7 @@ void MainWindow::playHandLevelUpAnimation(HandType t, int prevLevel, int newLeve
     // 结束：解除冻结、还原成当前选牌的 preview（或清空）。
     scheduleGame(tEnd, [this, token]() {
         if (token != mHandLevelAnimToken) return;
+        AudioManager::instance()->play(QStringLiteral("button"), 1.1, 0.7);
         mHandLevelAnimating = false;
         updateHandPreview();
     });
@@ -5539,6 +6208,21 @@ void MainWindow::playAllHandsLevelUpAnimation()
     const int tBeatChips = 360;
     const int tBeatLevel = 660;
     const int tEnd       = 1180;
+
+    AudioManager::instance()->play(QStringLiteral("button"), 0.8, 0.7);
+    scheduleGame(200, [this, token]() {
+        if (token != mHandLevelAnimToken) return;
+        AudioManager::instance()->play(QStringLiteral("tarot1"), 1.0, 1.0);
+    });
+    scheduleGame(1100, [this, token]() {
+        if (token != mHandLevelAnimToken) return;
+        AudioManager::instance()->play(QStringLiteral("tarot1"), 1.0, 1.0);
+    });
+    scheduleGame(2000, [this, token]() {
+        if (token != mHandLevelAnimToken) return;
+        AudioManager::instance()->play(QStringLiteral("tarot1"), 1.0, 1.0);
+        AudioManager::instance()->play(QStringLiteral("button"), 1.1, 0.7);
+    });
 
     scheduleGame(tBeatMult, [this, token]() {
         if (token != mHandLevelAnimToken) return;
@@ -5704,7 +6388,7 @@ void MainWindow::updateHandPreview()
     setLabelScaledText(mLblMult,  formatScoreNumber(r.mult),  uiPx(42));
 }
 
-void MainWindow::playScoreEvent(const ScoreEvent &ev)
+void MainWindow::playScoreEvent(const ScoreEvent &ev, double percent)
 {
     CardItem *sourceCard = nullptr;
     JokerItem *sourceJoker = nullptr;
@@ -5725,12 +6409,41 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev)
     QColor color;
     QString text;
     bool isXMult = false;
-    bool isHeldCardEvent = (ev.sourceHandIdx >= 0 && ev.sourceCardIdx < 0);
+    auto randomStatusPercent = []() {
+        return 0.9 + QRandomGenerator::global()->generateDouble() * 0.2;
+    };
+    if (percent < 0.0) {
+        if (ev.kind == ScoreEventKind::RedSealRetrigger
+            || ev.kind == ScoreEventKind::JokerRetrigger
+            || ev.kind == ScoreEventKind::BlueSealPlanet) {
+            percent = randomStatusPercent();
+        } else if (ev.sourceHandIdx >= 0 && !mHandCards.isEmpty()) {
+            percent = (ev.sourceHandIdx + 1.0 - 0.999) / qMax(1.0, double(mHandCards.size()) - 0.998);
+        } else {
+            percent = randomStatusPercent();
+        }
+    }
+    const double statusPitch = 0.8 + percent * 0.2;
 
     switch (ev.kind) {
     case ScoreEventKind::ScoringCardChip:
+        AudioManager::instance()->play(QStringLiteral("chips1"), statusPitch, 1.0);
+        color = QColor("#009dff");
+        text = QString("+%1").arg(formatScoreNumber(ev.intValue));
+        mDisplayedChips += ev.intValue;
+        setLabelScaledText(mLblChips, formatScoreNumber(mDisplayedChips), uiPx(42));
+        break;
+
     case ScoreEventKind::EditionChip:
+        AudioManager::instance()->play(QStringLiteral("foil2"), statusPitch, 0.3);
+        color = QColor("#009dff");
+        text = QString("+%1").arg(formatScoreNumber(ev.intValue));
+        mDisplayedChips += ev.intValue;
+        setLabelScaledText(mLblChips, formatScoreNumber(mDisplayedChips), uiPx(42));
+        break;
+
     case ScoreEventKind::JokerChip:
+        AudioManager::instance()->play(QStringLiteral("generic1"), statusPitch, 1.0);
         color = QColor("#009dff");
         text = QString("+%1").arg(formatScoreNumber(ev.intValue));
         mDisplayedChips += ev.intValue;
@@ -5738,8 +6451,23 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev)
         break;
 
     case ScoreEventKind::EnhancementMult:
+        AudioManager::instance()->play(QStringLiteral("multhit1"), statusPitch, 1.0);
+        color = QColor("#fe5f55");
+        text = QString("+%1").arg(formatScoreNumber(ev.intValue));
+        mDisplayedMult += ev.intValue;
+        setLabelScaledText(mLblMult, formatScoreNumber(mDisplayedMult), uiPx(42));
+        break;
+
     case ScoreEventKind::EditionMult:
+        AudioManager::instance()->play(QStringLiteral("foil2"), statusPitch, 0.3);
+        color = QColor("#fe5f55");
+        text = QString("+%1").arg(formatScoreNumber(ev.intValue));
+        mDisplayedMult += ev.intValue;
+        setLabelScaledText(mLblMult, formatScoreNumber(mDisplayedMult), uiPx(42));
+        break;
+
     case ScoreEventKind::JokerMult:
+        AudioManager::instance()->play(QStringLiteral("multhit1"), statusPitch, 1.0);
         color = QColor("#fe5f55");
         text = QString("+%1").arg(formatScoreNumber(ev.intValue));
         mDisplayedMult += ev.intValue;
@@ -5747,9 +6475,9 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev)
         break;
 
     case ScoreEventKind::EnhancementXMult:
-    case ScoreEventKind::EditionXMult:
     case ScoreEventKind::SteelXMult:
     case ScoreEventKind::JokerXMult:
+        AudioManager::instance()->play(QStringLiteral("multhit2"), statusPitch, 0.7);
         color = QColor("#fe5f55");
         text = QString("×%1").arg(QString::number(ev.xmultValue, 'g', 3));
         isXMult = true;
@@ -5758,24 +6486,46 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev)
         setLabelScaledText(mLblMult, formatScoreNumber(mDisplayedMult), uiPx(42));
         break;
 
+    case ScoreEventKind::EditionXMult:
+        AudioManager::instance()->play(QStringLiteral("foil2"), statusPitch, 0.3);
+        color = QColor("#fe5f55");
+        text = QString("x%1").arg(QString::number(ev.xmultValue, 'g', 3));
+        text = QString("脳%1").arg(QString::number(ev.xmultValue, 'g', 3));
+        isXMult = true;
+        mDisplayedMult = std::max(1.0, mDisplayedMult * ev.xmultValue);
+        if (!std::isfinite(mDisplayedMult)) mDisplayedMult = std::numeric_limits<double>::infinity();
+        setLabelScaledText(mLblMult, formatScoreNumber(mDisplayedMult), uiPx(42));
+        break;
+
     case ScoreEventKind::DollarGain:
+        AudioManager::instance()->play(QStringLiteral("coin3"), statusPitch, 1.0);
         color = QColor("#f3b958");
         text = QString("+$%1").arg(formatScoreNumber(ev.intValue));
         refreshGold();
         break;
 
     case ScoreEventKind::RedSealRetrigger:
+    case ScoreEventKind::JokerRetrigger:
+        AudioManager::instance()->play(QStringLiteral("generic1"), statusPitch, 1.0);
         color = QColor("#ff5f55");
         text = QStringLiteral("再触发");
         break;
 
     case ScoreEventKind::GlassShatter:
+        AudioManager::instance()->playRandom({
+            QStringLiteral("glass1"), QStringLiteral("glass2"), QStringLiteral("glass3"),
+            QStringLiteral("glass4"), QStringLiteral("glass5"), QStringLiteral("glass6")
+        }, 0.9 + QRandomGenerator::global()->generateDouble() * 0.2, 0.5);
+        AudioManager::instance()->play(QStringLiteral("generic1"),
+                                       0.9 + QRandomGenerator::global()->generateDouble() * 0.2,
+                                       0.5);
         color = QColor("#9ee7ff");
         text = QStringLiteral("碎裂");
         if (ev.sourceCardIdx >= 0) mShatteredPlayedIndices.insert(ev.sourceCardIdx);
         break;
 
     case ScoreEventKind::BlueSealPlanet:
+        AudioManager::instance()->play(QStringLiteral("generic1"), statusPitch, 1.0);
         color = QColor("#5aa7ff");
         text = QStringLiteral("+星球牌");
         refreshConsumableSlots();

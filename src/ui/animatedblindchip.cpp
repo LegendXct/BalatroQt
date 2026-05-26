@@ -2,8 +2,11 @@
 #include <QTimer>
 #include <QShowEvent>
 #include <QHideEvent>
+#include <QEnterEvent>
+#include <QRandomGenerator>
 #include <QVariantAnimation>
 #include <QPointer>
+#include "../audio/audiomanager.h"
 #include "../utils/shadereffects.h"
 
 QPixmap *AnimatedBlindChip::sSheet = nullptr;
@@ -17,6 +20,7 @@ AnimatedBlindChip::AnimatedBlindChip(QWidget *parent)
     setStyleSheet("background:transparent;");
     setAttribute(Qt::WA_TranslucentBackground, true);
     setScaledContents(false);
+    setMouseTracking(true);
 
     mTimer = new QTimer(this);
     mTimer->setInterval(mIntervalMs);
@@ -85,6 +89,11 @@ void AnimatedBlindChip::startDissolve(int durationMs)
     if (mDissolving) return;
     if (!sSheet || sSheet->isNull()) return;
     mDissolving = true;
+    for (int i = 1; i <= 3; ++i) {
+        QTimer::singleShot(156 * i, this, [i]() {
+            AudioManager::instance()->play(QStringLiteral("cancel"), 0.8 - 0.05 * i, 1.7);
+        });
+    }
     // 暂停帧动画，固定在当前帧上做溶解。
     if (mTimer && mTimer->isActive()) mTimer->stop();
 
@@ -122,6 +131,14 @@ void AnimatedBlindChip::startDissolve(int durationMs)
         guard->clear();
     });
     anim->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+void AnimatedBlindChip::enterEvent(QEnterEvent *e)
+{
+    AudioManager::instance()->play(QStringLiteral("chips1"),
+                                   0.55 + QRandomGenerator::global()->generateDouble() * 0.1,
+                                   0.12);
+    QLabel::enterEvent(e);
 }
 
 void AnimatedBlindChip::showEvent(QShowEvent *e)
