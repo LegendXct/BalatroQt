@@ -127,17 +127,20 @@ DynamicBackgroundItem::DynamicBackgroundItem(QWidget *parent)
 
     mClock.start();
     mLastTick = 0.0;
-    mTimer.setTimerType(Qt::PreciseTimer);
+    // 背景着色器原本以 60 FPS (16 ms) 更新，在很多机器上是全程卡顿的主因之一：
+    // 它会触发整个 QGraphicsView 的视口重绘，叠加上小丑牌/计分火焰的 shader 更新就抢满主线程。
+    // 降到 ~30 FPS 视觉差异极小，CPU/GPU 占用约减半。
+    mTimer.setTimerType(Qt::CoarseTimer);
     connect(&mTimer, &QTimer::timeout, this, [this]() {
         const double now = mClock.elapsed() / 1000.0;
-        const double dt = std::max(0.001, std::min(0.050, now - mLastTick));
+        const double dt = std::max(0.001, std::min(0.080, now - mLastTick));
         mLastTick = now;
         mTime = now;
         mSpinTime += dt * mCurrentSpin;
         easeVisuals(dt);
         update();
     });
-    mTimer.start(16);
+    mTimer.start(33);
 }
 
 DynamicBackgroundItem::~DynamicBackgroundItem()

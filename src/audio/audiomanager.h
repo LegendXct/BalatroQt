@@ -35,6 +35,14 @@ public:
     void play(const QString &soundCode, double pitch = 1.0, double volume = 1.0);
     void playRandom(const QStringList &soundCodes, double pitch = 1.0, double volume = 1.0);
 
+    // 设置界面用：实时调整音量。范围 0..1，立即生效。
+    void setMasterVolume(double v);
+    void setMusicVolume(double v);
+    void setSfxVolume(double v);
+    double masterVolume() const { return mMasterVolume; }
+    double musicVolume() const { return mMusicVolume; }
+    double sfxVolume() const { return mSfxVolume; }
+
 protected:
     bool eventFilter(QObject *watched, QEvent *event) override;
 

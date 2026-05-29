@@ -224,12 +224,14 @@ private:
     Deck mDeck;
     QVector<CardData> mHand;
     QVector<Joker> mJokers;
-    int mGold;
-    double mScore;
-    double mTargetScore;
-    int mHandsLeft;
-    int mDiscardLeft;
-    int mAnte;
+    // Default initializers prevent uninitialized reads before startBlind().
+    // 没有它们时，"开始新的一局" 后 refreshCounters() 会读到栈/堆垃圾值（曾出现巨大负数）。
+    int mGold = Constants::INITIAL_GOLD;
+    double mScore = 0.0;
+    double mTargetScore = 0.0;
+    int mHandsLeft = Constants::INITIAL_HANDS;
+    int mDiscardLeft = Constants::INITIAL_DISCARDS;
+    int mAnte = 1;
     BlindType mBlindType;
     GamePhase mPhase;
     HandResult mLastResult;

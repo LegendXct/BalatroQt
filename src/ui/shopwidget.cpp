@@ -1360,6 +1360,21 @@ void ShopWidget::refresh()
     int rcost = mGS->shop().rerollCost();
     mBtnReroll->setText(QString("重抽\n$%1").arg(rcost));
     mBtnReroll->setEnabled(mGS->gold() >= rcost);
+
+    // 槽位变化（如 Overstock 优惠券新增槽位）后，外层 ou.card 会被 QHBoxLayout
+    // 重新分配位置，但内部 cardBtn 不会收到 Move 事件，eventFilter 也就不会触发
+    // syncPriceLblForCardBtn——结果价格标签停留在旧位置，直到玩家 hover 才纠正。
+    // 这里在 layout 应用完毕后（singleShot(0)）主动把所有可见价格标签重新贴到位。
+    QPointer<ShopWidget> guard(this);
+    QTimer::singleShot(0, this, [guard]() {
+        if (!guard) return;
+        auto syncAll = [g = guard.data()](const QVector<OfferUi> &vec) {
+            for (const auto &ou : vec) if (ou.cardBtn) g->syncPriceLblForCardBtn(ou.cardBtn);
+        };
+        syncAll(guard->mShopUi);
+        syncAll(guard->mVoucherUi);
+        syncAll(guard->mBoosterUi);
+    });
 }
 
 QPixmap ShopWidget::offerPixmap(const ShopOffer &o) const

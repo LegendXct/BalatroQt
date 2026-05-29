@@ -306,6 +306,9 @@ private:
     QPushButton *mConsumableSellButton = nullptr;
     void showConsumableAction(int idx);
     void hideConsumableAction();
+    // 选中消耗牌但当前手牌/小丑选中数量不符合需求时禁用"使用"按钮，
+    // 避免玩家点击后只听到 cancel 音而看不到任何效果。
+    void refreshConsumableUseButtonState();
 
     QGraphicsProxyWidget *mGameOverProxy = nullptr;
     QWidget *mGameOverPanel = nullptr;
@@ -412,6 +415,10 @@ private:
     void showOptionsOverlay();
     void hideOptionsOverlay();
     void startNewRunFromOptions();
+    // 设置界面：用 in-scene overlay 复用现有覆盖层模式（避免在 QOpenGLWidget 上弹原生 QDialog）。
+    void showSettingsOverlay();
+    void hideSettingsOverlay();
+    QPointer<QWidget> mSettingsOverlay;
 
     void hidePlayControlsForScoring();
     void showPlayControlsAfterScoring();

@@ -23,6 +23,8 @@
 #include <QPointer>
 #include <QVariantAnimation>
 #include <QGraphicsDropShadowEffect>
+#include <QSlider>
+#include <QCheckBox>
 #include <QColor>
 #include <QProgressBar>
 #include <QCoreApplication>
@@ -1535,52 +1537,277 @@ void MainWindow::setupLeftPanel() {
         pages->addWidget(handPage);
 
         QWidget *blindPage = makeDarkPage(pages);
-        auto *blindH = new QHBoxLayout(blindPage); blindH->setContentsMargins(50, 22, 50, 22); blindH->setSpacing(16);
+        auto *blindH = new QHBoxLayout(blindPage); blindH->setContentsMargins(36, 22, 36, 22); blindH->setSpacing(14);
         BossInfo bi = mGameState->currentBossInfo();
         BossInfo nextBi = bossInfo(mGameState->pendingBossEffect());
-        blindH->addWidget(makeInfoTile(blindPage, "小盲注", QString("至少得分\n%1\n奖励：$$$+").arg(formatScoreNumber(std::max(1.0, mGameState->targetScore()*2.0/3.0))), "#009dff"), 1);
-        blindH->addWidget(makeInfoTile(blindPage, "当前盲注", QString("至少得分\n%1\n奖励：$$$$+").arg(formatScoreNumber(mGameState->targetScore())), "#fda200"), 1);
-        blindH->addWidget(makeInfoTile(blindPage, nextBi.name.isEmpty()?bi.name:nextBi.name,
-                                       (nextBi.description.isEmpty()?bi.description:nextBi.description) + QString("\n\n至少得分\n%1\n奖励：$$$$$+").arg(formatScoreNumber(mGameState->targetScore()*4/3)), "#fe5f55"), 1);
+        // 原版同 ante 三盲注：小盲 ×1、大盲 ×1.5、Boss ×2 的目标分；并明确奖励 $3/$4/$5。
+        const int currentIdx = mGameState->blindIdx();   // 0=小、1=大、2=Boss
+        // 已经在 Boss 战时，targetScore 已是当前 ×2；否则 ×3 推算出 Boss 目标。
+        const double baseBlind = (currentIdx >= 2) ? (mGameState->targetScore() / 2.0)
+                                                   : ((currentIdx == 1) ? (mGameState->targetScore() / 1.5)
+                                                                        : double(mGameState->targetScore()));
+        const double smallTarget = std::max(1.0, baseBlind);
+        const double bigTarget   = smallTarget * 1.5;
+        const double bossTarget  = smallTarget * 2.0;
+        QString bossName = nextBi.name.isEmpty() ? bi.name : nextBi.name;
+        QString bossDesc = nextBi.description.isEmpty() ? bi.description : nextBi.description;
+        if (bossName.isEmpty()) { bossName = "Boss 盲注"; bossDesc = "未知效果"; }
+
+        auto makeBlindCard = [&](const QString &title, const QString &target,
+                                 const QString &reward, const QString &accent,
+                                 const QString &subtitle = QString(),
+                                 bool active = false) {
+            QWidget *tile = new QWidget(blindPage);
+            tile->setAttribute(Qt::WA_StyledBackground, true);
+            tile->setStyleSheet(QString(
+                "background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+                " stop:0 rgba(20,30,33,235), stop:1 rgba(11,19,22,235));"
+                " border:3px solid %1; border-radius:14px;"
+            ).arg(accent));
+            auto *v = new QVBoxLayout(tile); v->setContentsMargins(10, 12, 10, 12); v->setSpacing(6);
+
+            auto *header = new QLabel(title, tile);
+            QFont hf = mCNFont; hf.setPixelSize(uiPx(20)); hf.setBold(true);
+            header->setFont(hf); header->setAlignment(Qt::AlignCenter);
+            header->setStyleSheet(QString("color:%1; background:transparent; border:none;").arg(accent));
+            v->addWidget(header);
+
+            if (!subtitle.isEmpty()) {
+                auto *sub = new QLabel(subtitle, tile);
+                QFont sf = mCNFont; sf.setPixelSize(uiPx(13)); sf.setBold(true);
+                sub->setFont(sf); sub->setAlignment(Qt::AlignCenter); sub->setWordWrap(true);
+                sub->setStyleSheet("color:#cfd9da; background:transparent; border:none;");
+                v->addWidget(sub);
+            }
+
+            auto *label = new QLabel("过关分数", tile);
+            QFont lf = mCNFont; lf.setPixelSize(uiPx(13));
+            label->setFont(lf); label->setAlignment(Qt::AlignCenter);
+            label->setStyleSheet("color:#9bb6bd; background:transparent; border:none;");
+            v->addWidget(label);
+
+            auto *score = new QLabel(target, tile);
+            QFont scf = mCNFont; scf.setPixelSize(uiPx(28)); scf.setBold(true);
+            score->setFont(scf); score->setAlignment(Qt::AlignCenter);
+            score->setStyleSheet("color:#fe5f55; background:transparent; border:none;");
+            v->addWidget(score);
+            v->addStretch(1);
+
+            auto *rwd = new QLabel("奖励", tile);
+            rwd->setFont(lf); rwd->setAlignment(Qt::AlignCenter);
+            rwd->setStyleSheet("color:#9bb6bd; background:transparent; border:none;");
+            v->addWidget(rwd);
+
+            auto *coins = new QLabel(reward, tile);
+            QFont cf = mCNFont; cf.setPixelSize(uiPx(22)); cf.setBold(true);
+            coins->setFont(cf); coins->setAlignment(Qt::AlignCenter);
+            coins->setStyleSheet("color:#eac058; background:transparent; border:none;");
+            v->addWidget(coins);
+
+            if (active) {
+                auto *now = new QLabel("正在挑战", tile);
+                QFont nf = mCNFont; nf.setPixelSize(uiPx(13)); nf.setBold(true);
+                now->setFont(nf); now->setAlignment(Qt::AlignCenter);
+                now->setStyleSheet(QString(
+                    "color:white; background:%1; border-radius:8px;"
+                    " padding:3px 8px;"
+                ).arg(accent));
+                v->addWidget(now);
+            }
+            return tile;
+        };
+
+        blindH->addWidget(makeBlindCard("小盲注",
+                                        formatScoreNumber(smallTarget),
+                                        "$$$",
+                                        "#4bc292",
+                                        QString(),
+                                        currentIdx == 0), 1);
+        blindH->addWidget(makeBlindCard("大盲注",
+                                        formatScoreNumber(bigTarget),
+                                        "$$$$",
+                                        "#fda200",
+                                        QString(),
+                                        currentIdx == 1), 1);
+        blindH->addWidget(makeBlindCard(bossName,
+                                        formatScoreNumber(bossTarget),
+                                        "$$$$$",
+                                        "#fe5f55",
+                                        bossDesc,
+                                        currentIdx == 2), 1);
         pages->addWidget(blindPage);
 
         QWidget *voucherPage = makeDarkPage(pages);
-        auto *voucherV = new QVBoxLayout(voucherPage); voucherV->setContentsMargins(70, 34, 70, 34); voucherV->setSpacing(18); voucherV->setAlignment(Qt::AlignCenter);
-        QLabel *voucherTitle = new QLabel("本赛局兑换的优惠券", voucherPage); QFont vtf=mCNFont; vtf.setPixelSize(uiPx(25)); vtf.setBold(true); voucherTitle->setFont(vtf); voucherTitle->setAlignment(Qt::AlignCenter); voucherV->addWidget(voucherTitle);
-        if (mGameState->redeemedVouchers().isEmpty()) {
-            QLabel *empty = new QLabel("本赛局尚未兑换任何优惠券", voucherPage); QFont ef=mCNFont; ef.setPixelSize(uiPx(22)); ef.setBold(true); empty->setFont(ef); empty->setAlignment(Qt::AlignCenter); voucherV->addWidget(empty, 1);
+        auto *voucherV = new QVBoxLayout(voucherPage);
+        voucherV->setContentsMargins(48, 22, 48, 22);
+        voucherV->setSpacing(14);
+        voucherV->setAlignment(Qt::AlignTop);
+
+        const auto redeemed = mGameState->redeemedVouchers();
+        QLabel *voucherTitle = new QLabel(
+            QString("本赛局兑换的优惠券　×%1").arg(redeemed.size()),
+            voucherPage);
+        QFont vtf=mCNFont; vtf.setPixelSize(uiPx(22)); vtf.setBold(true);
+        voucherTitle->setFont(vtf); voucherTitle->setAlignment(Qt::AlignCenter);
+        voucherTitle->setStyleSheet("color:#fd682b; background:transparent; border:none;");
+        voucherV->addWidget(voucherTitle);
+
+        if (redeemed.isEmpty()) {
+            QLabel *empty = new QLabel("本赛局尚未兑换任何优惠券\n进入商店购买可永久增益", voucherPage);
+            QFont ef=mCNFont; ef.setPixelSize(uiPx(18)); ef.setBold(true);
+            empty->setFont(ef); empty->setAlignment(Qt::AlignCenter); empty->setWordWrap(true);
+            empty->setStyleSheet("color:#9bb6bd; background:transparent; border:none;"
+                                 " padding:30px 0px;");
+            voucherV->addWidget(empty, 1);
         } else {
-            QWidget *gridW = new QWidget(voucherPage); auto *grid = new QGridLayout(gridW); grid->setSpacing(12); grid->setContentsMargins(0,0,0,0);
+            QWidget *gridW = new QWidget(voucherPage);
+            auto *grid = new QGridLayout(gridW);
+            grid->setSpacing(12);
+            grid->setContentsMargins(0,0,0,0);
             int vi = 0;
             QPixmap voucherSheet(":/textures/images/Vouchers.png");
-            for (VoucherType v : mGameState->redeemedVouchers()) {
+            for (VoucherType v : redeemed) {
                 const VoucherData vd = voucherData(v);
-                QWidget *card = new QWidget(gridW); card->setFixedSize(205, 92); card->setAttribute(Qt::WA_StyledBackground,true);
-                card->setStyleSheet("background:rgba(11,20,22,215); border:2px solid #51696d; border-radius:10px;");
-                auto *h = new QHBoxLayout(card); h->setContentsMargins(8,6,8,6); h->setSpacing(8);
-                QLabel *img = new QLabel(card); img->setFixedSize(54,72); img->setAlignment(Qt::AlignCenter);
+                QWidget *card = new QWidget(gridW);
+                card->setFixedSize(dp(238), dp(108));
+                card->setAttribute(Qt::WA_StyledBackground,true);
+                // 与盲注卡保持同款渐变 + 优惠券品牌色边框（#fd682b）。
+                card->setStyleSheet(
+                    "background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+                    " stop:0 rgba(20,30,33,235), stop:1 rgba(11,19,22,235));"
+                    " border:2px solid #fd682b; border-radius:12px;"
+                );
+                auto *h = new QHBoxLayout(card); h->setContentsMargins(10,8,10,8); h->setSpacing(10);
+                QLabel *img = new QLabel(card); img->setFixedSize(dp(64), dp(84));
+                img->setAlignment(Qt::AlignCenter);
+                img->setStyleSheet("background:transparent; border:none;");
                 if (!voucherSheet.isNull()) {
                     QPoint c = vd.spritePos;
-                    QPixmap pm = voucherSheet.copy(c.x()*ConsumableItem::SRC_W, c.y()*ConsumableItem::SRC_H, ConsumableItem::SRC_W, ConsumableItem::SRC_H);
+                    QPixmap pm = voucherSheet.copy(c.x()*ConsumableItem::SRC_W, c.y()*ConsumableItem::SRC_H,
+                                                   ConsumableItem::SRC_W, ConsumableItem::SRC_H);
                     img->setPixmap(pm.scaled(img->size(), Qt::KeepAspectRatio, Qt::SmoothTransformation));
                 }
                 h->addWidget(img);
-                QLabel *txt = new QLabel(vd.name + "\n" + vd.description, card); QFont txf=mCNFont; txf.setPixelSize(uiPx(13)); txf.setBold(true); txt->setFont(txf); txt->setWordWrap(true); txt->setStyleSheet("color:white;"); h->addWidget(txt,1);
+
+                QWidget *txtBox = new QWidget(card);
+                txtBox->setStyleSheet("background:transparent; border:none;");
+                auto *tv = new QVBoxLayout(txtBox);
+                tv->setContentsMargins(0,0,0,0); tv->setSpacing(2);
+                QLabel *name = new QLabel(vd.name, txtBox);
+                QFont nf = mCNFont; nf.setPixelSize(uiPx(15)); nf.setBold(true);
+                name->setFont(nf);
+                name->setStyleSheet("color:#fda200; background:transparent; border:none;");
+                tv->addWidget(name);
+                QLabel *desc = new QLabel(vd.description, txtBox);
+                QFont df = mCNFont; df.setPixelSize(uiPx(12)); df.setBold(true);
+                desc->setFont(df); desc->setWordWrap(true);
+                desc->setStyleSheet("color:#eaffff; background:transparent; border:none;");
+                tv->addWidget(desc, 1);
+                h->addWidget(txtBox, 1);
+
                 grid->addWidget(card, vi/2, vi%2); ++vi;
             }
-            voucherV->addWidget(gridW, 1, Qt::AlignCenter);
+            voucherV->addWidget(gridW, 1, Qt::AlignTop | Qt::AlignHCenter);
         }
         pages->addWidget(voucherPage);
 
         QWidget *stakePage = makeDarkPage(pages);
-        auto *stakeV = new QVBoxLayout(stakePage); stakeV->setContentsMargins(110, 42, 110, 42); stakeV->setSpacing(14);
-        stakeV->addWidget(makeInfoTile(stakePage, "蓝注", "弃牌次数 -1", "#009dff"));
-        stakeV->addWidget(makeInfoTile(stakePage, "同样起效", "商店可能会出现永恒小丑牌\n底注提升时，过关需求分数的增速更快\n小盲注没有奖励金", "#4bc292"));
-        stakeV->addWidget(makeInfoTile(stakePage, "当前赌注", QString("底注 %1/8　金钱 $%2\n小丑 %3/%4　消耗牌 %5/%6\n牌组 %7/%8")
-                                                                      .arg(mGameState->ante()).arg(mGameState->gold())
-                                                                      .arg(mGameState->jokers().size()).arg(mGameState->jokerSlots())
-                                                                      .arg(mGameState->consumables().size()).arg(mGameState->consumableSlots())
-                                                                      .arg(mGameState->deckRemaining()).arg(mGameState->deckTotal()), "#fe5f55"));
+        auto *stakeV = new QVBoxLayout(stakePage);
+        stakeV->setContentsMargins(48, 22, 48, 22);
+        stakeV->setSpacing(14);
+
+        // 顶部：当前赌注名 + 同款描述（与盲注卡牌头部样式呼应）。
+        QWidget *header = new QWidget(stakePage);
+        header->setAttribute(Qt::WA_StyledBackground, true);
+        header->setStyleSheet(
+            "background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+            " stop:0 rgba(20,30,33,235), stop:1 rgba(11,19,22,235));"
+            " border:3px solid #009dff; border-radius:14px;"
+        );
+        auto *hv = new QVBoxLayout(header); hv->setContentsMargins(14, 12, 14, 12); hv->setSpacing(4);
+        QLabel *stakeTitle = new QLabel("蓝注", header);
+        QFont sff=mCNFont; sff.setPixelSize(uiPx(22)); sff.setBold(true);
+        stakeTitle->setFont(sff); stakeTitle->setAlignment(Qt::AlignCenter);
+        stakeTitle->setStyleSheet("color:#009dff; background:transparent; border:none;");
+        hv->addWidget(stakeTitle);
+        QLabel *stakeBody = new QLabel(
+            "弃牌次数 -1\n商店可能会出现永恒小丑牌\n底注提升时过关分数增速更快\n小盲注没有奖励金",
+            header);
+        QFont sbf=mCNFont; sbf.setPixelSize(uiPx(14)); sbf.setBold(true);
+        stakeBody->setFont(sbf); stakeBody->setAlignment(Qt::AlignCenter); stakeBody->setWordWrap(true);
+        stakeBody->setStyleSheet("color:#eaffff; background:transparent; border:none;");
+        hv->addWidget(stakeBody);
+        stakeV->addWidget(header);
+
+        // 下半：当前资源 stat grid——每一项一个小方块，4 列。
+        QWidget *gridWrap = new QWidget(stakePage);
+        gridWrap->setAttribute(Qt::WA_StyledBackground, true);
+        gridWrap->setStyleSheet(
+            "background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+            " stop:0 rgba(20,30,33,235), stop:1 rgba(11,19,22,235));"
+            " border:3px solid #4bc292; border-radius:14px;"
+        );
+        auto *gw = new QVBoxLayout(gridWrap); gw->setContentsMargins(14, 12, 14, 12); gw->setSpacing(8);
+        QLabel *resTitle = new QLabel("当前赛局", gridWrap);
+        QFont rtf=mCNFont; rtf.setPixelSize(uiPx(18)); rtf.setBold(true);
+        resTitle->setFont(rtf); resTitle->setAlignment(Qt::AlignCenter);
+        resTitle->setStyleSheet("color:#4bc292; background:transparent; border:none;");
+        gw->addWidget(resTitle);
+
+        auto *grid = new QGridLayout;
+        grid->setSpacing(10);
+        gw->addLayout(grid);
+
+        auto makeStatCell = [&](const QString &label, const QString &value, const QString &color) {
+            QWidget *cell = new QWidget(gridWrap);
+            cell->setAttribute(Qt::WA_StyledBackground, true);
+            cell->setStyleSheet(
+                "background:rgba(8,16,18,200);"
+                " border:2px solid #1a262a; border-radius:10px;"
+            );
+            auto *cv = new QVBoxLayout(cell); cv->setContentsMargins(8, 8, 8, 8); cv->setSpacing(2);
+            QLabel *lbl = new QLabel(label, cell);
+            QFont lf = mCNFont; lf.setPixelSize(uiPx(12));
+            lbl->setFont(lf); lbl->setAlignment(Qt::AlignCenter);
+            lbl->setStyleSheet("color:#9bb6bd; background:transparent; border:none;");
+            cv->addWidget(lbl);
+            QLabel *val = new QLabel(value, cell);
+            QFont vf = mCNFont; vf.setPixelSize(uiPx(20)); vf.setBold(true);
+            val->setFont(vf); val->setAlignment(Qt::AlignCenter);
+            val->setStyleSheet(QString("color:%1; background:transparent; border:none;").arg(color));
+            cv->addWidget(val);
+            return cell;
+        };
+
+        grid->addWidget(makeStatCell("底注",
+                                     QString("%1/8").arg(mGameState->ante()),
+                                     "#fda200"), 0, 0);
+        grid->addWidget(makeStatCell("金币",
+                                     QString("$%1").arg(mGameState->gold()),
+                                     "#eac058"), 0, 1);
+        grid->addWidget(makeStatCell("小丑",
+                                     QString("%1/%2").arg(mGameState->jokers().size())
+                                                     .arg(mGameState->jokerSlots()),
+                                     "#fe5f55"), 0, 2);
+        grid->addWidget(makeStatCell("消耗牌",
+                                     QString("%1/%2").arg(mGameState->consumables().size())
+                                                     .arg(mGameState->consumableSlots()),
+                                     "#a782d1"), 0, 3);
+        grid->addWidget(makeStatCell("牌堆",
+                                     QString("%1/%2").arg(mGameState->deckRemaining())
+                                                     .arg(mGameState->deckTotal()),
+                                     "#009dff"), 1, 0);
+        grid->addWidget(makeStatCell("出牌",
+                                     QString::number(mGameState->handsLeft()),
+                                     "#23e6ff"), 1, 1);
+        grid->addWidget(makeStatCell("弃牌",
+                                     QString::number(mGameState->discardLeft()),
+                                     "#ff7066"), 1, 2);
+        grid->addWidget(makeStatCell("优惠券",
+                                     QString::number(mGameState->redeemedVouchers().size()),
+                                     "#fd682b"), 1, 3);
+        stakeV->addWidget(gridWrap);
+        stakeV->addStretch(1);
         pages->addWidget(stakePage);
 
         QVector<QPushButton*> tabButtons;
@@ -1820,6 +2047,11 @@ void MainWindow::showOptionsOverlay()
         b->setMinimumHeight(kBtnH);
         if (txt == "开始新的一局") {
             connect(b, &QPushButton::clicked, this, &MainWindow::startNewRunFromOptions);
+        } else if (txt == "设置") {
+            connect(b, &QPushButton::clicked, this, [this]() {
+                hideOptionsOverlay();
+                showSettingsOverlay();
+            });
         } else {
             b->setEnabled(false);
         }
@@ -1877,6 +2109,148 @@ void MainWindow::startNewRunFromOptions()
     if (mDynamicBg) mDynamicBg->update();
     update();
     hideOptionsOverlay();
+}
+
+void MainWindow::showSettingsOverlay()
+{
+    // 复用 options 覆盖层模式（in-scene QWidget）：避免在全屏 + QOpenGLWidget 场景里弹原生 QDialog。
+    QWidget *host = mPlayPage ? mPlayPage : this;
+
+    if (mSettingsOverlay) {
+        mSettingsOverlay->setGeometry(host->rect());
+        mSettingsOverlay->raise();
+        mSettingsOverlay->show();
+        return;
+    }
+
+    auto *overlay = new QWidget(host);
+    overlay->setAttribute(Qt::WA_StyledBackground, true);
+    overlay->setStyleSheet("background:rgba(0,0,0,160);");
+    mSettingsOverlay = overlay;
+
+    auto *root = new QVBoxLayout(overlay);
+    root->setContentsMargins(0, 0, 0, 0);
+    root->setAlignment(Qt::AlignCenter);
+    root->addStretch(1);
+
+    auto *centerRow = new QHBoxLayout;
+    centerRow->setAlignment(Qt::AlignCenter);
+    centerRow->addStretch(1);
+
+    auto *panel = new QWidget(overlay);
+    panel->setAttribute(Qt::WA_StyledBackground, true);
+    panel->setStyleSheet(
+        "background:#374244; border:3px solid #4f6367; border-radius:18px;"
+    );
+    panel->setFixedWidth(dp(520));
+
+    auto *v = new QVBoxLayout(panel);
+    v->setContentsMargins(dp(24), dp(20), dp(24), dp(20));
+    v->setSpacing(dp(14));
+
+    QFont titleFont = mCNFont;
+    titleFont.setPixelSize(uiPx(30));
+    titleFont.setBold(true);
+    auto *title = new QLabel("设置", panel);
+    title->setFont(titleFont);
+    title->setStyleSheet("color:#eaffff; background:transparent; border:none;");
+    title->setAlignment(Qt::AlignCenter);
+    v->addWidget(title);
+
+    QFont labelFont = mCNFont;
+    labelFont.setPixelSize(uiPx(18));
+    labelFont.setBold(true);
+
+    // 通用滑条样式 + 行构造器。
+    const QString sliderQss = QString(
+        "QSlider::groove:horizontal { height:8px; background:#1f2a2c;"
+        " border-radius:4px; }"
+        "QSlider::sub-page:horizontal { background:#fda200; border-radius:4px; }"
+        "QSlider::handle:horizontal { background:#fda200; width:18px;"
+        " margin:-6px 0; border-radius:9px; border:2px solid #ffe6a8; }"
+        "QSlider::handle:horizontal:hover { background:#ffb730; }"
+    );
+
+    auto makeSliderRow = [&](const QString &name, int initialPct,
+                             std::function<void(int)> onChange) {
+        auto *row = new QWidget(panel);
+        row->setStyleSheet("background:transparent; border:none;");
+        auto *h = new QHBoxLayout(row);
+        h->setContentsMargins(0, 0, 0, 0);
+        h->setSpacing(dp(10));
+
+        auto *lbl = new QLabel(name, row);
+        lbl->setFont(labelFont);
+        lbl->setStyleSheet("color:#eaffff; background:transparent; border:none;");
+        lbl->setFixedWidth(dp(110));
+        h->addWidget(lbl);
+
+        auto *slider = new QSlider(Qt::Horizontal, row);
+        slider->setRange(0, 100);
+        slider->setValue(initialPct);
+        slider->setStyleSheet(sliderQss);
+        h->addWidget(slider, 1);
+
+        auto *value = new QLabel(QString::number(initialPct) + "%", row);
+        value->setFont(labelFont);
+        value->setStyleSheet("color:#fda200; background:transparent; border:none;");
+        value->setFixedWidth(dp(58));
+        value->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
+        h->addWidget(value);
+
+        connect(slider, &QSlider::valueChanged, row, [value, onChange](int v) {
+            value->setText(QString::number(v) + "%");
+            onChange(v);
+        });
+
+        v->addWidget(row);
+    };
+
+    auto *audio = AudioManager::instance();
+    makeSliderRow("主音量", int(std::round(audio->masterVolume() * 100.0)),
+                  [audio](int v) { audio->setMasterVolume(v / 100.0); });
+    makeSliderRow("音乐音量", int(std::round(audio->musicVolume() * 100.0)),
+                  [audio](int v) { audio->setMusicVolume(v / 100.0); });
+    makeSliderRow("音效音量", int(std::round(audio->sfxVolume() * 100.0)),
+                  [audio](int v) { audio->setSfxVolume(v / 100.0); });
+
+    // 简单提示：原版还有画质等设置，本项目未实现。
+    auto *note = new QLabel("画质 / 全屏等更多选项待后续接入", panel);
+    QFont noteFont = mCNFont; noteFont.setPixelSize(uiPx(14));
+    note->setFont(noteFont);
+    note->setStyleSheet("color:#9bb6bd; background:transparent; border:none;");
+    note->setAlignment(Qt::AlignCenter);
+    v->addSpacing(dp(8));
+    v->addWidget(note);
+
+    auto *back = new QPushButton("返回", panel);
+    QFont btnFont = mCNFont; btnFont.setPixelSize(uiPx(20)); btnFont.setBold(true);
+    back->setFont(btnFont);
+    back->setMinimumHeight(dp(56));
+    back->setStyleSheet(
+        "QPushButton { background:#fe5f55; color:white;"
+        " border:2px solid rgba(255,255,255,90); border-radius:12px;"
+        " font-weight:bold; padding:6px 18px; }"
+        "QPushButton:hover { background:#ff7066; border:2px solid rgba(255,255,255,170); }"
+        "QPushButton:pressed { background:#d94a42; }"
+    );
+    connect(back, &QPushButton::clicked, this, &MainWindow::hideSettingsOverlay);
+    v->addSpacing(dp(6));
+    v->addWidget(back);
+
+    centerRow->addWidget(panel);
+    centerRow->addStretch(1);
+    root->addLayout(centerRow);
+    root->addStretch(1);
+
+    overlay->setGeometry(host->rect());
+    overlay->raise();
+    overlay->show();
+}
+
+void MainWindow::hideSettingsOverlay()
+{
+    if (mSettingsOverlay) mSettingsOverlay->hide();
 }
 
 void MainWindow::setupScene() {
@@ -2930,6 +3304,7 @@ void MainWindow::onCardClicked(CardItem *card) {
     layoutHandCards();
     refreshCounters();
     updateHandPreview();
+    refreshConsumableUseButtonState();   // 选牌数量变化 → 重新评估"使用"按钮可用性
 }
 
 
@@ -4293,6 +4668,8 @@ void MainWindow::showConsumableAction(int idx)
             " border-radius:10px; padding:0px; text-align:center; font-weight:bold; }"
             "QPushButton:hover { background:#ff7066; border:2px solid rgba(255,255,255,170); }"
             "QPushButton:pressed { background:#d94a42; }"
+            "QPushButton:disabled { background:#5a4642; color:#a39998;"
+            " border:2px solid rgba(255,255,255,40); }"
             );
         v->addWidget(mConsumableUseButton);
 
@@ -4461,6 +4838,7 @@ void MainWindow::showConsumableAction(int idx)
     mConsumableActionProxy->setZValue(5000);
     mConsumableActionProxy->setPos(x, y);
     mConsumableActionPanel->show();
+    refreshConsumableUseButtonState();
 }
 
 void MainWindow::hideConsumableAction()
@@ -4470,6 +4848,38 @@ void MainWindow::hideConsumableAction()
         mSelectedConsumableIdx = -1;
         layoutConsumableItems(true);
     }
+}
+
+void MainWindow::refreshConsumableUseButtonState()
+{
+    if (!mConsumableUseButton) return;
+    const int idx = mSelectedConsumableIdx;
+    const auto &cs = mGameState->consumables();
+    if (idx < 0 || idx >= cs.size()) {
+        mConsumableUseButton->setEnabled(false);
+        mConsumableUseButton->setToolTip(QString());
+        return;
+    }
+    const Consumable &c = cs[idx];
+    QVector<int> sel = mSelected;
+    std::sort(sel.begin(), sel.end());
+    sel.erase(std::unique(sel.begin(), sel.end()), sel.end());
+
+    bool ok = true;
+    QString reason;
+    if (c.needsSelection > 0 && sel.size() < c.needsSelection) {
+        ok = false;
+        reason = QString("需要选中 %1 张手牌").arg(c.needsSelection);
+    } else if (c.maxSelection > 0 && sel.size() > c.maxSelection) {
+        ok = false;
+        reason = QString("最多选 %1 张手牌").arg(c.maxSelection);
+    } else if (c.type == ConsumableType::Tarot_Fool && !mGameState->canUseFool()) {
+        ok = false;
+        reason = QStringLiteral("没有可复制的消耗牌");
+    }
+
+    mConsumableUseButton->setEnabled(ok);
+    mConsumableUseButton->setToolTip(ok ? QString() : reason);
 }
 
 void MainWindow::refreshConsumableSlotFrames()

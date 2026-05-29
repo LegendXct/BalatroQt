@@ -27,7 +27,9 @@ AudioManager::AudioManager(QObject *parent)
     : QObject(parent),
       mFadeTimer(new QTimer(this))
 {
-    mFadeTimer->setInterval(16);
+    // 音乐音量过渡每 16 ms 跑一次会和背景着色器/动画抢主线程；50 ms 对淡入淡出听感无明显差别。
+    mFadeTimer->setInterval(50);
+    mFadeTimer->setTimerType(Qt::CoarseTimer);
     connect(mFadeTimer, &QTimer::timeout, this, &AudioManager::updateMusicVolumes);
     mClock.start();
     mLastFadeMs = mClock.elapsed();
@@ -351,6 +353,25 @@ void AudioManager::play(const QString &soundCode, double pitch, double volume)
     QTimer::singleShot(12000, voice, &QObject::deleteLater);
 
     player->play();
+}
+
+void AudioManager::setMasterVolume(double v)
+{
+    mMasterVolume = qBound(0.0, v, 1.0);
+    if (!mFadeTimer->isActive()) mFadeTimer->start();
+    updateMusicVolumes();
+}
+
+void AudioManager::setMusicVolume(double v)
+{
+    mMusicVolume = qBound(0.0, v, 1.0);
+    if (!mFadeTimer->isActive()) mFadeTimer->start();
+    updateMusicVolumes();
+}
+
+void AudioManager::setSfxVolume(double v)
+{
+    mSfxVolume = qBound(0.0, v, 1.0);
 }
 
 void AudioManager::playRandom(const QStringList &soundCodes, double pitch, double volume)

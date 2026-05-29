@@ -2358,6 +2358,13 @@ void GameState::startGame()
     mSuppressGoldSignal = false;
     mAnte = 1;
     mScore = 0;
+    // 必须在 enterBlindSelect / refreshCounters 之前给 hands/discards 重置一个合法初值，
+    // 否则上一局的尾值（含 Burglar/Manacle 等可能减为 0/-1 的状态）会被 UI 短暂显示。
+    mHandsLeft = Constants::INITIAL_HANDS;
+    mDiscardLeft = Constants::INITIAL_DISCARDS;
+    mBlindStartingHands = mHandsLeft;
+    mBlindStartingDiscards = mDiscardLeft;
+    mTargetScore = 0;
     mJokers.clear();
     mShop = Shop();
     syncShopJokerRules();
