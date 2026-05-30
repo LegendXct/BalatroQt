@@ -88,8 +88,8 @@ BalatroInfoPanel::BalatroInfoPanel(const QFont &cnFont, QWidget *parent)
     // 白底上默认暗色文字，HTML 内联色（chips=蓝/mult=红/...）覆盖。
     mBodyLbl->setStyleSheet("background:transparent; border:none; color:#4f6367;");
     bodyLay->addWidget(mBodyLbl);
-    // 原版 minh = 0.8 lua 单位 ≈ 48 px——给描述盒一个最小高度，让单行描述也不会太扁。
-    mBodyBox->setMinimumHeight(40);
+    // 之前在构造时强制 setMinimumHeight(40) 作为"单行描述兜底"，会让 A→B 切换时
+    // 高度无法收缩到当前内容（用户反馈：B 长描述被裁切）。改为按实测高度走，最小不设。
     inner->addWidget(mBodyBox);
 
     mBadgesRow = new QWidget(mInner);
@@ -191,34 +191,50 @@ void BalatroInfoPanel::setContent(const QString &name, const QString &body,
         else doc.setPlainText(text);
         return int(doc.size().height() + 0.999);
     };
+    // 上次的修复用 setMinimumHeight(0)+heightForWidth 还是会被 QLabel 缓存
+    //（wordWrap + Preferred 政策在切到更短描述时不收高）。改成直接 setFixedHeight
+    // 用 QTextDocument 实测的值——彻底跳过 Qt 的 heightForWidth 计算。
     if (mBodyLbl) {
-        mBodyLbl->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::MinimumExpanding);
-        QSizePolicy sp = mBodyLbl->sizePolicy();
-        sp.setHeightForWidth(true);
-        mBodyLbl->setSizePolicy(sp);
-        mBodyLbl->setMinimumWidth(bodyWidth);
-        mBodyLbl->setMaximumWidth(bodyWidth);
-        const int measured = measureHtmlHeight(mBodyLbl->font(), body, bodyWidth);
-        if (measured > 0) mBodyLbl->setMinimumHeight(measured + 4);
+        mBodyLbl->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        mBodyLbl->setFixedWidth(bodyWidth);
+        int measured = measureHtmlHeight(mBodyLbl->font(), body, bodyWidth);
+        if (body.isEmpty()) measured = 0;
+        mBodyLbl->setFixedHeight(measured > 0 ? measured + 4 : 0);
     }
     if (mNameLbl) {
-        mNameLbl->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
-        // 跟 body 一样用 QTextDocument 测高，避免长名字（"X 之心：永恒/牢不可破"等）首次截掉。
-        const int nameWidth = bodyWidth;
-        mNameLbl->setMinimumWidth(nameWidth);
-        mNameLbl->setMaximumWidth(nameWidth);
-        const int measured = measureHtmlHeight(mNameLbl->font(), name, nameWidth);
-        if (measured > 0) mNameLbl->setMinimumHeight(measured + 2);
+        mNameLbl->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
+        mNameLbl->setFixedWidth(bodyWidth);
+        int measured = measureHtmlHeight(mNameLbl->font(), name, bodyWidth);
+        if (name.isEmpty()) measured = 0;
+        mNameLbl->setFixedHeight(measured > 0 ? measured + 2 : 0);
     }
-    // ensurePolished 让 QStyle / font metrics 在 show 前完成初始化（否则首次 heightForWidth
-    // 会用默认 font，第二次 hover 时才用正确的 mCNFont 重算）。
+    // 容器层全部解锁——让 adjustSize 真正自由收缩到当前内容大小。
+    setMinimumSize(0, 0);
+    setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX);
+    if (mInner)   { mInner->setMinimumSize(0, 0);   mInner->setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX); }
+    if (mBodyBox) { mBodyBox->setMinimumSize(0, 0); mBodyBox->setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX); }
+    if (mNameBox) { mNameBox->setMinimumSize(0, 0); mNameBox->setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX); }
+
     ensurePolished();
     if (mInner) mInner->ensurePolished();
     if (mBodyBox) mBodyBox->ensurePolished();
     if (mBodyLbl) mBodyLbl->ensurePolished();
-    // 多跑几遍 activate+adjustSize：Qt 5/6 在嵌套 layout + wordWrap 场景下偶尔需要 2-3 次。
+    if (mNameLbl) mNameLbl->ensurePolished();
+
+    // 沿着层次链强制 updateGeometry → 各级 layout 重新算 sizeHint。
+    if (mBodyLbl) mBodyLbl->updateGeometry();
+    if (mNameLbl) mNameLbl->updateGeometry();
+    if (mBodyBox) mBodyBox->updateGeometry();
+    if (mNameBox) mNameBox->updateGeometry();
+    if (mInner)   mInner->updateGeometry();
+    updateGeometry();
+    if (mInner && mInner->layout())   mInner->layout()->invalidate();
+    if (layout()) layout()->invalidate();
+
     for (int i = 0; i < 3; ++i) {
+        if (mInner && mInner->layout()) mInner->layout()->activate();
         if (layout()) layout()->activate();
+        if (mInner) mInner->adjustSize();
         adjustSize();
     }
 }
@@ -287,12 +303,17 @@ void BalatroInfoCluster::addSidePanel(const BalatroInfoPanel::SideEntry &entry)
 
 void BalatroInfoCluster::relayout()
 {
-    // 每张子面板自己的 layout 已在 setContent 里强制 polish/activate 过，这里只让 cluster
-    // 自己的 HBoxLayout 把它们收紧。多跑几次 activate+adjustSize 来处理 wordWrap +
-    // heightForWidth 的层叠场景。
     ensurePolished();
     if (mMain) mMain->ensurePolished();
     for (auto *p : mSidePanels) if (p) p->ensurePolished();
+    // 重置 cluster 自己的尺寸地板/天花板——上一张牌的高度可能比当前牌大，
+    // 不显式清零 adjustSize 不会收回去。
+    setMinimumSize(0, 0);
+    setMaximumSize(QWIDGETSIZE_MAX, QWIDGETSIZE_MAX);
+    if (mMain) mMain->updateGeometry();
+    for (auto *p : mSidePanels) if (p) p->updateGeometry();
+    if (layout()) layout()->invalidate();
+    updateGeometry();
     for (int i = 0; i < 3; ++i) {
         if (auto *lay = layout()) lay->activate();
         adjustSize();

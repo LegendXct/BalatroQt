@@ -140,6 +140,10 @@ public:
     void setGrosMichelExtinct(bool v) { mGrosMichelExtinct = v; }
 
     int shopSlots() const { return mShopSlots; }
+    // 原版：优惠券只在击败 Boss 后的商店出现（每 Ante 1 张）。
+    // GameState 在 finishWinningRound 调用这个标志：Boss 战为 true，小/大盲为 false。
+    void setAllowVoucherThisShop(bool v) { mAllowVoucherThisShop = v; }
+    bool allowVoucherThisShop() const { return mAllowVoucherThisShop; }
     const ShopRates &rates() const { return mRates; }
     int discountPercent() const { return mDiscountPercent; }
 
@@ -152,6 +156,7 @@ private:
     int mRerollDiscount = 0;
     int mShopSlots = 2;
     int mDiscountPercent = 0;
+    bool mAllowVoucherThisShop = false;  // 默认关闭——只在 Boss 商店打开。
     ShopRates mRates;
     QVector<VoucherType> mRedeemedVouchers;
     QVector<JokerType> mOwnedJokers;

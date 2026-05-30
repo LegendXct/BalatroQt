@@ -1287,7 +1287,8 @@ void ShopWidget::refresh()
                 "QPushButton:disabled { background:#3b4347; color:#7c8488; border:2px solid #3b4347; }"
             ).arg(buyBg, buyHover));
             ou.buyBtn->setVisible(selectedHere);
-            ou.buyBtn->setEnabled(canBuy && mGS->gold() >= o.cost);
+            // CreditCard 小丑允许金币透支至 -$20：买入判定走 spendableGold()。
+            ou.buyBtn->setEnabled(canBuy && mGS->spendableGold() >= o.cost);
         }
         if (ou.useBtn) {
             // 只有满足"可立即使用"条件的消耗牌才显示购买&使用；需要选牌的塔罗
@@ -1342,24 +1343,41 @@ void ShopWidget::refresh()
         else if (o.kind == OfferKind::PlayingCard)
             slotOk = true;
         fillSlot(mShopUi[i], o,
-                 mGS->shop().canBuyShop(i, mGS->gold()) && slotOk, false);
+                 mGS->shop().canBuyShop(i, mGS->spendableGold()) && slotOk, false);
     }
 
     const auto &voucherOffers = mGS->shop().voucherOffers();
-    for (int i = 0; i < mVoucherUi.size() && i < voucherOffers.size(); ++i) {
-        fillSlot(mVoucherUi[i], voucherOffers[i],
-                 mGS->shop().canBuyVoucher(i, mGS->gold()), false);
+    for (int i = 0; i < mVoucherUi.size(); ++i) {
+        if (i < voucherOffers.size()) {
+            fillSlot(mVoucherUi[i], voucherOffers[i],
+                     mGS->shop().canBuyVoucher(i, mGS->spendableGold()), false);
+        } else {
+            // 当前 Ante 不出优惠券（小/大盲）——必须把这一槽彻底藏掉，
+            // 否则上一次商店残留的 priceLbl/nameLbl/cardBtn 会以 "$0" 形式继续显示。
+            OfferUi &ou = mVoucherUi[i];
+            if (ou.card)     ou.card->setVisible(false);   // 外层占位卡也藏掉
+            if (ou.cardBtn)  ou.cardBtn->setVisible(false);
+            if (ou.priceLbl) ou.priceLbl->setVisible(false);
+            if (ou.nameLbl)  ou.nameLbl->setText(QString());
+            if (ou.buyBtn)   ou.buyBtn->hide();
+            if (ou.useBtn)   ou.useBtn->hide();
+        }
     }
 
     const auto &boosterOffers = mGS->shop().boosterOffers();
     for (int i = 0; i < mBoosterUi.size() && i < boosterOffers.size(); ++i) {
         fillSlot(mBoosterUi[i], boosterOffers[i],
-                 mGS->shop().canBuyBooster(i, mGS->gold()), true);
+                 mGS->shop().canBuyBooster(i, mGS->spendableGold()), true);
     }
 
     int rcost = mGS->shop().rerollCost();
     mBtnReroll->setText(QString("重抽\n$%1").arg(rcost));
-    mBtnReroll->setEnabled(mGS->gold() >= rcost);
+    // 混沌小丑：每次进商店首次重摇免费（rcost 在 hasFreeReroll() 时不应阻挡按钮）。
+    // CreditCard：允许透支购买，重摇同样走 spendableGold()。
+    const int effRerollCost = mGS->hasFreeShopReroll() ? 0 : rcost;
+    mBtnReroll->setEnabled(mGS->spendableGold() >= effRerollCost);
+    if (mGS->hasFreeShopReroll())
+        mBtnReroll->setText(QString("重抽\n免费"));
 
     // 槽位变化（如 Overstock 优惠券新增槽位）后，外层 ou.card 会被 QHBoxLayout
     // 重新分配位置，但内部 cardBtn 不会收到 Move 事件，eventFilter 也就不会触发
@@ -2018,7 +2036,10 @@ void ShopWidget::onBuyVoucher(int slot) {
         snap.fill(Qt::transparent);
         cardBtn->render(&snap);
 
-        auto *ghost = new QLabel(this);
+        // 把 ghost 挂到 top-level 窗口而不是 ShopWidget——否则后续 refresh() 触发的
+        // syncPriceLblForCardBtn()->priceLbl->raise() 会把价格标签盖回 ghost 上面。
+        QWidget *ghostHost = window() ? window() : this;
+        auto *ghost = new QLabel(ghostHost);
         ghost->setPixmap(snap);
         ghost->setFixedSize(snap.size());
         ghost->setAttribute(Qt::WA_TransparentForMouseEvents, true);
@@ -2026,8 +2047,8 @@ void ShopWidget::onBuyVoucher(int slot) {
         ghost->setAlignment(Qt::AlignCenter);
         ghost->setScaledContents(true);
         const QPoint globalTopLeft = cardBtn->mapToGlobal(QPoint(0, 0));
-        const QPoint localTopLeft = mapFromGlobal(globalTopLeft);
-        ghost->move(localTopLeft);
+        const QPoint hostTopLeft = ghostHost->mapFromGlobal(globalTopLeft);
+        ghost->move(hostTopLeft);
         ghost->show();
         ghost->raise();
 
@@ -2036,10 +2057,11 @@ void ShopWidget::onBuyVoucher(int slot) {
         ghost->setGraphicsEffect(opacity);
 
         const QSize startSize = snap.size();
-        const QPoint startTopLeft = localTopLeft;
+        const QPoint startTopLeft = hostTopLeft;
         const QPoint startCenter(startTopLeft.x() + startSize.width()  / 2,
                                   startTopLeft.y() + startSize.height() / 2);
-        const QPoint screenCenter(width() / 2, height() / 2);
+        // 中心点要用 ghost 实际宿主（top-level）的坐标系。
+        const QPoint screenCenter(ghostHost->width() / 2, ghostHost->height() / 2);
 
         QPointer<QLabel> ghostGuard(ghost);
         QPointer<QGraphicsOpacityEffect> opGuard(opacity);

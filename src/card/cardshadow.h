@@ -20,10 +20,15 @@ public:
     QRectF boundingRect() const override;
     void paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) override;
 
+    // 异形小丑（j_half / j_wee / j_square 等）：把可见矩形从默认 (0,0,w,h) 改成实际显示
+    // 区域，阴影才不会"溢出"到看得见的形状之外。
+    void setVisibleRect(const QRectF &r) { mVisibleRect = r; }
+
 private:
     int mW;
     int mH;
     LiftGetter mGetLift;
+    QRectF mVisibleRect;
 };
 
 #endif // CARDSHADOW_H

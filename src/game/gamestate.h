@@ -72,6 +72,28 @@ public:
     int gold() const {return mGold;}
     // 信用卡：可透支 $20；全是6：所有概率分母减半
     int spendableGold() const { return mGold + (hasJokerType(JokerType::CreditCard) ? 20 : 0); }
+    // 商店侧栏"预览下一回合"用：暴露当前的修正值（不含 Boss 影响——Boss 还没选）。
+    int extraHandsPerRoundPreview() const {
+        int delta = mExtraHandsPerRound;
+        for (const Joker &j : mJokers) {
+            if (j.isDebuffed) continue;
+            if (j.type == JokerType::Troubadour) delta -= 1;
+        }
+        return delta;
+    }
+    int extraDiscardsPerRoundPreview() const {
+        int delta = mExtraDiscardsPerRound;
+        for (const Joker &j : mJokers) {
+            if (j.isDebuffed) continue;
+            if (j.type == JokerType::Drunkard)  delta += 1;
+            if (j.type == JokerType::MerryAndy) delta += 3;
+        }
+        return delta;
+    }
+    // 混沌小丑：本次进商店是否还有免费重摇可用。
+    bool hasFreeShopReroll() const {
+        return !mChaosFreeRerollUsed && hasJokerType(JokerType::ChaosTheClown);
+    }
     int probDenom(int n) const { return hasJokerType(JokerType::OopsAllSixes) ? qMax(1, n / 2) : n; }
     int pendingRoundPayout() const { return mPendingRoundPayout; }
     bool claimRoundPayout();
@@ -247,6 +269,10 @@ private:
     QSet<int> mPlanetsUsedThisRun;         // 卫星：本局用过的行星牌种类
     bool mFirstDiscardThisRound = true;    // 焦痕小丑：本回合是否还没弃过牌
     bool mChaosFreeRerollUsed = false;     // 混沌小丑：本次商店免费重摇是否已用
+    int  mPendingDoubleTags = 0;           // 双倍标签：未消耗的复制次数（每次新非 Double 标签会被复制一次并 -1）
+    int  mTotalSkipsThisRun = 0;           // Skip Tag 用：本局已跳过的盲注次数
+    int  mTotalHandsPlayedThisRun = 0;     // Handy Tag 用：本局已打出的总手数（累加，不重置）
+    int  mUnusedDiscardsThisRun = 0;       // Garbage Tag 用：上一回合结束时累加的"剩余弃牌数"
     void cleanupDepletedJokers();          // 移除计数耗尽的小丑（爆米花/拉面/苏打水/海龟豆）
     BlindState mBlindStates[3] = {
         BlindState::Current, BlindState::Upcoming, BlindState::Upcoming

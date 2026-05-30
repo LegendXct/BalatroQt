@@ -321,6 +321,22 @@ JokerItem::JokerItem(const Joker &j, QGraphicsItem *parent)
     setFlag(QGraphicsItem::ItemSendsGeometryChanges, true);
     mShadow = new CardShadowItem(WIDTH, HEIGHT, [this]() { return mShadowLift; });
     mShadow->setZValue(-1000.0);
+    // 异形小丑：把阴影几何收紧到真实可见区域，避免在透明像素下方还印一块矩形阴影。
+    switch (j.type) {
+    case JokerType::HalfJoker:
+        // 美术图里上半部分是脸、下半部分被撕成碎条——撕碎部分的阴影按高度的 70% 收。
+        mShadow->setVisibleRect(QRectF(0, 0, WIDTH, HEIGHT * 0.70));
+        break;
+    case JokerType::WeeJoker:
+        // 原版 Wee Joker 在卡面里实际只占约中央 70% 区域。
+        mShadow->setVisibleRect(QRectF(WIDTH * 0.15, HEIGHT * 0.15, WIDTH * 0.70, HEIGHT * 0.70));
+        break;
+    case JokerType::SquareJoker:
+        // 方块小丑：原版做成方形（h ≈ w），阴影也按方形收。
+        mShadow->setVisibleRect(QRectF(0, HEIGHT * 0.15, WIDTH, WIDTH));
+        break;
+    default: break;
+    }
 
     if (jokerNeedsShaderTick(mJoker)) {
         ensureJokerShaderTimer();
@@ -407,12 +423,9 @@ void JokerItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) 
         while (order.size() > 160) cache.remove(order.takeFirst());
     }
     p->setRenderHint(QPainter::SmoothPixmapTransform, true);
-    if (mJoker.type == JokerType::HalfJoker) {
-        p->drawPixmap(QRectF(0, HEIGHT / 4.0, WIDTH, HEIGHT / 2.0),
-                      pix, QRectF(0, 0, SRC_W, SRC_H / 2.0));
-    } else {
-        p->drawPixmap(QRectF(0, 0, WIDTH, HEIGHT), pix, QRectF(0, 0, SRC_W, SRC_H));
-    }
+    // 异形小丑：直接画完整 sprite，不再裁切——原版美术里 j_half / j_wee 等
+    // 本身就把"撕碎/微缩"画在了卡面图上，我们裁掉反而丢了原形状。
+    p->drawPixmap(QRectF(0, 0, WIDTH, HEIGHT), pix, QRectF(0, 0, SRC_W, SRC_H));
 
     if (mHovered) {
         p->setPen(QPen(QColor(255, 240, 96, 200), 4));

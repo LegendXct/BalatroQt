@@ -41,6 +41,7 @@ qt_add_executable(BalatroQt
     src/ui/animatedblindchip.h src/ui/animatedblindchip.cpp
     src/ui/balatroinfopanel.h src/ui/balatroinfopanel.cpp
     src/ui/cardtooltipformat.h
+    src/ui/scoreeffectsoverlays.h src/ui/scoreeffectsoverlays.cpp
     src/audio/audiomanager.h src/audio/audiomanager.cpp
 )
 

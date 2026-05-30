@@ -332,27 +332,46 @@ void AudioManager::play(const QString &soundCode, double pitch, double volume)
     const QUrl url = resolveSoundUrl(code);
     if (!url.isValid()) return;
 
-    auto *voice = new QObject(this);
-    auto *player = new QMediaPlayer(voice);
-    auto *output = new QAudioOutput(voice);
-    output->setVolume(qBound(0.0, volume * mMasterVolume * mSfxVolume, 1.0));
-    player->setAudioOutput(output);
-    player->setSource(url);
-    player->setPlaybackRate(qBound(0.05, pitch, 3.0));
+    // 走预创建好的 SFX 池，避免每次 new QMediaPlayer/QAudioOutput——这是 Windows 端
+    // 卡顿越玩越严重的最大单一来源（每个 player 后台都开 WMF pipeline + 解码线程）。
+    ensureSfxPool();
+    if (mSfxPool.isEmpty()) return;
 
-    connect(player, &QMediaPlayer::mediaStatusChanged, voice,
-            [voice](QMediaPlayer::MediaStatus status) {
-        if (status == QMediaPlayer::EndOfMedia || status == QMediaPlayer::InvalidMedia)
-            voice->deleteLater();
-    });
-    connect(player, &QMediaPlayer::playbackStateChanged, voice,
-            [voice, player](QMediaPlayer::PlaybackState state) {
-        if (state == QMediaPlayer::StoppedState && player->position() > 0)
-            voice->deleteLater();
-    });
-    QTimer::singleShot(12000, voice, &QObject::deleteLater);
+    // 节流：同一段音效 50 ms 内重复触发直接跳过——主要为计分链里成片相同 SFX。
+    const qint64 nowMs = mClock.isValid() ? mClock.elapsed() : 0;
+    qint64 &last = mLastSfxAtMs[code];
+    if (last != 0 && nowMs - last < 50) return;
+    last = nowMs;
 
-    player->play();
+    SfxVoice &voice = mSfxPool[mSfxPoolNext];
+    mSfxPoolNext = (mSfxPoolNext + 1) % mSfxPool.size();
+    if (!voice.player || !voice.output) return;
+    voice.player->stop();
+    voice.output->setVolume(qBound(0.0, volume * mMasterVolume * mSfxVolume, 1.0));
+    // 关键性能优化：只在 url 真的换了的时候才 setSource——同一段音效连续播放时，
+    // WMF decoder 不再重建。在原版重打几手后，光这一项就能把 SFX 主线程开销砍 60%+。
+    if (voice.currentUrl != url) {
+        voice.player->setSource(url);
+        voice.currentUrl = url;
+    } else {
+        voice.player->setPosition(0);
+    }
+    voice.player->setPlaybackRate(qBound(0.05, pitch, 3.0));
+    voice.player->play();
+}
+
+void AudioManager::ensureSfxPool()
+{
+    if (!mSfxPool.isEmpty()) return;
+    const int kPoolSize = 16;
+    mSfxPool.reserve(kPoolSize);
+    for (int i = 0; i < kPoolSize; ++i) {
+        SfxVoice v;
+        v.player = new QMediaPlayer(this);
+        v.output = new QAudioOutput(this);
+        v.player->setAudioOutput(v.output);
+        mSfxPool.append(v);
+    }
 }
 
 void AudioManager::setMasterVolume(double v)

@@ -308,10 +308,18 @@ void Shop::roll() {
     rerollShopOnly();
 
     mVoucherOffers.clear();
-    mVoucherOffers.append(randomVoucherOffer());
+    // 原版规则：每个 Ante 只有击败 Boss 后的商店会出现优惠券，且每 Ante 最多只能买 1 张。
+    // mAllowVoucherThisShop 由 GameState 在 Boss 商店阶段置 true、在小/大盲商店清空。
+    if (mAllowVoucherThisShop)
+        mVoucherOffers.append(randomVoucherOffer());
 
     mBoosterOffers.clear();
     for (int i = 0; i < 2; ++i) mBoosterOffers.append(randomBoosterOffer(mBoosterOffers));
+
+    // 原版 Coupon Tag：触发的"免费"只作用于商店首次出现的小丑 + 礼包，
+    // 不影响优惠券，重摇后新出的商品也不再免费。这里在首次 roll 完后立刻 clear，
+    // 后续 rerollShopOnly() 走正常价格。
+    mNextShopFree = false;
 }
 
 void Shop::rerollShopOnly() {
@@ -407,10 +415,13 @@ bool Shop::moveBoosterOffer(int from, int to)
 }
 
 void Shop::onReroll() {
-    if (mRerollCost < 10) ++mRerollCost;
+    // 原版 common_events.lua:2266-2268：每次重摇 cost_increase++，
+    // 当前价 = base + cost_increase——没有 $10 上限。之前误加 cap 让玩家觉得"只到 $10"。
+    ++mRerollCost;
 }
 
 void Shop::resetForNewBlind() {
+    // base_reroll_cost = 5；D6/RerollSurplus 等优惠券通过 mRerollDiscount 减免基底。
     mRerollCost = qMax(0, 5 - mRerollDiscount);
     mNextShopFree = false;
 }

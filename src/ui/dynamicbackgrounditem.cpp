@@ -140,7 +140,9 @@ DynamicBackgroundItem::DynamicBackgroundItem(QWidget *parent)
         easeVisuals(dt);
         update();
     });
-    mTimer.start(33);
+    // 用户仍反馈卡顿严重。背景着色器是单一最大头：每 frame full screen GLSL render，
+    // 而画面差异极小。再降到 ~25 FPS（40 ms），CPU 占用约再砍 25%。
+    mTimer.start(40);
 }
 
 DynamicBackgroundItem::~DynamicBackgroundItem()

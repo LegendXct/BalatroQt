@@ -717,6 +717,8 @@ void GameState::finalizePlayedHand()
     }
     mHandLevels[mLastResult.type].played++;
     mHandTypesPlayedThisRound.insert(static_cast<int>(mLastResult.type));   // 锋利卡牌
+    // Handy Tag 用：累加本局打出的总手数（不区分牌型，跨回合累计）。
+    mTotalHandsPlayedThisRun++;
     // Batch 7：苏打水每出一手 -1，耗尽后销毁
     for (Joker &j : mJokers)
         if (j.type == JokerType::Seltzer) j.counter -= 1;
@@ -835,6 +837,8 @@ void GameState::finishWinningRound()
     case BlindType::Big:   blindReward = 4; break;
     case BlindType::Boss:  blindReward = 5; break;
     }
+    // Garbage Tag 用：累加本局未用过的弃牌数（含本回合剩余）。
+    mUnusedDiscardsThisRun += qMax(0, mDiscardLeft);
     int handBonus = mHandsLeft * Constants::HAND_GOLD;
     mGold += blindReward + handBonus;
     if (mBlindType == BlindType::Boss && mPendingInvestmentBonus > 0) {
@@ -907,6 +911,8 @@ void GameState::finishWinningRound()
     mPhase = GamePhase::Shop;
     mChaosFreeRerollUsed = false;   // Batch 7：进商店重置混沌小丑免费重摇
     syncShopJokerRules();
+    // 原版：每个 Ante 只有击败 Boss 后的商店出现优惠券。Voucher Tag 强制下个商店出券 → 也算入。
+    mShop.setAllowVoucherThisShop(mBlindType == BlindType::Boss || mTagVoucherNextShop);
     mShop.roll();
     if (mFirstShop) {
         auto &b = mShop.boosterOffersMutable();
@@ -1395,7 +1401,7 @@ bool GameState::buyAndUseShopConsumable(int idx, const QVector<int> &selectedHan
 
 bool GameState::buyVoucherOffer(int idx) {
     if (mPhase != GamePhase::Shop) return false;
-    if (!mShop.canBuyVoucher(idx, mGold)) return false;
+    if (!mShop.canBuyVoucher(idx, spendableGold())) return false;
 
     ShopOffer t = mShop.takeVoucherOffer(idx);
     mGold -= t.cost;
@@ -1982,7 +1988,7 @@ ConsumableType GameState::planetTypeFor(HandType t)
 bool GameState::buyPack(int idx, PackContent &out)
 {
     if (mPhase != GamePhase::Shop) return false;
-    if (!mShop.canBuyBooster(idx, mGold)) return false;
+    if (!mShop.canBuyBooster(idx, spendableGold())) return false;
     const ShopOffer &o = mShop.boosterOffers()[idx];
     if (o.kind != OfferKind::Pack) return false;
 
@@ -2383,6 +2389,10 @@ void GameState::startGame()
     mHasTagFreePack = false;
     mActiveTags.clear();
     mLastSkippedTag = TagType::Skip;
+    mPendingDoubleTags = 0;
+    mTotalSkipsThisRun = 0;
+    mTotalHandsPlayedThisRun = 0;
+    mUnusedDiscardsThisRun = 0;
     mBlindIdx = 0;
     mPendingBossEffect = BossEffect::None;
     mBossRerollsUsedThisAnte = 0;
@@ -2692,7 +2702,22 @@ void GameState::skipCurrentBlind()
     TagType gained = mBlindTags[mBlindIdx];
     mLastSkippedTag = gained;
     mActiveTags.append(gained);
+    // 必须在 applySkippedTag 之前 ++ skip 计数：原版 Skip Tag 公式
+    // `G.GAME.skips * $5` 中的 G.GAME.skips 是包含本次跳过的，第一次跳过给 $5。
+    mTotalSkipsThisRun++;
     applySkippedTag(gained);
+
+    // 原版 Double Tag：新获得的非 Double 标签会被任何挂起的 Double Tag 复制一份。
+    // 复制次数累积——同时持有两张 Double Tag，下一张普通标签会被各复制 1 次（共 3 份）。
+    if (gained != TagType::Double && mPendingDoubleTags > 0) {
+        const int copies = mPendingDoubleTags;
+        mPendingDoubleTags = 0;
+        for (int i = 0; i < copies; ++i) {
+            mActiveTags.append(gained);
+            mLastSkippedTag = gained;
+            applySkippedTag(gained);
+        }
+    }
 
     mBlindStates[mBlindIdx] = BlindState::Skipped;
     mBlindIdx++;
@@ -2712,16 +2737,22 @@ void GameState::applySkippedTag(TagType t, int recursionDepth)
 {
     switch (t) {
     case TagType::Skip:
-        addGold(5);
+        // 原版 tag.lua:154 — ease_dollars((G.GAME.skips or 0)*skip_bonus($5))
+        // 跳过次数 N（含本次）× $5；mTotalSkipsThisRun 在 skipCurrentBlind 已 ++ 含本次。
+        addGold(qMax(1, mTotalSkipsThisRun) * 5);
         break;
     case TagType::Economy:
-        addGold(qMin(mGold, 40));
+        // 原版 tag.lua:184 — ease_dollars(math.min(max=40, math.max(0, G.GAME.dollars)))
+        // 即"金钱翻倍最多 +40"。加入 qMax(0, mGold) 防止负债时给负数。
+        addGold(qMin(40, qMax(0, mGold)));
         break;
     case TagType::Handy:
-        addGold(5);
+        // 原版 tag.lua:172 — ease_dollars((G.GAME.hands_played or 0)*dollars_per_hand($1))
+        addGold(mTotalHandsPlayedThisRun);
         break;
     case TagType::Garbage:
-        addGold(5);
+        // 原版 tag.lua:163 — ease_dollars((G.GAME.unused_discards or 0)*dollars_per_discard($1))
+        addGold(mUnusedDiscardsThisRun);
         break;
     case TagType::Investment:
         mPendingInvestmentBonus += 25;
@@ -2757,12 +2788,9 @@ void GameState::applySkippedTag(TagType t, int recursionDepth)
         break;
     }
     case TagType::Double:
-        if (recursionDepth < 1) {
-            TagType extra = randomTagForAnte(mAnte);
-            mActiveTags.append(extra);
-            mLastSkippedTag = extra;
-            applySkippedTag(extra, recursionDepth + 1);
-        }
+        // 原版：Double Tag 不立刻产生新标签，而是"下一次获得任何非 Double 标签时复制它"。
+        // 这里只增加挂起计数，复制由 skipCurrentBlind() 里的非 Double 分支处理。
+        ++mPendingDoubleTags;
         break;
     case TagType::Negative:
         mShop.addPendingEditionJoker(Edition::Negative);

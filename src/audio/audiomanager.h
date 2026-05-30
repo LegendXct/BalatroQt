@@ -77,6 +77,20 @@ private:
     QVector<MusicTrack> mTracks;
     QVector<AmbientTrack> mAmbientTracks;
     mutable QHash<QString, QUrl> mUrlCache;
+    // SFX 池：每个 play() 之前都 new QMediaPlayer + QAudioOutput 在 Windows 上极重
+    // （新 WMF pipeline + 解码线程），玩几手后能让 CPU 不可控地飙到 20%+ 并产生
+    // 卡顿。改成 16 个 player 的轮询池，重复使用同一组 QMediaPlayer。
+    struct SfxVoice {
+        QMediaPlayer *player = nullptr;
+        QAudioOutput *output = nullptr;
+        QUrl currentUrl;   // 缓存，避免 setSource 在 url 相同时白白重建 WMF decoder
+    };
+    QVector<SfxVoice> mSfxPool;
+    int mSfxPoolNext = 0;
+    void ensureSfxPool();
+    // 节流：很短时间内同一个 sound 重复播放就跳过——计分链一帧可能尝试播十几次
+    // 相同 chip/foil 音效，听上去与单次播放无差，但 setSource 的代价能压垮主线程。
+    QHash<QString, qint64> mLastSfxAtMs;
     QString mDesiredMusic = QStringLiteral("music1");
     QTimer *mFadeTimer = nullptr;
     QElapsedTimer mClock;

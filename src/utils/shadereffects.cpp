@@ -790,11 +790,12 @@ void paintFlame(QPainter *p, const QRectF &rect, double amount,
     if (!p || amount <= 0.05 || rect.width() <= 1 || rect.height() <= 1) return;
 
     // 移植 flame.fs:小分辨率 fractal noise,每帧重新算。
-    // 采样分辨率提到 0.85×、上限 170，配合下方的软边 alpha + 平滑放大，
-    // 火焰边缘不再是硬锯齿。
+    // CPU 实现 + per-pixel 五次迭代 fractal——分辨率必须严格控制。
+    // 之前实验过 170/210/280，越高单帧成本越夸张；卡顿压力下退回到 130 但加 smooth scale，
+    // 视觉上比早期的 170 边缘更柔（因为 SmoothPixmapTransform 放大兼具反锯齿）。
     const double intensity = std::min(10.0, amount);
-    const int W = qBound(48, int(rect.width()  * 0.85), 170);
-    const int H = qBound(48, int(rect.height() * 0.85), 170);
+    const int W = qBound(48, int(rect.width()  * 0.7), 130);
+    const int H = qBound(48, int(rect.height() * 0.7), 130);
 
     QImage img(W, H, QImage::Format_ARGB32_Premultiplied);
     img.fill(0);

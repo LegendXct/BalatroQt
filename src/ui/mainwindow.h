@@ -323,9 +323,13 @@ private:
     // BalatroInfoPanel 自身带 QGraphicsDropShadowEffect，再套一层 QGraphicsProxyWidget
     // 在某些驱动上会渲染成空白/0×0，导致 hover 完全不显示（商店里的浮窗是子 widget 所以正常）。
     BalatroInfoCluster *mHoverTooltip = nullptr;
+    // 记录当前 hover 的手牌——选中/取消选中导致手牌上下移动时，需要重新贴位置。
+    QPointer<CardItem> mHoveredCard;
     void ensureHoverTooltip();
     void showHoverTooltipNearScene(class QGraphicsObject *anchor, double anchorWidth);
     void showCardHoverTooltip(CardItem *card);
+    // 选中/取消选中后调用：如果该手牌正在被 hover，让信息框跟着上下移。
+    void repositionHoverIfFollowingCard(CardItem *card);
     void showJokerHoverTooltip(int jokerIdx);
     void showConsumableHoverTooltip(int consumableIdx);
     void hideHoverTooltip();
@@ -358,8 +362,9 @@ private:
 
     // 原版每次累加分数都重算火焰强度:earned >= required 才点燃,log5 公式控制大小。
     // 不再用单次触发布尔,真正按"当前 displayed chips × mult"实时驱动。
-    QWidget *mChipFlame = nullptr;       // 蓝色筹码方块上的火焰
-    QWidget *mMultFlame = nullptr;       // 红色倍率方块上的火焰
+    // 火焰从原本的 CPU paintFlame() 改成 GPU FlameShaderWidget（直接跑原版 flame.fs）。
+    FlameShaderWidget *mChipFlame = nullptr;       // 蓝色筹码方块上的火焰
+    FlameShaderWidget *mMultFlame = nullptr;       // 红色倍率方块上的火焰
     QWidget *mChipScorePlate = nullptr;
     QWidget *mMultScorePlate = nullptr;
     double   mChipFlameTarget = 0.0;
@@ -419,6 +424,9 @@ private:
     void showSettingsOverlay();
     void hideSettingsOverlay();
     QPointer<QWidget> mSettingsOverlay;
+    void showMainMenuOverlay();
+    void hideMainMenuOverlay();
+    QPointer<QWidget> mMainMenuOverlay;
 
     void hidePlayControlsForScoring();
     void showPlayControlsAfterScoring();

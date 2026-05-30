@@ -4,7 +4,8 @@
 #include <QtMath>
 
 CardShadowItem::CardShadowItem(int w, int h, LiftGetter getter)
-    : mW(w), mH(h), mGetLift(std::move(getter)) {}
+    : mW(w), mH(h), mGetLift(std::move(getter)),
+      mVisibleRect(0, 0, w, h) {}
 
 QRectF CardShadowItem::boundingRect() const
 {
@@ -46,14 +47,16 @@ void CardShadowItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidge
     p->setRenderHint(QPainter::Antialiasing, true);
     p->setPen(Qt::NoPen);
 
+    // 异形卡牌用 mVisibleRect 作为阴影几何，默认 = 全卡。
+    const QRectF vr = mVisibleRect;
     const int alphaOuter = int(20 + 25 * lift);
     p->setBrush(QColor(0, 0, 0, alphaOuter));
     p->drawRoundedRect(
-        QRectF(offX - expand, offY - expand,
-               mW + 2 * expand, mH + 2 * expand),
+        QRectF(vr.x() + offX - expand, vr.y() + offY - expand,
+               vr.width() + 2 * expand, vr.height() + 2 * expand),
         10, 10);
 
     const int alphaInner = int(45 + 40 * lift);
     p->setBrush(QColor(0, 0, 0, alphaInner));
-    p->drawRoundedRect(QRectF(offX, offY, mW, mH), 9, 9);
+    p->drawRoundedRect(QRectF(vr.x() + offX, vr.y() + offY, vr.width(), vr.height()), 9, 9);
 }
