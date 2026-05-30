@@ -81,6 +81,10 @@ public:
         }
         return delta;
     }
+    // 统计数据界面用：本局累计计数。
+    int totalSkipsThisRun() const { return mTotalSkipsThisRun; }
+    int totalHandsPlayedThisRun() const { return mTotalHandsPlayedThisRun; }
+    int unusedDiscardsThisRun() const { return mUnusedDiscardsThisRun; }
     int extraDiscardsPerRoundPreview() const {
         int delta = mExtraDiscardsPerRound;
         for (const Joker &j : mJokers) {
@@ -323,6 +327,12 @@ private:
     bool mDNAEligibleThisPlay = false;
     int mDNACopiesCreatedThisPlay = 0;
     QVector<CardData> mPendingDNACopies;
+    // 标签队列：每张 tag 单独消费——Double Tag 可能往这里推多张同类型。
+    // 旧的 bool 改成"还能用几次"，每次进商店消耗 1。
+    int mTagVoucherPendingShops = 0;
+    int mTagCouponPendingShops = 0;
+    int mTagD6PendingShops = 0;
+    // 兼容字段：之前代码读 mTagVoucherNextShop bool，保留派生计算。
     bool mTagVoucherNextShop = false;
     PackKind mTagFreePackKind = PackKind::Standard;
     bool mHasTagFreePack = false;

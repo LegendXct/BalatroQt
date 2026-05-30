@@ -2060,6 +2060,21 @@ void MainWindow::showOptionsOverlay()
                 hideOptionsOverlay();
                 showMainMenuOverlay();
             });
+        } else if (txt == "统计数据") {
+            connect(b, &QPushButton::clicked, this, [this]() {
+                hideOptionsOverlay();
+                showStatsOverlay();
+            });
+        } else if (txt == "收藏") {
+            connect(b, &QPushButton::clicked, this, [this]() {
+                hideOptionsOverlay();
+                showCollectionOverlay();
+            });
+        } else if (txt == "定制牌组") {
+            connect(b, &QPushButton::clicked, this, [this]() {
+                hideOptionsOverlay();
+                showDeckCustomizeOverlay();
+            });
         } else {
             b->setEnabled(false);
         }
@@ -2260,6 +2275,185 @@ void MainWindow::showSettingsOverlay()
 void MainWindow::hideSettingsOverlay()
 {
     if (mSettingsOverlay) mSettingsOverlay->hide();
+}
+
+// ────────────────────────────────────────────────────────────────────────────
+// 统计数据 / 收藏 / 定制牌组 — 选项菜单的三个二级界面
+// 都复用同一种 in-scene QWidget overlay 模式（与 settings/main menu 一致）。
+// ────────────────────────────────────────────────────────────────────────────
+namespace {
+// 便于复用：返回一个深底圆角面板和它的根 QVBoxLayout。
+QPair<QWidget*, QVBoxLayout*> makeOverlayPanel(QWidget *parent, int widthDp, const QString &accent)
+{
+    auto *overlay = new QWidget(parent);
+    overlay->setAttribute(Qt::WA_StyledBackground, true);
+    overlay->setStyleSheet("background:rgba(0,0,0,170);");
+    auto *root = new QVBoxLayout(overlay);
+    root->setContentsMargins(0, 0, 0, 0);
+    root->setAlignment(Qt::AlignCenter);
+
+    auto *panel = new QWidget(overlay);
+    panel->setAttribute(Qt::WA_StyledBackground, true);
+    panel->setStyleSheet(QString(
+        "background:#1f2a2c; border:3px solid %1; border-radius:18px;"
+    ).arg(accent));
+    panel->setFixedWidth(widthDp);
+    auto *row = new QHBoxLayout;
+    row->setAlignment(Qt::AlignCenter);
+    row->addWidget(panel);
+    root->addLayout(row);
+
+    auto *v = new QVBoxLayout(panel);
+    v->setContentsMargins(24, 20, 24, 20);
+    v->setSpacing(10);
+    return { overlay, v };
+}
+}
+
+void MainWindow::showStatsOverlay()
+{
+    QWidget *host = mPlayPage ? mPlayPage : this;
+    if (mStatsOverlay) { mStatsOverlay->hide(); mStatsOverlay->deleteLater(); }
+    auto p = makeOverlayPanel(host, dp(520), "#4bc292");
+    mStatsOverlay = p.first;
+    mStatsOverlay->setGeometry(host->rect());
+
+    QFont titleFont = mCNFont; titleFont.setPixelSize(uiPx(28)); titleFont.setBold(true);
+    auto *title = new QLabel("统计数据");
+    title->setFont(titleFont); title->setAlignment(Qt::AlignCenter);
+    title->setStyleSheet("color:#4bc292; background:transparent; border:none;");
+    p.second->addWidget(title);
+
+    QFont rowFont = mCNFont; rowFont.setPixelSize(uiPx(17));
+    auto addStat = [&](const QString &name, const QString &value) {
+        auto *line = new QWidget;
+        line->setAttribute(Qt::WA_StyledBackground, true);
+        line->setStyleSheet("background:rgba(8,16,18,200); border:2px solid #1a262a; border-radius:10px;");
+        auto *h = new QHBoxLayout(line);
+        h->setContentsMargins(12, 8, 12, 8);
+        auto *l = new QLabel(name);
+        l->setFont(rowFont); l->setStyleSheet("color:#9bb6bd; background:transparent; border:none;");
+        h->addWidget(l);
+        h->addStretch(1);
+        auto *r = new QLabel(value);
+        QFont vf = rowFont; vf.setBold(true);
+        r->setFont(vf); r->setStyleSheet("color:#fda200; background:transparent; border:none;");
+        h->addWidget(r);
+        p.second->addWidget(line);
+    };
+
+    addStat("当前 Ante",          QString("%1 / 8").arg(mGameState->ante()));
+    addStat("当前金币",            QString("$%1").arg(mGameState->gold()));
+    addStat("本局已打出手数",      QString::number(mGameState->totalHandsPlayedThisRun()));
+    addStat("本局已跳过盲注",      QString::number(mGameState->totalSkipsThisRun()));
+    addStat("本局累计弃牌（剩余）",QString::number(mGameState->unusedDiscardsThisRun()));
+    addStat("已兑换优惠券数",      QString::number(mGameState->redeemedVouchers().size()));
+    addStat("持有小丑",            QString("%1 / %2").arg(mGameState->jokers().size())
+                                                     .arg(mGameState->jokerSlots()));
+    addStat("持有消耗牌",          QString("%1 / %2").arg(mGameState->consumables().size())
+                                                     .arg(mGameState->consumableSlots()));
+    addStat("牌堆余 / 总",         QString("%1 / %2").arg(mGameState->deckRemaining())
+                                                     .arg(mGameState->deckTotal()));
+
+    auto *back = new QPushButton("返回");
+    QFont btnFont = mCNFont; btnFont.setPixelSize(uiPx(20)); btnFont.setBold(true);
+    back->setFont(btnFont); back->setMinimumHeight(dp(56));
+    back->setStyleSheet(
+        "QPushButton { background:#fe5f55; color:white; border:2px solid rgba(255,255,255,90);"
+        " border-radius:12px; font-weight:bold; padding:6px 18px; }"
+        "QPushButton:hover { background:#ff7066; border:2px solid rgba(255,255,255,170); }"
+        "QPushButton:pressed { background:#d94a42; }"
+    );
+    connect(back, &QPushButton::clicked, this, [this]() {
+        if (mStatsOverlay) { mStatsOverlay->hide(); mStatsOverlay->deleteLater(); }
+    });
+    p.second->addWidget(back);
+
+    mStatsOverlay->raise();
+    mStatsOverlay->show();
+}
+
+void MainWindow::showCollectionOverlay()
+{
+    QWidget *host = mPlayPage ? mPlayPage : this;
+    if (mCollectionOverlay) { mCollectionOverlay->hide(); mCollectionOverlay->deleteLater(); }
+    auto p = makeOverlayPanel(host, dp(640), "#a782d1");
+    mCollectionOverlay = p.first;
+    mCollectionOverlay->setGeometry(host->rect());
+
+    QFont titleFont = mCNFont; titleFont.setPixelSize(uiPx(28)); titleFont.setBold(true);
+    auto *title = new QLabel("收藏");
+    title->setFont(titleFont); title->setAlignment(Qt::AlignCenter);
+    title->setStyleSheet("color:#a782d1; background:transparent; border:none;");
+    p.second->addWidget(title);
+
+    auto *body = new QLabel(
+        "已持有的小丑 / 消耗牌 / 优惠券会在游戏过程中自动登记。\n\n"
+        "本局已获取的内容：\n"
+        "・小丑：" + QString::number(mGameState->jokers().size()) + " 张\n"
+        "・消耗牌：" + QString::number(mGameState->consumables().size()) + " 张\n"
+        "・优惠券：" + QString::number(mGameState->redeemedVouchers().size()) + " 张\n\n"
+        "完整图鉴（包含未发现的卡牌剪影）正在制作中。"
+    );
+    QFont bf = mCNFont; bf.setPixelSize(uiPx(16));
+    body->setFont(bf); body->setWordWrap(true); body->setAlignment(Qt::AlignCenter);
+    body->setStyleSheet("color:#eaffff; background:transparent; border:none; padding:10px 0;");
+    p.second->addWidget(body);
+
+    auto *back = new QPushButton("返回");
+    QFont btnFont = mCNFont; btnFont.setPixelSize(uiPx(20)); btnFont.setBold(true);
+    back->setFont(btnFont); back->setMinimumHeight(dp(56));
+    back->setStyleSheet(
+        "QPushButton { background:#fe5f55; color:white; border:2px solid rgba(255,255,255,90);"
+        " border-radius:12px; font-weight:bold; padding:6px 18px; }"
+        "QPushButton:hover { background:#ff7066; border:2px solid rgba(255,255,255,170); }"
+        "QPushButton:pressed { background:#d94a42; }"
+    );
+    connect(back, &QPushButton::clicked, this, [this]() {
+        if (mCollectionOverlay) { mCollectionOverlay->hide(); mCollectionOverlay->deleteLater(); }
+    });
+    p.second->addWidget(back);
+
+    mCollectionOverlay->raise();
+    mCollectionOverlay->show();
+}
+
+void MainWindow::showDeckCustomizeOverlay()
+{
+    QWidget *host = mPlayPage ? mPlayPage : this;
+    if (mDeckCustomizeOverlay) { mDeckCustomizeOverlay->hide(); mDeckCustomizeOverlay->deleteLater(); }
+    auto p = makeOverlayPanel(host, dp(460), "#fda200");
+    mDeckCustomizeOverlay = p.first;
+    mDeckCustomizeOverlay->setGeometry(host->rect());
+
+    QFont titleFont = mCNFont; titleFont.setPixelSize(uiPx(28)); titleFont.setBold(true);
+    auto *title = new QLabel("定制牌组");
+    title->setFont(titleFont); title->setAlignment(Qt::AlignCenter);
+    title->setStyleSheet("color:#fda200; background:transparent; border:none;");
+    p.second->addWidget(title);
+
+    auto *body = new QLabel("敬请期待");
+    QFont bf = mCNFont; bf.setPixelSize(uiPx(28)); bf.setBold(true);
+    body->setFont(bf); body->setAlignment(Qt::AlignCenter);
+    body->setStyleSheet("color:#eaffff; background:transparent; border:none; padding:36px 0;");
+    p.second->addWidget(body);
+
+    auto *back = new QPushButton("返回");
+    QFont btnFont = mCNFont; btnFont.setPixelSize(uiPx(20)); btnFont.setBold(true);
+    back->setFont(btnFont); back->setMinimumHeight(dp(56));
+    back->setStyleSheet(
+        "QPushButton { background:#fe5f55; color:white; border:2px solid rgba(255,255,255,90);"
+        " border-radius:12px; font-weight:bold; padding:6px 18px; }"
+        "QPushButton:hover { background:#ff7066; border:2px solid rgba(255,255,255,170); }"
+        "QPushButton:pressed { background:#d94a42; }"
+    );
+    connect(back, &QPushButton::clicked, this, [this]() {
+        if (mDeckCustomizeOverlay) { mDeckCustomizeOverlay->hide(); mDeckCustomizeOverlay->deleteLater(); }
+    });
+    p.second->addWidget(back);
+
+    mDeckCustomizeOverlay->raise();
+    mDeckCustomizeOverlay->show();
 }
 
 void MainWindow::showMainMenuOverlay()

@@ -427,6 +427,12 @@ private:
     void showMainMenuOverlay();
     void hideMainMenuOverlay();
     QPointer<QWidget> mMainMenuOverlay;
+    void showStatsOverlay();
+    void showCollectionOverlay();
+    void showDeckCustomizeOverlay();
+    QPointer<QWidget> mStatsOverlay;
+    QPointer<QWidget> mCollectionOverlay;
+    QPointer<QWidget> mDeckCustomizeOverlay;
 
     void hidePlayControlsForScoring();
     void showPlayControlsAfterScoring();

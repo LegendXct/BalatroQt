@@ -911,8 +911,25 @@ void GameState::finishWinningRound()
     mPhase = GamePhase::Shop;
     mChaosFreeRerollUsed = false;   // Batch 7：进商店重置混沌小丑免费重摇
     syncShopJokerRules();
-    // 原版：每个 Ante 只有击败 Boss 后的商店出现优惠券。Voucher Tag 强制下个商店出券 → 也算入。
-    mShop.setAllowVoucherThisShop(mBlindType == BlindType::Boss || mTagVoucherNextShop);
+    // 原版：每个 Ante 只有击败 Boss 后的商店出现优惠券。Voucher Tag（含 Double Tag 复制）强制下个商店出券。
+    const bool voucherFromTag = (mTagVoucherPendingShops > 0);
+    mShop.setAllowVoucherThisShop(mBlindType == BlindType::Boss || voucherFromTag);
+    if (voucherFromTag) --mTagVoucherPendingShops;
+    mTagVoucherNextShop = (mTagVoucherPendingShops > 0);
+    // Coupon Tag：每张缓存对应一次"下个商店初始价免费"。
+    if (mTagCouponPendingShops > 0) {
+        mShop.setNextShopFree(true);
+        --mTagCouponPendingShops;
+    } else {
+        mShop.setNextShopFree(false);
+    }
+    // D6 Tag：每张缓存对应一次"下个商店重摇折扣"。
+    if (mTagD6PendingShops > 0) {
+        mShop.setRerollDiscount(5);
+        --mTagD6PendingShops;
+    } else {
+        mShop.setRerollDiscount(0);
+    }
     mShop.roll();
     if (mFirstShop) {
         auto &b = mShop.boosterOffersMutable();
@@ -1037,6 +1054,7 @@ double GameState::calcTargetScore() const {
     if (!hasJokerType(JokerType::Chicot)) {
         if (mBossEffect == BossEffect::TheWall)         target *= 2.0;  // 围墙 mult 4 = 2×2
         if (mBossEffect == BossEffect::VioletVessel)    target *= 3.0;  // 紫罗兰之器 mult 6 = 2×3
+        if (mBossEffect == BossEffect::TheNeedle)       target *= 0.5;  // 针 mult 1 = 2×0.5（每回合只 1 手，分数线减半）
     }
     return target;
 }
@@ -1488,9 +1506,14 @@ void GameState::applyVoucher(VoucherType t) {
         mExtraJokerSlots += 1;
         break;
     case VoucherType::Hieroglyph:
-    case VoucherType::Petroglyph:
+        // 原版 card.lua:1957-1965: ease_ante(-1) + hands -=1
         mAnte = qMax(1, mAnte - 1);
         mExtraHandsPerRound -= 1;
+        break;
+    case VoucherType::Petroglyph:
+        // 原版 card.lua:1957/1966-1969: ease_ante(-1) + discards -=1（注意是 discards 不是 hands）
+        mAnte = qMax(1, mAnte - 1);
+        mExtraDiscardsPerRound -= 1;
         break;
     case VoucherType::Hone:
         mShop.setJokerEditionRate(2.0);
@@ -2386,6 +2409,9 @@ void GameState::startGame()
     mOneRoundHandSizeBonus = 0;
     mPendingInvestmentBonus = 0;
     mTagVoucherNextShop = false;
+    mTagVoucherPendingShops = 0;
+    mTagCouponPendingShops = 0;
+    mTagD6PendingShops = 0;
     mHasTagFreePack = false;
     mActiveTags.clear();
     mLastSkippedTag = TagType::Skip;
@@ -2700,24 +2726,27 @@ void GameState::skipCurrentBlind()
     if (mBlindIdx >= 2) return;
 
     TagType gained = mBlindTags[mBlindIdx];
-    mLastSkippedTag = gained;
-    mActiveTags.append(gained);
     // 必须在 applySkippedTag 之前 ++ skip 计数：原版 Skip Tag 公式
     // `G.GAME.skips * $5` 中的 G.GAME.skips 是包含本次跳过的，第一次跳过给 $5。
     mTotalSkipsThisRun++;
-    applySkippedTag(gained);
 
-    // 原版 Double Tag：新获得的非 Double 标签会被任何挂起的 Double Tag 复制一份。
-    // 复制次数累积——同时持有两张 Double Tag，下一张普通标签会被各复制 1 次（共 3 份）。
-    if (gained != TagType::Double && mPendingDoubleTags > 0) {
-        const int copies = mPendingDoubleTags;
+    // 原版 add_tag（UI_definitions.lua:1252）：先用 tag_add 事件通知所有已存在的
+    // Double Tag，它们会复制传入的 tag 加进 inventory；之后再把原始 tag 入 inventory。
+    // 顺序很关键——保证一张 Double + 一张 Skip = 1 个原 Skip + 1 个 Double 复制出的 Skip。
+    int doublesToFire = (gained != TagType::Double) ? mPendingDoubleTags : 0;
+    if (doublesToFire > 0) {
         mPendingDoubleTags = 0;
-        for (int i = 0; i < copies; ++i) {
+        for (int i = 0; i < doublesToFire; ++i) {
             mActiveTags.append(gained);
-            mLastSkippedTag = gained;
+            // 与原版一致：复制出来的副本随后按它自己的 type 触发副作用（叠加：
+            // immediate 类立刻发钱、shop 类增加缓存计数 N+1、edition 类多压一张到队列）。
             applySkippedTag(gained);
         }
     }
+
+    mLastSkippedTag = gained;
+    mActiveTags.append(gained);
+    applySkippedTag(gained);
 
     mBlindStates[mBlindIdx] = BlindState::Skipped;
     mBlindIdx++;
@@ -2758,10 +2787,13 @@ void GameState::applySkippedTag(TagType t, int recursionDepth)
         mPendingInvestmentBonus += 25;
         break;
     case TagType::Voucher:
+        // 计数式：Double Tag 可让同时缓存多张优惠券标签，下面 N 个商店各出一张。
+        ++mTagVoucherPendingShops;
         mTagVoucherNextShop = true;
         break;
     case TagType::Coupon:
-        mShop.setNextShopFree(true);
+        // 计数式：缓存 N 次"下个商店初始价免费"。每进一次商店消耗一份。
+        ++mTagCouponPendingShops;
         break;
     case TagType::Boss:
         mPendingBossEffect = randomBossEffect(mAnte);
@@ -2778,7 +2810,8 @@ void GameState::applySkippedTag(TagType t, int recursionDepth)
         mOneRoundHandSizeBonus += 3;
         break;
     case TagType::D6:
-        mShop.setRerollDiscount(5);
+        // 原版 D6 Tag 只对下个商店第一次重摇免费。计数式：缓存 N 个商店各享受一次。
+        ++mTagD6PendingShops;
         break;
     case TagType::Orbital: {
         HandType types[] = { HandType::HighCard, HandType::Pair, HandType::TwoPair,
@@ -2814,8 +2847,10 @@ void GameState::applySkippedTag(TagType t, int recursionDepth)
 
 void GameState::applyTagEffectsToShop()
 {
-    if (mTagVoucherNextShop && !mShop.voucherOffersMutable().isEmpty()) {
-        // 原版 Voucher Tag 会在商店阶段追加/刷新优惠券；这里把左侧券槽替换成免费未拥有券。
+    // Voucher Tag 的"出券"已由 Shop::roll() 通过 mAllowVoucherThisShop 处理，
+    // 这里不再二次替换券槽——避免双重生成 / 错乱。
+    // 仅保留 free-pack 标签（Standard/Charm/Meteor/Buffoon/Ethereal）的礼包置换。
+    if (false && mTagVoucherNextShop && !mShop.voucherOffersMutable().isEmpty()) {
         mShop.voucherOffersMutable()[0].sold = true;
         mShop.voucherOffersMutable().clear();
         ShopOffer forced;
