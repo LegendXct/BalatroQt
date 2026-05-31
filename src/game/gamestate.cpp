@@ -985,11 +985,13 @@ void GameState::finishWinningRound()
     mPhase = GamePhase::Shop;
     mChaosFreeRerollUsed = false;   // Batch 7：进商店重置混沌小丑免费重摇
     syncShopJokerRules();
-    // 原版：每个 Ante 只有击败 Boss 后的商店出现优惠券。Voucher Tag（含 Double Tag 复制）强制下个商店出券。
-    const bool voucherFromTag = (mTagVoucherPendingShops > 0);
-    mShop.setAllowVoucherThisShop(mBlindType == BlindType::Boss || voucherFromTag);
-    if (voucherFromTag) --mTagVoucherPendingShops;
-    mTagVoucherNextShop = (mTagVoucherPendingShops > 0);
+    // 原版：每个 Ante 只有击败 Boss 后的商店出现优惠券(基础 1 张)。
+    // Voucher Tag(含 Double Tag 复制)的语义是 "在下个商店额外多出 1 张优惠券",
+    // 所以 Boss 商店遇到 N 张缓存 Voucher Tag 应出 1+N 张;非 Boss 商店则出 N 张。
+    const int extraVouchersFromTag = mTagVoucherPendingShops;
+    mTagVoucherPendingShops = 0;
+    mTagVoucherNextShop = false;
+    mShop.setAllowVoucherThisShop(mBlindType == BlindType::Boss);
 
     // Coupon Tag：每张缓存对应一次"下个商店初始价免费"。
     if (mTagCouponPendingShops > 0) {
@@ -1008,15 +1010,30 @@ void GameState::finishWinningRound()
     }
 
     mShop.roll();
+    for (int i = 0; i < extraVouchersFromTag; ++i) mShop.appendVoucherOffer();
     if (mFirstShop) {
         auto &b = mShop.boosterOffersMutable();
         if (b.size() >= 1) {
             ShopOffer &o = b[0];
+            // 保留 Coupon Tag 触发的 cost=0;否则按原版固定 $4 小丑包。
+            const bool wasFree = (o.cost == 0);
             o.kind = OfferKind::Pack;
             o.pack = PackKind::Buffoon;
             o.packSize = PackSize::Normal;
-            o.cost = 4;
+            o.cost = wasFree ? 0 : 4;
             o.sold = false;
+        }
+        // 第一商店硬塞 Buffoon Normal 后,如果旁边那张随机礼包恰好也是 Buffoon Normal,
+        // 就出现两张同封面——按原版规则避免重复封面。
+        if (b.size() >= 2 && b[0].kind == OfferKind::Pack && b[1].kind == OfferKind::Pack &&
+            b[0].pack == b[1].pack && b[0].packSize == b[1].packSize) {
+            // 用一个不同尺寸的同类型,或换成 Arcana Normal 作为兜底——保持卡包性质,但封面不同。
+            ShopOffer &o2 = b[1];
+            o2.pack = PackKind::Arcana;
+            o2.packSize = PackSize::Normal;
+            // cost 维持原本随机礼包的价格(Arcana Normal = $4)。
+            const bool keepFree = (o2.cost == 0);
+            o2.cost = keepFree ? 0 : 4;
         }
         mFirstShop = false;
     }

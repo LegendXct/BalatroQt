@@ -61,6 +61,7 @@ private:
     // (ShopCardButton)；内部读 visibleCardSize 与 isHovered 算位置。
     void syncPriceLblForCardBtn(QWidget *cardBtn);
     void ensureVoucherUiCount(int count);
+    void ensureVoucherBoxSize(int activeCount);   // 根据未售优惠券张数动态扩宽阴影方框
     void layoutVoucherFan();
 
     void onBuyShop(int slot);

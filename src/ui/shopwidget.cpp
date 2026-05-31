@@ -504,7 +504,10 @@ void ShopWidget::buildUi()
     // 最小尺寸跟随放大后的 normal slot（containerW=180、containerH≈330）。
     mVoucherBox = new QWidget(lowerRow);
     mVoucherBox->setObjectName("voucherBox");
-    mVoucherBox->setMinimumSize(dp(174), dp(294));
+    // 原版优惠券区只比一张牌宽,但我们引入了 Voucher Tag 复制后可能出现 2~3 张,
+    // 用一个较宽的初始尺寸+足够高度,确保扇形+弧形排列不会被裁切;真实宽度仍由
+    // ensureVoucherBoxSize() 根据 offers.size() 动态调整。
+    mVoucherBox->setMinimumSize(dp(200), dp(330));
     mVoucherBox->setAttribute(Qt::WA_StyledBackground, true);
     mVoucherBox->setStyleSheet(
         "QWidget#voucherBox { background:rgba(57,72,76,230); border:none; border-radius:14px; }"
@@ -954,46 +957,79 @@ void ShopWidget::ensureVoucherUiCount(int count)
     }
 }
 
+void ShopWidget::ensureVoucherBoxSize(int activeCount)
+{
+    if (!mVoucherBox) return;
+    // 1 张 → 基础宽 200dp;2 张 → +110;3 张 → +220 …… 上限 4 张以内能完整显示。
+    const int extra = qMax(0, activeCount - 1);
+    const int targetW = dp(200) + extra * dp(110);
+    if (mVoucherBox->minimumWidth() != targetW) {
+        mVoucherBox->setMinimumWidth(targetW);
+        if (mVoucherBox->width() < targetW) mVoucherBox->resize(targetW, mVoucherBox->height());
+    }
+}
+
 void ShopWidget::layoutVoucherFan()
 {
     if (!mVoucherBox) return;
 
-    const int offers = mGS ? mGS->shop().voucherOffers().size() : 0;
-    const int visibleCount = qMin(offers, mVoucherUi.size());
-    if (visibleCount <= 0) return;
+    // 只把"未售出"的优惠券计入排列;已售出的槽位仍保留 UI 不参与定位/计数。
+    // 这样:2 张里买掉 1 张 → 剩下 1 张回正居中、不再倾斜;3 张里买掉 1 张 → 剩 2 张左右对称。
+    const auto &voucherOffers = mGS ? mGS->shop().voucherOffers() : QVector<ShopOffer>{};
+    QVector<int> activeSlots;   // 未售出的 mVoucherUi 槽位下标
+    for (int i = 0; i < mVoucherUi.size() && i < voucherOffers.size(); ++i) {
+        if (!voucherOffers[i].sold) activeSlots.append(i);
+    }
+    const int activeCount = activeSlots.size();
+    ensureVoucherBoxSize(activeCount);
 
-    const double mid = (visibleCount - 1) / 2.0;
+    // 已售出槽位:隐藏价格/购买按钮,回正旋转,但保留 ou.card 显示(留位避免布局抖动)。
+    QSet<int> activeSet(activeSlots.begin(), activeSlots.end());
+    for (int i = 0; i < mVoucherUi.size(); ++i) {
+        if (activeSet.contains(i)) continue;
+        OfferUi &ou = mVoucherUi[i];
+        if (auto *scb = dynamic_cast<ShopCardButton *>(ou.cardBtn)) scb->setStaticRotation(0.0);
+        if (ou.cardBtn) ou.cardBtn->setProperty("suppressPrice", true);
+        if (ou.priceLbl) ou.priceLbl->hide();
+        if (ou.buyBtn) ou.buyBtn->hide();
+    }
+    if (activeCount <= 0) return;
+
+    const double mid = (activeCount - 1) / 2.0;
     const int centerX = mVoucherBox->width() / 2;
-    const int centerY = mVoucherBox->height() / 2 + dp(4);
+    // 优惠券基线 Y 与右侧 boosterBox 对齐:以 voucherBox 中心为准,
+    // 不再 +dp(4) 偏移(以前会让初始时优惠券比右侧礼包高一点)。
+    const int centerY = mVoucherBox->height() / 2;
     const int visibleCardW = (!mVoucherUi.isEmpty() && mVoucherUi[0].cardBtn)
         ? mVoucherUi[0].cardBtn->width() : dp(176);
-    const int spreadX = (visibleCount > 1)
-        ? qBound(dp(82), (mVoucherBox->width() - visibleCardW + dp(28)) / (visibleCount - 1), dp(130))
+    const int spreadX = (activeCount > 1)
+        ? qBound(dp(82), (mVoucherBox->width() - visibleCardW + dp(28)) / (activeCount - 1), dp(130))
         : 0;
 
-    int focusSlot = -1;
-    if (mSelectedVoucherSlot >= 0 && mSelectedVoucherSlot < visibleCount)
-        focusSlot = mSelectedVoucherSlot;
-    else if (mHoveredVoucherSlot >= 0 && mHoveredVoucherSlot < visibleCount)
-        focusSlot = mHoveredVoucherSlot;
-    else
-        focusSlot = visibleCount - 1;
+    // 仅 "点击选中" 才上抬,**不再因 hover 上抬**——按原版 G.shop_vouchers 行为。
+    int focusOrder = -1;   // activeSlots 中的索引
+    if (mSelectedVoucherSlot >= 0) {
+        focusOrder = activeSlots.indexOf(mSelectedVoucherSlot);
+    }
+    if (focusOrder < 0) focusOrder = activeCount - 1;   // 默认把最右那张放在最上层
 
-    QVector<int> order;
-    for (int i = 0; i < visibleCount; ++i)
-        if (i != focusSlot) order.append(i);
-    if (focusSlot >= 0) order.append(focusSlot);
+    QVector<int> order;   // 渲染顺序:把 focus 放到最后,确保其在最上层
+    for (int k = 0; k < activeCount; ++k)
+        if (k != focusOrder) order.append(k);
+    order.append(focusOrder);
 
-    for (int orderIdx = 0; orderIdx < order.size(); ++orderIdx) {
-        const int i = order[orderIdx];
-        OfferUi &ou = mVoucherUi[i];
+    for (int renderIdx = 0; renderIdx < order.size(); ++renderIdx) {
+        const int k = order[renderIdx];
+        const int slot = activeSlots[k];
+        OfferUi &ou = mVoucherUi[slot];
         if (!ou.card) continue;
 
         if (ou.card->layout()) ou.card->layout()->activate();
         QWidget *btn = ou.cardBtn ? ou.cardBtn : ou.card;
-        const double rel = i - mid;
+        const double rel = k - mid;
         const int targetCenterX = centerX + int(std::round(rel * spreadX));
-        const bool focused = (i == focusSlot);
+        const bool focused = (k == focusOrder) && (slot == mSelectedVoucherSlot);
+        // 弧形排列保留(rel*22 垂直 + |rel|*8 弧形),但 hover 不再额外上抬。
         const int targetCenterY = centerY + int(std::round(rel * dp(22) + std::abs(rel) * dp(8))) - (focused ? dp(24) : 0);
         const int btnCenterXInCard = btn->x() + btn->width() / 2;
         const int btnCenterYInCard = btn->y() + btn->height() / 2;
@@ -1023,18 +1059,10 @@ void ShopWidget::layoutVoucherFan()
             ou.cardBtn->setProperty("suppressPrice", !focused);
         if (!focused) {
             if (ou.priceLbl) ou.priceLbl->hide();
-            if (ou.buyBtn && i != mSelectedVoucherSlot) ou.buyBtn->hide();
+            if (ou.buyBtn && slot != mSelectedVoucherSlot) ou.buyBtn->hide();
         } else {
             syncPriceLblForCardBtn(ou.cardBtn);
         }
-    }
-
-    for (int i = visibleCount; i < mVoucherUi.size(); ++i) {
-        OfferUi &ou = mVoucherUi[i];
-        if (auto *scb = dynamic_cast<ShopCardButton *>(ou.cardBtn)) scb->setStaticRotation(0.0);
-        if (ou.cardBtn) ou.cardBtn->setProperty("suppressPrice", true);
-        if (ou.priceLbl) ou.priceLbl->hide();
-        if (ou.buyBtn) ou.buyBtn->hide();
     }
 }
 
@@ -1048,12 +1076,12 @@ bool ShopWidget::eventFilter(QObject *obj, QEvent *event)
         int slot = -1;
         DragGroup group = dragGroupForWidget(w, &slot);
         if (group == DragGroup::Voucher) {
+            // 仅记录 hover 槽位以便其它逻辑(如信息面板)使用,**不再触发 layoutVoucherFan**——
+            // 优惠券只有在点击选中时才上抬,hover 不再让它向上移。
             if (event->type() == QEvent::Enter) {
                 mHoveredVoucherSlot = slot;
-                layoutVoucherFan();
             } else if (event->type() == QEvent::Leave && mHoveredVoucherSlot == slot) {
                 mHoveredVoucherSlot = -1;
-                layoutVoucherFan();
             }
         }
         if (group != DragGroup::None) {
