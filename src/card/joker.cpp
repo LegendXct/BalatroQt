@@ -7,7 +7,7 @@
 #include <QSet>
 
 
-static int jokerBaseCost(JokerType t)
+int jokerBaseCost(JokerType t)
 {
     switch (t) {
     case JokerType::Joker: return 2;

@@ -3172,6 +3172,20 @@ void MainWindow::layoutPlayedCards() {
 }
 
 void MainWindow::refreshScore() {
+    if (mGameState->phase() == GamePhase::Shop) {
+        if (mScoreCountAnim) {
+            mScoreCountAnim->stop();
+            mScoreCountAnim->deleteLater();
+            mScoreCountAnim = nullptr;
+        }
+        if (mScoreProgressAnim && mScoreProgressAnim->state() == QAbstractAnimation::Running)
+            mScoreProgressAnim->stop();
+        setLabelScaledText(mLblScore, "0", uiPx(38));
+        mLblTarget->setText(QString::fromUtf8("\342\234\223" "0"));
+        updateScoreProgressBar(0.0, false);
+        return;
+    }
+
     const double score = mGameState->score();
     setLabelScaledText(mLblScore, formatScoreNumber(score), uiPx(38));
     mLblTarget->setText(formatScoreNumber(mGameState->targetScore()));
@@ -5696,21 +5710,13 @@ void MainWindow::onPackFinished()
         mPackFromTag = false;
         AudioManager::instance()->setPitchMod(1.0);
         AudioManager::instance()->setDesiredMusic(QStringLiteral("music1"));
-        // 包来自标签：包关闭即视为对应标签"已被使用"，把它从右侧标签列移除。
-        switch (mPendingPack.kind) {
-        case PackKind::Standard:  removeObtainedTag(TagType::Standard); break;
-        case PackKind::Arcana:    removeObtainedTag(TagType::Charm); break;
-        case PackKind::Celestial: removeObtainedTag(TagType::Meteor); break;
-        case PackKind::Buffoon:   removeObtainedTag(TagType::Buffoon); break;
-        case PackKind::Spectral:  removeObtainedTag(TagType::Ethereal); break;
-        }
-        if (mDynamicBg) mDynamicBg->setMood(DynamicBackgroundItem::Mood::BlindSelect);
-        if (mBlindSelectWidget && mPlayPage) {
-            mBlindSelectWidget->refresh();
-            mBlindSelectWidget->setGeometry(lowerOverlayRect());
-            mBlindSelectWidget->show();
-            mBlindSelectWidget->raise();
-            mBlindSelectWidget->arrangeCards(false);
+        showBlindSelectAfterTagPack();
+        if (!mQueuedTagPacks.isEmpty()) {
+            const PackKind next = mQueuedTagPacks.takeFirst();
+            QTimer::singleShot(260, this, [this, next]() {
+                consumeImmediateTagPack(next);
+            });
+            return;
         }
         return;
     }
@@ -5805,18 +5811,18 @@ void MainWindow::showShopOverlay()
 
     // 原版 tag.lua：shop_start / shop_final_pass / voucher_add / tag_add 类 tag 在
     // 进入商店时触发并消耗。这里在 shop overlay 显示时统一移除它们的图标。
-    removeObtainedTag(TagType::Coupon);
-    removeObtainedTag(TagType::D6);
-    removeObtainedTag(TagType::Voucher);
-    removeObtainedTag(TagType::Foil);
-    removeObtainedTag(TagType::Holographic);
-    removeObtainedTag(TagType::Polychrome);
-    removeObtainedTag(TagType::Negative);
-    removeObtainedTag(TagType::Uncommon);
-    removeObtainedTag(TagType::Rare);
+    removeObtainedTags(TagType::Coupon, 99);
+    removeObtainedTags(TagType::D6, 99);
+    removeObtainedTags(TagType::Voucher, 99);
+    removeObtainedTags(TagType::Foil, 99);
+    removeObtainedTags(TagType::Holographic, 99);
+    removeObtainedTags(TagType::Polychrome, 99);
+    removeObtainedTags(TagType::Negative, 99);
+    removeObtainedTags(TagType::Uncommon, 99);
+    removeObtainedTags(TagType::Rare, 99);
     // Investment Tag 在击败 Boss 时通过结算给 $25。打到 Boss 商店后移除。
     if (mGameState->blindType() == BlindType::Boss)
-        removeObtainedTag(TagType::Investment);
+        removeObtainedTags(TagType::Investment, 99);
 }
 
 void MainWindow::animateShopEntrance()
@@ -5983,10 +5989,14 @@ void MainWindow::openImmediateTagPack(PackKind kind)
     QVector<JokerType> owned;
     for (const Joker &j : mGameState->jokers()) owned.append(j.type);
 
+    ConsumableType telescopePlanet = ConsumableType::Planet_Pluto;
+    const bool telescopeActive =
+        mGameState->hasVoucher(VoucherType::Telescope) &&
+        mGameState->telescopePlanetForPack(telescopePlanet);
     mPendingPack = generatePackContent(kind, size,
                                        mGameState->hasVoucher(VoucherType::OmenGlobe),
-                                       mGameState->hasVoucher(VoucherType::Telescope),
-                                       ConsumableType::Planet_Pluto,
+                                       telescopeActive,
+                                       telescopePlanet,
                                        owned,
                                        false,
                                        mGameState->grosMichelExtinct());
@@ -6011,6 +6021,40 @@ void MainWindow::openImmediateTagPack(PackKind kind)
     mPackOpenWidget->open(mPendingPack, mPendingPackHand,
                           mGameState->consumables(), freeJoker);
     mPackOpenWidget->setGeometry(lowerOverlayRect());
+}
+
+void MainWindow::removeObtainedPackTag(PackKind kind)
+{
+    switch (kind) {
+    case PackKind::Standard:  removeObtainedTag(TagType::Standard); break;
+    case PackKind::Arcana:    removeObtainedTag(TagType::Charm); break;
+    case PackKind::Celestial: removeObtainedTag(TagType::Meteor); break;
+    case PackKind::Buffoon:   removeObtainedTag(TagType::Buffoon); break;
+    case PackKind::Spectral:  removeObtainedTag(TagType::Ethereal); break;
+    }
+}
+
+void MainWindow::consumeImmediateTagPack(PackKind kind)
+{
+    // 原版 Tag:yep() 会先播放标签确认反馈，随后标签从右下角消失并执行 func。
+    // 卡包类 tag 也保留这个流程：先让玩家看到获得的 tag，再消费 tag 打开包。
+    playOriginalTagYepSound(this, 700);
+    QTimer::singleShot(700, this, [this, kind]() {
+        removeObtainedPackTag(kind);
+        openImmediateTagPack(kind);
+    });
+}
+
+void MainWindow::showBlindSelectAfterTagPack()
+{
+    if (mDynamicBg) mDynamicBg->setMood(DynamicBackgroundItem::Mood::BlindSelect);
+    if (mBlindSelectWidget && mPlayPage) {
+        mBlindSelectWidget->refresh();
+        mBlindSelectWidget->setGeometry(lowerOverlayRect());
+        mBlindSelectWidget->show();
+        mBlindSelectWidget->raise();
+        mBlindSelectWidget->arrangeCards(false);
+    }
 }
 
 void MainWindow::onBlindSelectEntered()
@@ -6079,8 +6123,8 @@ void MainWindow::onBlindStarted()
     //   - Boss Tag：在选 Boss 时已 reroll Boss，进入 Boss 战即消耗。
     //   - Juggle Tag：进入下一回合就生效（修改 mOneRoundHandSizeBonus）。
     //   - Investment Tag：在击败 Boss 时通过结算消耗（这里只补漏：进非 Boss 不消耗）。
-    if (mGameState->blindType() == BlindType::Boss) removeObtainedTag(TagType::Boss);
-    removeObtainedTag(TagType::Juggle);
+    if (mGameState->blindType() == BlindType::Boss) removeObtainedTags(TagType::Boss, 99);
+    removeObtainedTags(TagType::Juggle, 99);
     mHandY = mHandYNormal;
     if (mBlindSelectWidget) mBlindSelectWidget->hide();
     if (mShopWidget) mShopWidget->hide();
@@ -6378,10 +6422,23 @@ void MainWindow::setContextPage(int page)
     group->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
-void MainWindow::onSkipBlind(int /*idx*/)
+void MainWindow::onSkipBlind(int idx)
+{
+    const TagType pendingTag = mGameState->blindTag(idx);
+    if (pendingTag == TagType::Boss && mBlindSelectWidget) {
+        mBlindSelectWidget->animateBossReroll([this, idx]() { completeSkipBlind(idx); });
+        return;
+    }
+    completeSkipBlind(idx);
+}
+
+void MainWindow::completeSkipBlind(int /*idx*/)
 {
     mGameState->skipCurrentBlind();
     TagType gained = mGameState->lastSkippedTag();
+    const int copiedByDouble = mGameState->lastConsumedDoubleTags();
+    if (gained != TagType::Double && copiedByDouble > 0)
+        transformObtainedTags(TagType::Double, gained, copiedByDouble);
     TagData td = tagData(gained);
     addObtainedTag(gained, td.spritePos.x(), td.spritePos.y());
     AudioManager::instance()->play(QStringLiteral("generic1"), 1.0, 1.0);
@@ -6390,11 +6447,23 @@ void MainWindow::onSkipBlind(int /*idx*/)
     refreshJokerSlots();
 
     switch (gained) {
-    case TagType::Standard: playOriginalTagYepSound(this, 700); openImmediateTagPack(PackKind::Standard); break;
-    case TagType::Charm:    playOriginalTagYepSound(this, 700); openImmediateTagPack(PackKind::Arcana); break;
-    case TagType::Meteor:   playOriginalTagYepSound(this, 700); openImmediateTagPack(PackKind::Celestial); break;
-    case TagType::Buffoon:  playOriginalTagYepSound(this, 700); openImmediateTagPack(PackKind::Buffoon); break;
-    case TagType::Ethereal: playOriginalTagYepSound(this, 700); openImmediateTagPack(PackKind::Spectral); break;
+    case TagType::Standard:
+    case TagType::Charm:
+    case TagType::Meteor:
+    case TagType::Buffoon:
+    case TagType::Ethereal: {
+        PackKind kind = PackKind::Standard;
+        if (gained == TagType::Charm) kind = PackKind::Arcana;
+        else if (gained == TagType::Meteor) kind = PackKind::Celestial;
+        else if (gained == TagType::Buffoon) kind = PackKind::Buffoon;
+        else if (gained == TagType::Ethereal) kind = PackKind::Spectral;
+
+        mQueuedTagPacks.clear();
+        for (int i = 0; i < copiedByDouble; ++i)
+            mQueuedTagPacks.append(kind);
+        consumeImmediateTagPack(kind);
+        break;
+    }
     // 原版 tag.lua:immediate 系列：tag 立即把钱/牌型变化打到玩家身上，
     // 视觉提示完一小段时间后从 tag 列表移除——这里 1.4 s 后移除。
     case TagType::Skip:
@@ -6403,7 +6472,10 @@ void MainWindow::onSkipBlind(int /*idx*/)
     case TagType::Economy:
     case TagType::Orbital:
     case TagType::TopUp:
-        QTimer::singleShot(1400, this, [this, gained]() { removeObtainedTag(gained); });
+        QTimer::singleShot(1400, this, [this, gained, copiedByDouble]() { removeObtainedTags(gained, copiedByDouble + 1); });
+        break;
+    case TagType::Boss:
+        QTimer::singleShot(1400, this, [this]() { removeObtainedTag(TagType::Boss); });
         break;
     default: break;
     }
@@ -6438,6 +6510,31 @@ void MainWindow::removeObtainedTag(TagType type)
             return;
         }
     }
+}
+
+void MainWindow::removeObtainedTags(TagType type, int count)
+{
+    for (int i = 0; i < count; ++i)
+        removeObtainedTag(type);
+}
+
+void MainWindow::transformObtainedTags(TagType from, TagType to, int count)
+{
+    if (count <= 0) return;
+    QPixmap sheet(":/textures/images/tags.png");
+    if (sheet.isNull()) return;
+    TagData td = tagData(to);
+    QPixmap pix = sheet.copy(td.spritePos.x() * 68, td.spritePos.y() * 68, 68, 68)
+                      .scaled(48, 48, Qt::KeepAspectRatio,
+                              Qt::SmoothTransformation);
+    int changed = 0;
+    for (ObtainedTagEntry &entry : mObtainedTagIcons) {
+        if (entry.type != from) continue;
+        entry.type = to;
+        if (entry.item) entry.item->setPixmap(pix);
+        if (++changed >= count) break;
+    }
+    relayoutObtainedTags();
 }
 
 void MainWindow::clearObtainedTags()

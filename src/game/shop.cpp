@@ -307,11 +307,10 @@ QVector<VoucherType> baseVoucherPool() {
 void Shop::roll() {
     rerollShopOnly();
 
-    mVoucherOffers.clear();
-    // 原版规则：每个 Ante 只有击败 Boss 后的商店会出现优惠券，且每 Ante 最多只能买 1 张。
-    // mAllowVoucherThisShop 由 GameState 在 Boss 商店阶段置 true、在小/大盲商店清空。
-    if (mAllowVoucherThisShop)
+    if (mAllowVoucherThisShop) {
+        mVoucherOffers.clear();
         mVoucherOffers.append(randomVoucherOffer());
+    }
 
     mBoosterOffers.clear();
     for (int i = 0; i < 2; ++i) mBoosterOffers.append(randomBoosterOffer(mBoosterOffers));
@@ -324,6 +323,19 @@ void Shop::roll() {
 
 void Shop::rerollShopOnly() {
     mShopOffers.clear();
+
+    while (!mPendingRarityJokers.isEmpty() && mShopOffers.size() < mShopSlots) {
+        const JokerRarity rarity = mPendingRarityJokers.takeFirst();
+        if (!canCreateRarityJoker(rarity)) continue;
+
+        ShopOffer offer = makeRarityJokerOffer(rarity, mShopOffers);
+        if (!mPendingEditionJokers.isEmpty()) {
+            offer.jokerEdition = mPendingEditionJokers.takeFirst();
+            offer.cost = 0;
+            offer.freeByTag = true;
+        }
+        mShopOffers.append(offer);
+    }
 
     // 原版 Foil/Holographic/Polychrome/Negative Tag：下个商店生成一张对应版本小丑，价格为 $0。
     while (!mPendingEditionJokers.isEmpty() && mShopOffers.size() < mShopSlots) {
@@ -424,6 +436,7 @@ void Shop::resetForNewBlind() {
     // base_reroll_cost = 5；D6/RerollSurplus 等优惠券通过 mRerollDiscount 减免基底。
     mRerollCost = qMax(0, 5 - mRerollDiscount);
     mNextShopFree = false;
+    mNextShopRerollStartsFree = false;
 }
 
 void Shop::changeShopSlots(int delta) {
@@ -440,6 +453,40 @@ void Shop::addPendingEditionJoker(Edition e)
 {
     if (e == Edition::None) return;
     mPendingEditionJokers.append(e);
+}
+
+void Shop::addPendingRarityJoker(JokerRarity rarity)
+{
+    mPendingRarityJokers.append(rarity);
+}
+
+bool Shop::canCreateRarityJoker(JokerRarity rarity) const
+{
+    QVector<JokerType> rolled;
+    for (const ShopOffer &existing : mShopOffers)
+        if (existing.kind == OfferKind::Joker) rolled.append(existing.joker);
+
+    for (JokerType t : jokerPool()) {
+        if (jokerRarity(t) != rarity) continue;
+        if (t == JokerType::GrosMichel && mGrosMichelExtinct) continue;
+        if (t == JokerType::Cavendish && !mGrosMichelExtinct) continue;
+        if (!mAllowJokerDuplicates && (mOwnedJokers.contains(t) || rolled.contains(t)))
+            continue;
+        return true;
+    }
+    return false;
+}
+
+void Shop::appendVoucherOffer()
+{
+    for (int attempt = 0; attempt < 40; ++attempt) {
+        ShopOffer offer = randomVoucherOffer();
+        if (!duplicatesOffer(offer, mVoucherOffers)) {
+            mVoucherOffers.append(offer);
+            return;
+        }
+    }
+    mVoucherOffers.append(randomVoucherOffer());
 }
 
 int Shop::applyDiscount(int rawCost) const {
@@ -529,16 +576,29 @@ ShopOffer Shop::makeEditionJokerOffer(Edition e, const QVector<ShopOffer> &alrea
     return o;
 }
 
+ShopOffer Shop::makeRarityJokerOffer(JokerRarity rarity, const QVector<ShopOffer> &alreadyRolled) const
+{
+    QVector<JokerType> rolled;
+    for (const ShopOffer &existing : alreadyRolled)
+        if (existing.kind == OfferKind::Joker) rolled.append(existing.joker);
+
+    ShopOffer o;
+    o.kind = OfferKind::Joker;
+    o.joker = randomJokerTypeByRarity(rarity, rolled);
+    o.jokerEdition = Edition::None;
+    o.cost = 0;
+    o.freeByTag = true;
+    return o;
+}
+
 Edition Shop::randomJokerEdition() const
 {
-    // 原版 poll_edition：negative 0.3%，polychrome 0.6%，holo 2%，foil 4%，
-    // Hone/Glow Up 通过 edition_rate=2/4 放大除 negative 外的概率。
+    // Source poll_edition probabilities. Hone/Glow Up scale every edition except Negative.
     double p = QRandomGenerator::global()->generateDouble();
-    // 调试期：把负片小丑概率临时提高到 20%。正式复刻时改回 0.003。
-    if (p < 0.20) return Edition::Negative;
-    if (p < 0.20 + 0.006 * mJokerEditionRate) return Edition::Polychrome;
-    if (p < 0.20 + 0.026 * mJokerEditionRate) return Edition::Holographic;
-    if (p < 0.20 + 0.066 * mJokerEditionRate) return Edition::Foil;
+    if (p > 1.0 - 0.003) return Edition::Negative;
+    if (p > 1.0 - 0.006 * mJokerEditionRate) return Edition::Polychrome;
+    if (p > 1.0 - 0.02 * mJokerEditionRate) return Edition::Holographic;
+    if (p > 1.0 - 0.04 * mJokerEditionRate) return Edition::Foil;
     return Edition::None;
 }
 
@@ -694,8 +754,8 @@ CardData Shop::randomPlayingCard(bool enhancedPossible, const QVector<ShopOffer>
         c.rank = static_cast<Rank>(rng->bounded(13) + 2);
 
         if (enhancedPossible) {
-            // Illusion：商店游戏牌可能带增强、版本或印章。概率先做成轻量版，保证可玩且不破坏牌池。
-            if (rng->bounded(100) < 65) {
+            // Source Illusion shop-card generation: optional enhancement and optional edition.
+            if (rng->generateDouble() > 0.6) {
                 constexpr Enhancement pool[] = {
                     Enhancement::Bonus, Enhancement::Mult, Enhancement::Wild,
                     Enhancement::Glass, Enhancement::Steel, Enhancement::Lucky,
@@ -703,13 +763,11 @@ CardData Shop::randomPlayingCard(bool enhancedPossible, const QVector<ShopOffer>
                 };
                 c.enhancement = pool[rng->bounded(int(sizeof(pool)/sizeof(*pool)))];
             }
-            if (rng->bounded(100) < 20) {
-                constexpr Edition editions[] = { Edition::Foil, Edition::Holographic, Edition::Polychrome };
-                c.edition = editions[rng->bounded(int(sizeof(editions)/sizeof(*editions)))];
-            }
-            if (rng->bounded(100) < 20) {
-                constexpr Seal seals[] = { Seal::Gold, Seal::Red, Seal::Blue, Seal::Purple };
-                c.seal = seals[rng->bounded(int(sizeof(seals)/sizeof(*seals)))];
+            if (rng->generateDouble() > 0.8) {
+                double ep = rng->generateDouble();
+                if (ep > 0.85) c.edition = Edition::Polychrome;
+                else if (ep > 0.5) c.edition = Edition::Holographic;
+                else c.edition = Edition::Foil;
             }
         }
         ShopOffer tmp; tmp.kind = OfferKind::PlayingCard; tmp.playingCard = c;
@@ -800,6 +858,28 @@ JokerType Shop::randomJokerType(const QVector<JokerType> &alreadyRolled) const {
         }
     }
     if (pool.isEmpty()) pool = jokerPool();
+    return pool[QRandomGenerator::global()->bounded(pool.size())];
+}
+
+JokerType Shop::randomJokerTypeByRarity(JokerRarity rarity, const QVector<JokerType> &alreadyRolled) const {
+    QVector<JokerType> pool;
+    for (JokerType t : jokerPool()) {
+        if (jokerRarity(t) != rarity) continue;
+        if (t == JokerType::GrosMichel && mGrosMichelExtinct) continue;
+        if (t == JokerType::Cavendish && !mGrosMichelExtinct) continue;
+        if (!mAllowJokerDuplicates && (mOwnedJokers.contains(t) || alreadyRolled.contains(t)))
+            continue;
+        pool.append(t);
+    }
+    if (pool.isEmpty()) {
+        for (JokerType t : jokerPool()) {
+            if (jokerRarity(t) != rarity) continue;
+            if (t == JokerType::GrosMichel && mGrosMichelExtinct) continue;
+            if (t == JokerType::Cavendish && !mGrosMichelExtinct) continue;
+            pool.append(t);
+        }
+    }
+    if (pool.isEmpty()) return randomJokerType(alreadyRolled);
     return pool[QRandomGenerator::global()->bounded(pool.size())];
 }
 

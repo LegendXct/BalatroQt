@@ -329,11 +329,8 @@ void PackOpenWidget::open(const PackContent &content,
     raise();
     layoutPanel();
     refreshAll();
-    QTimer::singleShot(0, this, [this]() {
-        layoutPackHand(-1, /*instant=*/true);
-        // 先把选项/手牌 hide() 等开包动画开壳后再炸出来。
-        startPackReveal();
-    });
+    layoutPackHand(-1, /*instant=*/true);
+    startPackReveal();
 }
 
 void PackOpenWidget::setPackHand(const QVector<CardData> &packHand)
@@ -1503,11 +1500,6 @@ void PackOpenWidget::startPackReveal()
                     mRevealDissolveT = 0.0;
                     mRevealDissolveTimer->start();
                 }
-                // dissolve 大概持续 460ms（见下方定时器），这里留 380ms 让包基本散完。
-                QPointer<PackOpenWidget> g(this);
-                QTimer::singleShot(380, this, [g]() {
-                    if (g) g->animateCardsIn();
-                });
             }
         }
     });
@@ -1527,7 +1519,11 @@ void PackOpenWidget::startPackReveal()
 
     connect(timeline, &QVariantAnimation::finished, this, [this, crackFired]() {
         delete crackFired;
-        endPackReveal();
+        animateCardsIn();
+        QPointer<PackOpenWidget> g(this);
+        QTimer::singleShot(520, this, [g]() {
+            if (g) g->endPackReveal();
+        });
     });
     timeline->start(QAbstractAnimation::DeleteWhenStopped);
 }

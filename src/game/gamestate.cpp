@@ -55,6 +55,60 @@ static bool consumableNeedsFreeJokerSlot(ConsumableType type)
         || type == ConsumableType::Spectral_Soul;
 }
 
+static int editionExtraCost(Edition e)
+{
+    switch (e) {
+    case Edition::Foil:        return 2;
+    case Edition::Holographic: return 3;
+    case Edition::Polychrome:  return 5;
+    case Edition::Negative:    return 5;
+    default:                   return 0;
+    }
+}
+
+static int discountedCost(int rawCost, int discountPercent)
+{
+    if (discountPercent <= 0) return qMax(1, rawCost);
+    return qMax(1, int(std::floor((rawCost + 0.5) * (100 - discountPercent) / 100.0)));
+}
+
+static bool telescopeHandVisible(HandType t, int played)
+{
+    switch (t) {
+    case HandType::HighCard:
+    case HandType::Pair:
+    case HandType::TwoPair:
+    case HandType::ThreeOfAKind:
+    case HandType::Straight:
+    case HandType::Flush:
+    case HandType::FullHouse:
+    case HandType::FourOfAKind:
+    case HandType::StraightFlush:
+        return true;
+    default:
+        return played > 0;
+    }
+}
+
+static bool planetMatchesHand(ConsumableType type, HandType hand)
+{
+    switch (type) {
+    case ConsumableType::Planet_Pluto:   return hand == HandType::HighCard;
+    case ConsumableType::Planet_Mercury: return hand == HandType::Pair;
+    case ConsumableType::Planet_Uranus:  return hand == HandType::TwoPair;
+    case ConsumableType::Planet_Venus:   return hand == HandType::ThreeOfAKind;
+    case ConsumableType::Planet_Saturn:  return hand == HandType::Straight;
+    case ConsumableType::Planet_Jupiter: return hand == HandType::Flush;
+    case ConsumableType::Planet_Earth:   return hand == HandType::FullHouse;
+    case ConsumableType::Planet_Mars:    return hand == HandType::FourOfAKind;
+    case ConsumableType::Planet_Neptune: return hand == HandType::StraightFlush || hand == HandType::RoyalFlush;
+    case ConsumableType::Planet_PlanetX: return hand == HandType::FiveOfAKind;
+    case ConsumableType::Planet_Ceres:   return hand == HandType::FlushHouse;
+    case ConsumableType::Planet_Eris:    return hand == HandType::FlushFive;
+    default: return false;
+    }
+}
+
 static auto rankComp = [](const CardData &a, const CardData &b) {
     const bool aStone = a.enhancement == Enhancement::Stone;
     const bool bStone = b.enhancement == Enhancement::Stone;
@@ -308,6 +362,16 @@ void GameState::syncShopJokerRules()
     mShop.setOwnedJokers(ownedJokerTypes(), hasJokerDuplicateBypass());
     mShop.setOwnedConsumables(ownedConsumableTypes());
     mShop.setGrosMichelExtinct(mGrosMichelExtinct);
+}
+
+void GameState::updateOwnedSellValues()
+{
+    const int discount = mShop.discountPercent();
+    for (Joker &j : mJokers) {
+        const int rawCost = jokerBaseCost(j.type) + editionExtraCost(j.edition);
+        const int currentCost = discountedCost(rawCost, discount);
+        j.sellValue = qMax(1, currentCost / 2) + qMax(0, j.extraSellValue);
+    }
 }
 
 void GameState::dealCards(DrawContext ctx) {
@@ -679,6 +743,15 @@ void GameState::playCards(const QVector<int> &indices) {
     }
 
     // 只缓存本手最终分。真正加到回合总分，要等 UI 播完逐张牌/小丑动画之后。
+    if (hasVoucher(VoucherType::Observatory)) {
+        for (const Consumable &c : mConsumables) {
+            if (c.kind == ConsumableKind::Planet && planetMatchesHand(c.type, result.type)) {
+                result.xmult *= 1.5;
+                result.events.append({ ScoreEventKind::JokerXMult, -1, -1, -1, 0, 1.5 });
+            }
+        }
+    }
+
     mPendingHandScore = result.chips * result.mult * result.xmult;
     if (!std::isfinite(mPendingHandScore)) mPendingHandScore = std::numeric_limits<double>::infinity();
     mPendingPlayedIndices = sorted;
@@ -864,7 +937,7 @@ void GameState::finishWinningRound()
         for (Joker &j : mJokers) {
             if (j.isDebuffed) continue;
             switch (j.type) {
-            case JokerType::Egg:       j.sellValue += 3; break;
+            case JokerType::Egg:       j.extraSellValue += 3; break;
             case JokerType::Rocket:
                 addGold(qMax(0, j.counter));
                 if (bossDefeated) j.counter += 2;
@@ -888,9 +961,10 @@ void GameState::finishWinningRound()
         for (const Joker &j : mJokers)
             if (!j.isDebuffed && j.type == JokerType::GiftCard) ++gifts;
         if (gifts > 0) {
-            for (Joker &j : mJokers) j.sellValue += gifts;
+            for (Joker &j : mJokers) j.extraSellValue += gifts;
             for (Consumable &c : mConsumables) c.sellValue += gifts;
         }
+        updateOwnedSellValues();
     }
 
     processEndOfRoundJokerExtinctions();
@@ -916,6 +990,7 @@ void GameState::finishWinningRound()
     mShop.setAllowVoucherThisShop(mBlindType == BlindType::Boss || voucherFromTag);
     if (voucherFromTag) --mTagVoucherPendingShops;
     mTagVoucherNextShop = (mTagVoucherPendingShops > 0);
+
     // Coupon Tag：每张缓存对应一次"下个商店初始价免费"。
     if (mTagCouponPendingShops > 0) {
         mShop.setNextShopFree(true);
@@ -923,6 +998,7 @@ void GameState::finishWinningRound()
     } else {
         mShop.setNextShopFree(false);
     }
+
     // D6 Tag：每张缓存对应一次"下个商店重摇折扣"。
     if (mTagD6PendingShops > 0) {
         mShop.setRerollDiscount(5);
@@ -930,6 +1006,7 @@ void GameState::finishWinningRound()
     } else {
         mShop.setRerollDiscount(0);
     }
+
     mShop.roll();
     if (mFirstShop) {
         auto &b = mShop.boosterOffersMutable();
@@ -1337,14 +1414,8 @@ bool GameState::buyShopOffer(int idx) {
         mGold -= t.cost;
         Joker j = createJoker(t.joker);
         j.edition = t.jokerEdition;
-        switch (j.edition) {
-        case Edition::Foil:
-        case Edition::Holographic: j.sellValue += 1; break;
-        case Edition::Polychrome:  j.sellValue += 2; break;
-        case Edition::Negative:    j.sellValue += 3; break;
-        default: break;
-        }
         mJokers.append(j);
+        updateOwnedSellValues();
         syncShopJokerRules();
         emit jokersChanged();
     } else if (o.kind == OfferKind::Tarot ||
@@ -1432,6 +1503,7 @@ bool GameState::buyVoucherOffer(int idx) {
 
     emit goldChanged();
     emit shopChanged();
+    emit jokersChanged();
     emit consumablesChanged();
     return true;
 }
@@ -1440,18 +1512,50 @@ bool GameState::hasVoucher(VoucherType t) const {
     return mRedeemedVouchers.contains(t);
 }
 
+bool GameState::telescopePlanetForPack(ConsumableType &out) const
+{
+    const QVector<HandType> order = {
+        HandType::HighCard, HandType::Pair, HandType::TwoPair,
+        HandType::ThreeOfAKind, HandType::Straight, HandType::Flush,
+        HandType::FullHouse, HandType::FourOfAKind, HandType::StraightFlush,
+        HandType::RoyalFlush, HandType::FiveOfAKind, HandType::FlushHouse,
+        HandType::FlushFive,
+    };
+
+    bool found = false;
+    HandType best = HandType::HighCard;
+    int bestPlayed = 0;
+    for (HandType t : order) {
+        auto it = mHandLevels.constFind(t);
+        const int played = (it == mHandLevels.constEnd()) ? 0 : it.value().played;
+        if (!telescopeHandVisible(t, played)) continue;
+        if (played > bestPlayed) {
+            found = true;
+            best = t;
+            bestPlayed = played;
+        }
+    }
+    if (!found || bestPlayed <= 0) return false;
+    out = planetTypeFor(best);
+    return true;
+}
+
 void GameState::applyVoucher(VoucherType t) {
     switch (t) {
     case VoucherType::Overstock:
     case VoucherType::OverstockPlus:
         mShop.changeShopSlots(1);
-        mShop.rerollShopOnly();
+        mShop.ensureShopOfferCount();
         break;
     case VoucherType::ClearanceSale:
         mShop.setDiscountPercent(25);
+        mShop.refreshCurrentOfferCosts();
+        updateOwnedSellValues();
         break;
     case VoucherType::Liquidation:
         mShop.setDiscountPercent(50);
+        mShop.refreshCurrentOfferCosts();
+        updateOwnedSellValues();
         break;
     case VoucherType::RerollSurplus:
         mShop.setRerollDiscount(2);
@@ -1476,6 +1580,7 @@ void GameState::applyVoucher(VoucherType t) {
         mShop.setPlayingCardRate(4.0);
         break;
     case VoucherType::Illusion:
+        mShop.setPlayingCardRate(4.0);
         mShop.setPlayingCardsEnhanced(true);
         break;
     case VoucherType::CrystalBall:
@@ -1771,6 +1876,13 @@ double GameState::simulatePlayScore(const QVector<int> &orderedIndices)
         }
     }
 
+    if (hasVoucher(VoucherType::Observatory)) {
+        for (const Consumable &c : mConsumables) {
+            if (c.kind == ConsumableKind::Planet && planetMatchesHand(c.type, result.type))
+                result.xmult *= 1.5;
+        }
+    }
+
     mDryRun = false;
 
     double score = result.chips * result.mult * result.xmult;
@@ -2017,8 +2129,10 @@ bool GameState::buyPack(int idx, PackContent &out)
 
     ShopOffer t = mShop.takeBoosterOffer(idx);
     mGold -= t.cost;
-    out = generatePackContent(t.pack, t.packSize, hasVoucher(VoucherType::OmenGlobe), hasVoucher(VoucherType::Telescope),
-                              ConsumableType::Planet_Pluto,
+    ConsumableType telescopePlanet = ConsumableType::Planet_Pluto;
+    const bool telescopeActive = hasVoucher(VoucherType::Telescope) && telescopePlanetForPack(telescopePlanet);
+    out = generatePackContent(t.pack, t.packSize, hasVoucher(VoucherType::OmenGlobe), telescopeActive,
+                              telescopePlanet,
                               ownedJokerTypes(), hasJokerDuplicateBypass(), mGrosMichelExtinct);
 
     // Batch 8：幻觉——打开卡包时 1/2 概率创建塔罗牌
@@ -2333,6 +2447,7 @@ bool GameState::applyPackChoice(const PackContent &pack, int chosenIdx,
         if (chosenIdx >= pack.jokers.size()) return false;
         if (!canAddJoker()) return false;
         mJokers.append(createJoker(pack.jokers[chosenIdx]));
+        updateOwnedSellValues();
         syncShopJokerRules();
         emit jokersChanged();
         emit shopChanged();
@@ -2415,6 +2530,7 @@ void GameState::startGame()
     mHasTagFreePack = false;
     mActiveTags.clear();
     mLastSkippedTag = TagType::Skip;
+    mLastConsumedDoubleTags = 0;
     mPendingDoubleTags = 0;
     mTotalSkipsThisRun = 0;
     mTotalHandsPlayedThisRun = 0;
@@ -2441,6 +2557,7 @@ void GameState::startGame()
         mBlindStates[i] = (i == 0) ? BlindState::Current : BlindState::Upcoming;
 
     mFirstShop = true;
+    mVoucherRolledAnte = 0;
     prepareBlindTags();
     enterBlindSelect();
 
@@ -2460,6 +2577,58 @@ TagType GameState::blindTag(int idx) const
 {
     if (idx == 0 || idx == 1) return mBlindTags[idx];
     return TagType::Skip;
+}
+
+int GameState::projectedTagReward(TagType type) const
+{
+    switch (type) {
+    case TagType::Skip:
+        return qMax(1, mTotalSkipsThisRun + 1) * 5;
+    case TagType::Handy:
+        return qMax(0, mTotalHandsPlayedThisRun);
+    case TagType::Garbage:
+        return qMax(0, mUnusedDiscardsThisRun);
+    case TagType::Economy:
+        return qMin(40, qMax(0, mGold));
+    default:
+        return 0;
+    }
+}
+
+QString GameState::tagDescriptionFor(TagType type) const
+{
+    const TagData td = tagData(type);
+    const QString money = QStringLiteral("<span style=\"color:#eac058;font-weight:bold\">$%1</span>");
+    switch (type) {
+    case TagType::Skip:
+        return QStringLiteral("%1<br/>本赛局每跳过一次盲注，获得 %2<br/>"
+                              "<span style=\"color:#9aa4a9\">将获得 %3</span>")
+            .arg(td.name, money.arg(5), money.arg(projectedTagReward(type)));
+    case TagType::Handy:
+        return QStringLiteral("%1<br/>本赛局每打出一次手牌，获得 %2<br/>"
+                              "<span style=\"color:#9aa4a9\">将获得 %3</span>")
+            .arg(td.name, money.arg(1), money.arg(projectedTagReward(type)));
+    case TagType::Garbage:
+        return QStringLiteral("%1<br/>本赛局每个未使用的弃牌次数，获得 %2<br/>"
+                              "<span style=\"color:#9aa4a9\">将获得 %3</span>")
+            .arg(td.name, money.arg(1), money.arg(projectedTagReward(type)));
+    case TagType::Economy:
+        return QStringLiteral("%1<br/>将当前金钱翻倍，最多获得 %2<br/>"
+                              "<span style=\"color:#9aa4a9\">将获得 %3</span>")
+            .arg(td.name, money.arg(40), money.arg(projectedTagReward(type)));
+    case TagType::D6:
+        return QStringLiteral("%1<br/>下一次商店重掷起价为 %2").arg(td.name, money.arg(0));
+    case TagType::Voucher:
+        return QStringLiteral("%1<br/>下个商店额外添加 1 张优惠券<br/>"
+                              "<span style=\"color:#9aa4a9\">优惠券本身不免费</span>").arg(td.name);
+    case TagType::Rare:
+        return QStringLiteral("%1<br/>下个商店强制生成一张免费的稀有小丑<br/>"
+                              "<span style=\"color:#9aa4a9\">若没有可用稀有小丑则 NOPE</span>").arg(td.name);
+    case TagType::Uncommon:
+        return QStringLiteral("%1<br/>下个商店强制生成一张免费的罕见小丑").arg(td.name);
+    default:
+        return QStringLiteral("%1<br/>%2").arg(td.name, td.description);
+    }
 }
 
 void GameState::enterBlindSelect() {
@@ -2651,7 +2820,7 @@ void GameState::triggerBlindSelectJokers(BlindType type)
         }
     }
 
-    if (jokersDirty) { syncShopJokerRules(); emit jokersChanged(); }
+    if (jokersDirty) { updateOwnedSellValues(); syncShopJokerRules(); emit jokersChanged(); }
 }
 
 void GameState::cleanupDepletedJokers()
@@ -2726,14 +2895,16 @@ void GameState::skipCurrentBlind()
     if (mBlindIdx >= 2) return;
 
     TagType gained = mBlindTags[mBlindIdx];
+
     // 必须在 applySkippedTag 之前 ++ skip 计数：原版 Skip Tag 公式
     // `G.GAME.skips * $5` 中的 G.GAME.skips 是包含本次跳过的，第一次跳过给 $5。
     mTotalSkipsThisRun++;
 
-    // 原版 add_tag（UI_definitions.lua:1252）：先用 tag_add 事件通知所有已存在的
-    // Double Tag，它们会复制传入的 tag 加进 inventory；之后再把原始 tag 入 inventory。
-    // 顺序很关键——保证一张 Double + 一张 Skip = 1 个原 Skip + 1 个 Double 复制出的 Skip。
+    // 原版 add_tag：先让已有 Double Tag 复制新获得的非 Double Tag，之后再加入原始 tag。
     int doublesToFire = (gained != TagType::Double) ? mPendingDoubleTags : 0;
+    mLastSkippedTag = gained;
+    mLastConsumedDoubleTags = doublesToFire;
+
     if (doublesToFire > 0) {
         mPendingDoubleTags = 0;
         for (int i = 0; i < doublesToFire; ++i) {
@@ -2744,7 +2915,6 @@ void GameState::skipCurrentBlind()
         }
     }
 
-    mLastSkippedTag = gained;
     mActiveTags.append(gained);
     applySkippedTag(gained);
 
@@ -2837,38 +3007,37 @@ void GameState::applySkippedTag(TagType t, int recursionDepth)
     case TagType::Polychrome:
         mShop.addPendingEditionJoker(Edition::Polychrome);
         break;
-    case TagType::TopUp:
+    case TagType::TopUp: {
+        syncShopJokerRules();
+        int created = 0;
+        while (created < 2 && canAddJoker()) {
+            QVector<JokerType> already = ownedJokerTypes();
+            Joker j = createJoker(mShop.randomJokerForTag(already));
+            mJokers.append(j);
+            updateOwnedSellValues();
+            ++created;
+            syncShopJokerRules();
+        }
+        if (created > 0) {
+            emit jokersChanged();
+            emit shopChanged();
+        }
+        break;
+    }
     case TagType::Uncommon:
+        mShop.addPendingRarityJoker(JokerRarity::Uncommon);
+        break;
     case TagType::Rare:
-        // 罕见/稀有/充值涉及稀有度池。当前 JokerType 还没有 rarity 字段，暂时只登记图标。
+        mShop.addPendingRarityJoker(JokerRarity::Rare);
         break;
     }
 }
 
 void GameState::applyTagEffectsToShop()
 {
-    // Voucher Tag 的"出券"已由 Shop::roll() 通过 mAllowVoucherThisShop 处理，
+    // Voucher Tag 的“出券”已由 Shop::roll() 通过 mAllowVoucherThisShop 处理，
     // 这里不再二次替换券槽——避免双重生成 / 错乱。
     // 仅保留 free-pack 标签（Standard/Charm/Meteor/Buffoon/Ethereal）的礼包置换。
-    if (false && mTagVoucherNextShop && !mShop.voucherOffersMutable().isEmpty()) {
-        mShop.voucherOffersMutable()[0].sold = true;
-        mShop.voucherOffersMutable().clear();
-        ShopOffer forced;
-        forced.kind = OfferKind::Voucher;
-        QVector<VoucherType> pool;
-        for (VoucherType v : baseVoucherPool()) {
-            if (mRedeemedVouchers.contains(v)) continue;
-            VoucherType prereq = prerequisiteVoucherFor(v);
-            if (prereq != v && !mRedeemedVouchers.contains(prereq)) continue;
-            pool.append(v);
-        }
-        if (pool.isEmpty()) pool.append(VoucherType::Blank);
-        forced.voucher = pool[QRandomGenerator::global()->bounded(pool.size())];
-        // 原版 Voucher Tag 是“额外增加一张优惠券”，不是免费券。
-        forced.cost = voucherData(forced.voucher).cost;
-        mShop.voucherOffersMutable().append(forced);
-        mTagVoucherNextShop = false;
-    }
 
     if (mHasTagFreePack && !mShop.boosterOffersMutable().isEmpty()) {
         ShopOffer &o = mShop.boosterOffersMutable()[0];
@@ -3052,6 +3221,7 @@ bool GameState::addRandomRareJoker()
     if (rare.isEmpty()) return false;
     Joker j = createJoker(rare[QRandomGenerator::global()->bounded(rare.size())]);
     mJokers.append(j);
+    updateOwnedSellValues();
     syncShopJokerRules();
     emit jokersChanged();
     emit shopChanged();
@@ -3082,19 +3252,13 @@ bool GameState::setRandomEditionlessJoker(Edition e, bool destroyOthers, bool re
     int chosen = candidates[QRandomGenerator::global()->bounded(candidates.size())];
     Joker selected = mJokers[chosen];
     selected.edition = e;
-    switch (e) {
-    case Edition::Foil:
-    case Edition::Holographic: selected.sellValue += 1; break;
-    case Edition::Polychrome: selected.sellValue += 2; break;
-    case Edition::Negative: selected.sellValue += 3; break;
-    default: break;
-    }
     if (destroyOthers) {
         mJokers.clear();
         mJokers.append(selected);
     } else {
         mJokers[chosen] = selected;
     }
+    updateOwnedSellValues();
     if (reduceHandSize) addPermanentHandSizeBonus(-1);
     syncShopJokerRules();
     emit jokersChanged();
@@ -3145,6 +3309,7 @@ bool GameState::addRandomLegendaryJoker()
     if (legends.isEmpty()) legends = { JokerType::Caino, JokerType::Triboulet, JokerType::Yorick, JokerType::Chicot, JokerType::Perkeo };
     Joker j = createJoker(legends[QRandomGenerator::global()->bounded(legends.size())]);
     mJokers.append(j);
+    updateOwnedSellValues();
     syncShopJokerRules();
     emit jokersChanged();
     return true;

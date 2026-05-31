@@ -165,6 +165,12 @@ public:
     }
     QSize visibleCardSize() const { return mVisibleCardSize; }
     bool isHovered() const { return mHovered; }
+    void setStaticRotation(double deg)
+    {
+        if (qFuzzyCompare(mStaticRotDeg + 1.0, deg + 1.0)) return;
+        mStaticRotDeg = deg;
+        update();
+    }
 
 protected:
     void enterEvent(QEnterEvent *event) override
@@ -359,8 +365,8 @@ protected:
         const qreal hoverScale = 1.0 + (mHovered ? 0.045 : 0.0);
         t.scale(hoverScale, hoverScale);
         // hover 抖动：进入悬浮时 ±2.4° 弹一下；和 CardItem/JokerItem 一致。
-        if (!qFuzzyIsNull(mJitterRotDeg))
-            t.rotate(mJitterRotDeg);
+        if (!qFuzzyIsNull(mStaticRotDeg + mJitterRotDeg))
+            t.rotate(mStaticRotDeg + mJitterRotDeg);
         t = persp * t;
         p.setTransform(t, true);
 
@@ -378,6 +384,7 @@ private:
     bool mUseSilhouetteShadow = false; // true 给 booster 用 (异形)，否则双层圆角矩形 (joker/consumable/voucher)
     qreal mTiltX = 0.0; // degrees, same direction as CardItem/JokerItem
     qreal mTiltY = 0.0;
+    double mStaticRotDeg = 0.0;
     double mJitterRotDeg = 0.0;
     QSequentialAnimationGroup *mJitterAnim = nullptr;
 };
@@ -495,25 +502,21 @@ void ShopWidget::buildUi()
 
     // Voucher 单槽：原版下半区左侧优惠券，固定售价 $10。
     // 最小尺寸跟随放大后的 normal slot（containerW=180、containerH≈330）。
-    auto *voucherBox = new QWidget(lowerRow);
-    voucherBox->setObjectName("voucherBox");
-    voucherBox->setMinimumSize(dp(174), dp(294));
-    voucherBox->setAttribute(Qt::WA_StyledBackground, true);
-    voucherBox->setStyleSheet(
+    mVoucherBox = new QWidget(lowerRow);
+    mVoucherBox->setObjectName("voucherBox");
+    mVoucherBox->setMinimumSize(dp(174), dp(294));
+    mVoucherBox->setAttribute(Qt::WA_StyledBackground, true);
+    mVoucherBox->setStyleSheet(
         "QWidget#voucherBox { background:rgba(57,72,76,230); border:none; border-radius:14px; }"
         );
-    auto *vbl = new QVBoxLayout(voucherBox);
-    vbl->setContentsMargins(dp(8), dp(6), dp(8), dp(6));
-    vbl->setAlignment(Qt::AlignCenter);
 
-    OfferUi vu = createOfferSlot(voucherBox, false);
+    OfferUi vu = createOfferSlot(mVoucherBox, false);
     vu.card->setProperty("voucherSlotIdx", 0);
     connect(vu.cardBtn, &QPushButton::clicked, this, [this]() { onVoucherCardClicked(0); });
     if (vu.buyBtn)
         connect(vu.buyBtn, &QPushButton::clicked, this, [this]() { onBuyVoucher(0); });
-    vbl->addWidget(vu.card);
     mVoucherUi.append(vu);
-    lhbl->addWidget(voucherBox);
+    lhbl->addWidget(mVoucherBox);
 
     // Booster 区
     auto *boosterBox = new QWidget(lowerRow);
@@ -547,6 +550,7 @@ void ShopWidget::buildUi()
 ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
 {
     OfferUi ou;
+    const bool isVoucherSlot = parent && parent->objectName() == QStringLiteral("voucherBox");
     // 原版 game.lua:3153：booster 用 G.CARD_W*1.27 × G.CARD_H*1.27 显示——两个轴都乘 1.27
     // 保持与扑克牌相同的 0.747 长宽比。我们的 JokerItem/ConsumableItem 是 162×218，所以：
     //   非礼包槽：162 × 218
@@ -555,7 +559,7 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
     const int slotH = isBooster ? 278 : 218;
     // 普通商品槽右侧专门预留给“购买&使用”侧按钮。
     // 关键点：预留宽度不参与卡牌列居中，否则按钮只拿到一半预留空间，右侧会被容器裁掉。
-    const int actionReserveW = isBooster ? 0 : 48;
+    const int actionReserveW = (isBooster || isVoucherSlot) ? 0 : 48;
     // cardBtn 给 hover 1.045 缩放预留 ±7 px overflow 空间：实际 paint pixmap 大小是
     // slotW × slotH（与槽位 JokerItem/ConsumableItem 同尺寸），但 button 本身略大，
     // 这样 hover 放大时图像顶部不会被 widget rect 裁掉。
@@ -566,9 +570,9 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
     const int priceTabH = 26;
     // 选中时 cardBtn 会向上 move dp(36)，必须在 ou.card 顶部预留同等空间，
     // 否则 Qt 把超出 ou.card 顶边的 cardBtn 像素裁掉，看着像"商品上半截没了"。
-    const int selectionLiftReserve = 36;
+    const int selectionLiftReserve = isVoucherSlot ? 24 : 36;
     const int topReserve = (priceTabH - 1) + selectionLiftReserve;
-    const int containerH = topReserve + btnH + 12;
+    const int containerH = topReserve + btnH + (isVoucherSlot ? 46 : 12);
 
     ou.card = new QWidget(parent);
     ou.card->setFixedSize(dp(containerW), dp(containerH));
@@ -644,7 +648,7 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
     // 这样卡牌上浮后按钮不会显得又窄又矮。
     ou.buyBtn = new QPushButton("购买", ou.card);
     ou.buyBtn->setCursor(Qt::PointingHandCursor);
-    ou.buyBtn->setFixedSize(dp(slotW * 64 / 100), dp(38));
+    ou.buyBtn->setFixedSize(dp(isVoucherSlot ? slotW * 78 / 100 : slotW * 64 / 100), dp(38));
     ou.buyBtn->setFont(bbf);
     ou.buyBtn->hide();
 
@@ -910,6 +914,10 @@ void ShopWidget::syncPriceLblForCardBtn(QWidget *cardBtn)
     if (!ou) ou = findOu(mVoucherUi);
     if (!ou) ou = findOu(mBoosterUi);
     if (!ou || !ou->priceLbl) return;
+    if (cardBtn->property("suppressPrice").toBool()) {
+        ou->priceLbl->hide();
+        return;
+    }
 
     // 可见卡牌在 button 内的垂直偏移：button 比可见尺寸大一圈给 hover 缩放预留。
     const int visibleTopOffset = (scb && scb->visibleCardSize().isValid())
@@ -932,6 +940,104 @@ void ShopWidget::syncPriceLblForCardBtn(QWidget *cardBtn)
     }
 }
 
+void ShopWidget::ensureVoucherUiCount(int count)
+{
+    if (!mVoucherBox) return;
+    while (mVoucherUi.size() < count) {
+        const int idx = mVoucherUi.size();
+        OfferUi vu = createOfferSlot(mVoucherBox, false);
+        vu.card->setProperty("voucherSlotIdx", idx);
+        connect(vu.cardBtn, &QPushButton::clicked, this, [this, idx]() { onVoucherCardClicked(idx); });
+        if (vu.buyBtn)
+            connect(vu.buyBtn, &QPushButton::clicked, this, [this, idx]() { onBuyVoucher(idx); });
+        mVoucherUi.append(vu);
+    }
+}
+
+void ShopWidget::layoutVoucherFan()
+{
+    if (!mVoucherBox) return;
+
+    const int offers = mGS ? mGS->shop().voucherOffers().size() : 0;
+    const int visibleCount = qMin(offers, mVoucherUi.size());
+    if (visibleCount <= 0) return;
+
+    const double mid = (visibleCount - 1) / 2.0;
+    const int centerX = mVoucherBox->width() / 2;
+    const int centerY = mVoucherBox->height() / 2 + dp(4);
+    const int visibleCardW = (!mVoucherUi.isEmpty() && mVoucherUi[0].cardBtn)
+        ? mVoucherUi[0].cardBtn->width() : dp(176);
+    const int spreadX = (visibleCount > 1)
+        ? qBound(dp(82), (mVoucherBox->width() - visibleCardW + dp(28)) / (visibleCount - 1), dp(130))
+        : 0;
+
+    int focusSlot = -1;
+    if (mSelectedVoucherSlot >= 0 && mSelectedVoucherSlot < visibleCount)
+        focusSlot = mSelectedVoucherSlot;
+    else if (mHoveredVoucherSlot >= 0 && mHoveredVoucherSlot < visibleCount)
+        focusSlot = mHoveredVoucherSlot;
+    else
+        focusSlot = visibleCount - 1;
+
+    QVector<int> order;
+    for (int i = 0; i < visibleCount; ++i)
+        if (i != focusSlot) order.append(i);
+    if (focusSlot >= 0) order.append(focusSlot);
+
+    for (int orderIdx = 0; orderIdx < order.size(); ++orderIdx) {
+        const int i = order[orderIdx];
+        OfferUi &ou = mVoucherUi[i];
+        if (!ou.card) continue;
+
+        if (ou.card->layout()) ou.card->layout()->activate();
+        QWidget *btn = ou.cardBtn ? ou.cardBtn : ou.card;
+        const double rel = i - mid;
+        const int targetCenterX = centerX + int(std::round(rel * spreadX));
+        const bool focused = (i == focusSlot);
+        const int targetCenterY = centerY + int(std::round(rel * dp(22) + std::abs(rel) * dp(8))) - (focused ? dp(24) : 0);
+        const int btnCenterXInCard = btn->x() + btn->width() / 2;
+        const int btnCenterYInCard = btn->y() + btn->height() / 2;
+        const QPoint target(targetCenterX - btnCenterXInCard,
+                            targetCenterY - btnCenterYInCard);
+        if (ou.card->property("voucherTargetPos").toPoint() != target) {
+            ou.card->setProperty("voucherTargetPos", target);
+            auto *anim = new QPropertyAnimation(ou.card, "pos", ou.card);
+            anim->setDuration(150);
+            anim->setStartValue(ou.card->pos());
+            anim->setEndValue(target);
+            anim->setEasingCurve(QEasingCurve::OutCubic);
+            QPointer<ShopWidget> self(this);
+            QPointer<QWidget> btnGuard(ou.cardBtn);
+            connect(anim, &QPropertyAnimation::finished, this, [self, btnGuard]() {
+                if (self && btnGuard) self->syncPriceLblForCardBtn(btnGuard);
+            });
+            anim->start(QAbstractAnimation::DeleteWhenStopped);
+        } else if (ou.card->pos() != target && !ou.card->findChild<QPropertyAnimation*>()) {
+            ou.card->move(target);
+        }
+        ou.card->raise();
+        if (auto *scb = dynamic_cast<ShopCardButton *>(ou.cardBtn))
+            scb->setStaticRotation(rel * (focused ? 3.5 : 5.5));
+
+        if (ou.cardBtn)
+            ou.cardBtn->setProperty("suppressPrice", !focused);
+        if (!focused) {
+            if (ou.priceLbl) ou.priceLbl->hide();
+            if (ou.buyBtn && i != mSelectedVoucherSlot) ou.buyBtn->hide();
+        } else {
+            syncPriceLblForCardBtn(ou.cardBtn);
+        }
+    }
+
+    for (int i = visibleCount; i < mVoucherUi.size(); ++i) {
+        OfferUi &ou = mVoucherUi[i];
+        if (auto *scb = dynamic_cast<ShopCardButton *>(ou.cardBtn)) scb->setStaticRotation(0.0);
+        if (ou.cardBtn) ou.cardBtn->setProperty("suppressPrice", true);
+        if (ou.priceLbl) ou.priceLbl->hide();
+        if (ou.buyBtn) ou.buyBtn->hide();
+    }
+}
+
 bool ShopWidget::eventFilter(QObject *obj, QEvent *event)
 {
     QWidget *w = qobject_cast<QWidget *>(obj);
@@ -941,6 +1047,15 @@ bool ShopWidget::eventFilter(QObject *obj, QEvent *event)
     if (w) {
         int slot = -1;
         DragGroup group = dragGroupForWidget(w, &slot);
+        if (group == DragGroup::Voucher) {
+            if (event->type() == QEvent::Enter) {
+                mHoveredVoucherSlot = slot;
+                layoutVoucherFan();
+            } else if (event->type() == QEvent::Leave && mHoveredVoucherSlot == slot) {
+                mHoveredVoucherSlot = -1;
+                layoutVoucherFan();
+            }
+        }
         if (group != DragGroup::None) {
             QWidget *container = w->parentWidget();
             if (event->type() == QEvent::MouseButtonPress) {
@@ -1167,6 +1282,8 @@ bool ShopWidget::eventFilter(QObject *obj, QEvent *event)
 
 void ShopWidget::refresh()
 {
+    if (mVoucherPurchaseAnimating) return;
+
     if (mLblGold) mLblGold->setText(QString("$%1").arg(mGS->gold()));
 
     auto fillSlot = [this](OfferUi &ou, const ShopOffer &o, bool canBuy, bool isBooster) {
@@ -1272,6 +1389,8 @@ void ShopWidget::refresh()
         } else if (voucherIdxV.isValid()) {
             // 优惠券：黄色"兑换"
             selectedHere = (voucherIdxV.toInt() == mSelectedVoucherSlot);
+            buyBg = QStringLiteral("#4BC292");
+            buyHover = QStringLiteral("#63d4a8");
             buyText = QStringLiteral("兑换");
         } else if (shopIdxV.isValid()) {
             selectedHere = (shopIdxV.toInt() == mSelectedShopSlot);
@@ -1347,6 +1466,7 @@ void ShopWidget::refresh()
     }
 
     const auto &voucherOffers = mGS->shop().voucherOffers();
+    ensureVoucherUiCount(voucherOffers.size());
     for (int i = 0; i < mVoucherUi.size(); ++i) {
         if (i < voucherOffers.size()) {
             fillSlot(mVoucherUi[i], voucherOffers[i],
@@ -1363,6 +1483,7 @@ void ShopWidget::refresh()
             if (ou.useBtn)   ou.useBtn->hide();
         }
     }
+    layoutVoucherFan();
 
     const auto &boosterOffers = mGS->shop().boosterOffers();
     for (int i = 0; i < mBoosterUi.size() && i < boosterOffers.size(); ++i) {
@@ -1376,7 +1497,7 @@ void ShopWidget::refresh()
     // CreditCard：允许透支购买，重摇同样走 spendableGold()。
     const int effRerollCost = mGS->hasFreeShopReroll() ? 0 : rcost;
     mBtnReroll->setEnabled(mGS->spendableGold() >= effRerollCost);
-    if (mGS->hasFreeShopReroll())
+    if (mGS->hasFreeShopReroll() && rcost > 0)
         mBtnReroll->setText(QString("重抽\n免费"));
 
     // 槽位变化（如 Overstock 优惠券新增槽位）后，外层 ou.card 会被 QHBoxLayout
@@ -1622,8 +1743,18 @@ bool ShopWidget::moveOfferInGroup(DragGroup group, int from, int to)
             else if (from > to && mSelectedShopSlot >= to && mSelectedShopSlot < from) ++mSelectedShopSlot;
         }
     } else if (group == DragGroup::Voucher) {
-        // 原版券区目前只有一个槽位：允许拖出查看/松手吸回，但没有可交换的第二张券。
-        ok = (from == to);
+        auto &offers = mGS->shop().voucherOffersMutable();
+        ok = (from >= 0 && from < offers.size() && to >= 0 && to < offers.size());
+        if (ok) {
+            offers.move(from, to);
+            if (mSelectedVoucherSlot == from) mSelectedVoucherSlot = to;
+            else if (from < to && mSelectedVoucherSlot > from && mSelectedVoucherSlot <= to) --mSelectedVoucherSlot;
+            else if (from > to && mSelectedVoucherSlot >= to && mSelectedVoucherSlot < from) ++mSelectedVoucherSlot;
+
+            if (mHoveredVoucherSlot == from) mHoveredVoucherSlot = to;
+            else if (from < to && mHoveredVoucherSlot > from && mHoveredVoucherSlot <= to) --mHoveredVoucherSlot;
+            else if (from > to && mHoveredVoucherSlot >= to && mHoveredVoucherSlot < from) ++mHoveredVoucherSlot;
+        }
     } else if (group == DragGroup::Booster) {
         ok = mGS->moveBoosterOffer(from, to);
         if (ok) {
@@ -2011,13 +2142,12 @@ void ShopWidget::onBuyAndUseShop(int slot) {
 // 兑换券 / 开包前先清选中再交给原逻辑。
 
 void ShopWidget::onBuyVoucher(int slot) {
+    if (mVoucherPurchaseAnimating) return;
+
     if (slot < 0 || slot >= mVoucherUi.size()) {
         if (mGS->buyVoucherOffer(slot)) {
+            AudioManager::instance()->play(QStringLiteral("card1"), 1.0, 1.0);
             AudioManager::instance()->play(QStringLiteral("coin1"), 1.0, 1.0);
-            QTimer::singleShot(400, this, []() {
-                AudioManager::instance()->play(QStringLiteral("card1"), 1.0, 1.0);
-                AudioManager::instance()->play(QStringLiteral("coin1"), 1.0, 1.0);
-            });
             mSelectedVoucherSlot = -1;
             refresh();
         } else {
@@ -2025,6 +2155,19 @@ void ShopWidget::onBuyVoucher(int slot) {
         }
         return;
     }
+    const auto voucherOffers = mGS->shop().voucherOffers();
+    if (slot < 0 || slot >= voucherOffers.size() ||
+        !mGS->shop().canBuyVoucher(slot, mGS->spendableGold())) {
+        AudioManager::instance()->play(QStringLiteral("cancel"), 1.0, 0.65);
+        return;
+    }
+    const QString voucherRedeemName = voucherData(voucherOffers[slot].voucher).name;
+    const QPoint voucherShopStart = pos();
+    const int parentH = parentWidget() ? parentWidget()->height() : (y() + height());
+    const QPoint voucherShopDown(voucherShopStart.x(),
+                                 qMax(parentH + dp(28), voucherShopStart.y() + height() + dp(28)));
+    bool voucherHasAnimation = false;
+
     // 兑换动画：完整 3 段——
     //   Phase A (260ms)：截下 cardBtn 像素 → ghost 沿屏幕中心平移 + 放大到 2.4x；
     //   Phase B (240ms)：在中心轻微摇晃 (±5° 抖动)；
@@ -2056,6 +2199,22 @@ void ShopWidget::onBuyVoucher(int slot) {
         opacity->setOpacity(1.0);
         ghost->setGraphicsEffect(opacity);
 
+        auto makeRedeemText = [this, ghostHost](const QString &text, int px) {
+            auto *label = new QLabel(text, ghostHost);
+            QFont f = mCNFont;
+            f.setPixelSize(fontPx(px));
+            f.setBold(true);
+            label->setFont(f);
+            label->setStyleSheet(QStringLiteral("color:white; background:transparent;"));
+            label->setAlignment(Qt::AlignCenter);
+            label->setAttribute(Qt::WA_TransparentForMouseEvents, true);
+            label->adjustSize();
+            label->hide();
+            return label;
+        };
+        QLabel *topText = makeRedeemText(voucherRedeemName, 24);
+        QLabel *botText = makeRedeemText(QStringLiteral("兑换！"), 24);
+
         const QSize startSize = snap.size();
         const QPoint startTopLeft = hostTopLeft;
         const QPoint startCenter(startTopLeft.x() + startSize.width()  / 2,
@@ -2064,15 +2223,48 @@ void ShopWidget::onBuyVoucher(int slot) {
         const QPoint screenCenter(ghostHost->width() / 2, ghostHost->height() / 2);
 
         QPointer<QLabel> ghostGuard(ghost);
+        QPointer<QLabel> topTextGuard(topText);
+        QPointer<QLabel> botTextGuard(botText);
         QPointer<QGraphicsOpacityEffect> opGuard(opacity);
-        auto setGhostGeom = [ghostGuard, startSize](qreal scale, QPoint centerInThis) {
+        auto placeRedeemText = [ghostGuard, topTextGuard, botTextGuard]() {
+            if (!ghostGuard) return;
+            const QRect g = ghostGuard->geometry();
+            if (topTextGuard)
+                topTextGuard->move(g.center().x() - topTextGuard->width() / 2,
+                                   g.top() - topTextGuard->height() - 6);
+            if (botTextGuard)
+                botTextGuard->move(g.center().x() - botTextGuard->width() / 2,
+                                   g.bottom() + 6);
+        };
+        auto setGhostGeom = [ghostGuard, startSize, placeRedeemText](qreal scale, QPoint centerInThis) {
             if (!ghostGuard) return;
             const QSize ns(int(startSize.width()  * scale),
                            int(startSize.height() * scale));
             ghostGuard->setFixedSize(ns);
             ghostGuard->move(centerInThis.x() - ns.width()  / 2,
                              centerInThis.y() - ns.height() / 2);
+            placeRedeemText();
         };
+
+        mVoucherPurchaseAnimating = true;
+        voucherHasAnimation = true;
+        hideOfferInfo();
+        if (mVoucherUi[slot].card) mVoucherUi[slot].card->hide();
+        if (mVoucherUi[slot].priceLbl) mVoucherUi[slot].priceLbl->hide();
+        placeRedeemText();
+        QTimer::singleShot(400, this, [topTextGuard, botTextGuard, placeRedeemText]() {
+            placeRedeemText();
+            if (topTextGuard) { topTextGuard->show(); topTextGuard->raise(); }
+            if (botTextGuard) { botTextGuard->show(); botTextGuard->raise(); }
+        });
+
+        auto *shopOut = new QPropertyAnimation(this, "pos", this);
+        shopOut->setDuration(260);
+        shopOut->setStartValue(voucherShopStart);
+        shopOut->setEndValue(voucherShopDown);
+        shopOut->setEasingCurve(QEasingCurve::InCubic);
+        connect(shopOut, &QPropertyAnimation::finished, this, [this]() { hide(); });
+        shopOut->start(QAbstractAnimation::DeleteWhenStopped);
 
         // Phase A：平移到屏幕中心 + 放大到 1.5（之前 2.4 太大，与开包视觉量级不一致）
         auto *phaseA = new QVariantAnimation(this);
@@ -2134,18 +2326,44 @@ void ShopWidget::onBuyVoucher(int slot) {
         seq->addAnimation(phaseA);
         seq->addAnimation(phaseB);
         seq->addAnimation(phaseC);
-        connect(seq, &QSequentialAnimationGroup::finished, ghost, &QObject::deleteLater);
+        connect(seq, &QSequentialAnimationGroup::finished, this,
+                [this, ghost, topText, botText, voucherShopStart, voucherShopDown]() {
+            if (topText) topText->deleteLater();
+            if (botText) botText->deleteLater();
+            ghost->deleteLater();
+            move(voucherShopDown);
+            mVoucherPurchaseAnimating = false;
+            refresh();
+            show();
+            raise();
+
+            auto *shopIn = new QPropertyAnimation(this, "pos", this);
+            shopIn->setDuration(320);
+            shopIn->setStartValue(voucherShopDown);
+            shopIn->setEndValue(voucherShopStart);
+            shopIn->setEasingCurve(QEasingCurve::OutCubic);
+            shopIn->start(QAbstractAnimation::DeleteWhenStopped);
+        });
         seq->start(QAbstractAnimation::DeleteWhenStopped);
     }
     if (mGS->buyVoucherOffer(slot)) {
-        AudioManager::instance()->play(QStringLiteral("coin1"), 1.0, 1.0);
-        QTimer::singleShot(400, this, []() {
+        auto playRedeemSounds = []() {
             AudioManager::instance()->play(QStringLiteral("card1"), 1.0, 1.0);
             AudioManager::instance()->play(QStringLiteral("coin1"), 1.0, 1.0);
-        });
+        };
+        if (voucherHasAnimation)
+            QTimer::singleShot(400, this, playRedeemSounds);
+        else
+            playRedeemSounds();
         mSelectedVoucherSlot = -1;
         refresh();
     } else {
+        if (voucherHasAnimation) {
+            mVoucherPurchaseAnimating = false;
+            move(voucherShopStart);
+            show();
+            refresh();
+        }
         AudioManager::instance()->play(QStringLiteral("cancel"), 1.0, 0.65);
     }
 }
@@ -2169,6 +2387,7 @@ void ShopWidget::resizeEvent(QResizeEvent *e)
 {
     QWidget::resizeEvent(e);
     layoutPanel();
+    layoutVoucherFan();
 }
 
 void ShopWidget::layoutPanel()

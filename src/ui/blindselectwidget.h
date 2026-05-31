@@ -2,6 +2,7 @@
 #define BLINDSELECTWIDGET_H
 
 #include <QWidget>
+#include <functional>
 #include "../game/gamestate.h"
 
 class QLabel;
@@ -17,6 +18,7 @@ public:
     void refresh();
     void prepareEntrancePositions();
     void arrangeCards(bool initialFloat);
+    void animateBossReroll(std::function<void()> applyChange);
 
 signals:
     void selectClicked();

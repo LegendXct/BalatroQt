@@ -90,6 +90,7 @@ public:
     QString description;
     Edition edition = Edition::None;
     int sellValue = 2;
+    int extraSellValue = 0;
     bool isDebuffed = false;
     int counter = 0; // 动态数值：冰淇淋当前筹码等
 
@@ -99,5 +100,6 @@ public:
 
 Joker createJoker(JokerType type);
 JokerRarity jokerRarity(JokerType t);
+int jokerBaseCost(JokerType t);
 
 #endif // JOKER_HH

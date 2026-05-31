@@ -133,15 +133,19 @@ public:
     void setDiscountPercent(int v) { mDiscountPercent = v; }
     void setJokerEditionRate(double rate) { mJokerEditionRate = qMax(0.0, rate); }
     void addPendingEditionJoker(Edition e);
-    void setRerollDiscount(int v) { mRerollDiscount = v; resetForNewBlind(); }
+    void addPendingRarityJoker(JokerRarity rarity);
+    bool canCreateRarityJoker(JokerRarity rarity) const;
+    void appendVoucherOffer();
+    void setRerollDiscount(int v) { mRerollDiscount = v; if (!mNextShopRerollStartsFree) resetForNewBlind(); }
+    void setNextShopRerollStartsFree() { mNextShopRerollStartsFree = true; mRerollCost = 0; }
     void setRedeemedVouchers(const QVector<VoucherType> &v) { mRedeemedVouchers = v; }
     void setOwnedJokers(const QVector<JokerType> &owned, bool allowDuplicates);
     void setOwnedConsumables(const QVector<ConsumableType> &owned) { mOwnedConsumables = owned; }
     void setGrosMichelExtinct(bool v) { mGrosMichelExtinct = v; }
+    JokerType randomJokerForTag(const QVector<JokerType> &alreadyRolled = {}) const { return randomJokerType(alreadyRolled); }
 
     int shopSlots() const { return mShopSlots; }
-    // 原版：优惠券只在击败 Boss 后的商店出现（每 Ante 1 张）。
-    // GameState 在 finishWinningRound 调用这个标志：Boss 战为 true，小/大盲为 false。
+    // 每个 Ante 第一次进入商店刷新 1 张优惠券；之后同 Ante 保留该券/售罄状态。
     void setAllowVoucherThisShop(bool v) { mAllowVoucherThisShop = v; }
     bool allowVoucherThisShop() const { return mAllowVoucherThisShop; }
     const ShopRates &rates() const { return mRates; }
@@ -156,7 +160,7 @@ private:
     int mRerollDiscount = 0;
     int mShopSlots = 2;
     int mDiscountPercent = 0;
-    bool mAllowVoucherThisShop = false;  // 默认关闭——只在 Boss 商店打开。
+    bool mAllowVoucherThisShop = false;
     ShopRates mRates;
     QVector<VoucherType> mRedeemedVouchers;
     QVector<JokerType> mOwnedJokers;
@@ -164,10 +168,13 @@ private:
     bool mAllowJokerDuplicates = false;
     bool mPlayingCardsEnhanced = false;
     bool mNextShopFree = false;
+    bool mNextShopRerollStartsFree = false;
     double mJokerEditionRate = 1.0;
     QVector<Edition> mPendingEditionJokers;
+    QVector<JokerRarity> mPendingRarityJokers;
     bool mGrosMichelExtinct = false;
 
+    ShopOffer makeRarityJokerOffer(JokerRarity rarity, const QVector<ShopOffer> &alreadyRolled = {}) const;
     ShopOffer makeEditionJokerOffer(Edition e, const QVector<ShopOffer> &alreadyRolled = {}) const;
     ShopOffer randomShopOffer(const QVector<ShopOffer> &alreadyRolled = {}) const;
     ShopOffer randomVoucherOffer() const;
@@ -176,6 +183,7 @@ private:
 
     static QVector<JokerType> jokerPool();
     JokerType randomJokerType(const QVector<JokerType> &alreadyRolled = {}) const;
+    JokerType randomJokerTypeByRarity(JokerRarity rarity, const QVector<JokerType> &alreadyRolled = {}) const;
     Edition randomJokerEdition() const;
     int costFor(JokerType t, Edition e = Edition::None) const;
     int rawCostFor(const ShopOffer &o) const;

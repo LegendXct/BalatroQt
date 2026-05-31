@@ -276,13 +276,12 @@ static ConsumableType randomUniqueSpectral(QVector<ConsumableType> &already)
 static ConsumableType randomPackConsumableWithSpecials(PackKind kind, QVector<ConsumableType> &already, bool omenGlobe)
 {
     auto *rng = QRandomGenerator::global();
-    // 原版 The Soul / Black Hole 是 0.3%；为了测试体验这里临时改成 20%。
-    // Soul: 塔罗包和幻灵包；Black Hole: 天体包和幻灵包。
+    // Source special rates: The Soul / Black Hole each roll at 0.3% in eligible packs.
     if ((kind == PackKind::Arcana || kind == PackKind::Spectral) && !already.contains(ConsumableType::Spectral_Soul)) {
-        if (rng->bounded(100) < 20) { already.append(ConsumableType::Spectral_Soul); return ConsumableType::Spectral_Soul; }
+        if (rng->generateDouble() > 0.997) { already.append(ConsumableType::Spectral_Soul); return ConsumableType::Spectral_Soul; }
     }
     if ((kind == PackKind::Celestial || kind == PackKind::Spectral) && !already.contains(ConsumableType::Spectral_BlackHole)) {
-        if (rng->bounded(100) < 20) { already.append(ConsumableType::Spectral_BlackHole); return ConsumableType::Spectral_BlackHole; }
+        if (rng->generateDouble() > 0.997) { already.append(ConsumableType::Spectral_BlackHole); return ConsumableType::Spectral_BlackHole; }
     }
 
     if (kind == PackKind::Arcana) {
@@ -298,9 +297,6 @@ PackContent generatePackContent(PackKind k, PackSize s, bool omenGlobe,
                                 const QVector<JokerType> &ownedJokers,
                                 bool allowDuplicateJokers,
                                 bool grosMichelExtinct) {
-    Q_UNUSED(telescope);
-    Q_UNUSED(telescopePlanet);
-
     PackContent pc;
     pc.kind = k;
     pc.size = s;
@@ -318,8 +314,15 @@ PackContent generatePackContent(PackKind k, PackSize s, bool omenGlobe,
     case PackKind::Arcana:
     case PackKind::Celestial:
     case PackKind::Spectral:
-        for (int i = 0; i < pc.optionsToShow; ++i)
-            pc.consumables.append(randomPackConsumableWithSpecials(k, usedConsumables, omenGlobe));
+        for (int i = 0; i < pc.optionsToShow; ++i) {
+            if (k == PackKind::Celestial && telescope && i == 0 &&
+                kindOf(telescopePlanet) == ConsumableKind::Planet) {
+                pc.consumables.append(telescopePlanet);
+                usedConsumables.append(telescopePlanet);
+            } else {
+                pc.consumables.append(randomPackConsumableWithSpecials(k, usedConsumables, omenGlobe));
+            }
+        }
         break;
     case PackKind::Buffoon:
         for (int i = 0; i < pc.optionsToShow; ++i) {

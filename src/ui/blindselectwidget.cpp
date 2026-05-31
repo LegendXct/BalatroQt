@@ -114,6 +114,7 @@ BlindSelectWidget::BlindSelectWidget(GameState *gs, const QFont &cnFont,
 
     mTagPopup = new QLabel(this);
     mTagPopup->setAttribute(Qt::WA_StyledBackground, true);
+    mTagPopup->setTextFormat(Qt::RichText);
     mTagPopup->setWordWrap(true);
     mTagPopup->setAlignment(Qt::AlignCenter);
     QFont tf = mCNFont; tf.setPixelSize(fontPx(15)); tf.setBold(true);
@@ -336,10 +337,11 @@ void BlindSelectWidget::buildUi()
             "QPushButton:disabled { background:#333; color:#777; }"
         );
         connect(b.bossRerollBtn, &QPushButton::clicked, this, [this]() {
-            if (mGS && mGS->rerollBoss()) {
-                AudioManager::instance()->play(QStringLiteral("other1"), 1.0, 1.0);
-                refresh();
-            }
+            if (!mGS || !mGS->canRerollBoss()) return;
+            animateBossReroll([this]() {
+                if (mGS && mGS->rerollBoss())
+                    AudioManager::instance()->play(QStringLiteral("other1"), 1.0, 1.0);
+            });
         });
         bpvbl->addWidget(b.bossRerollBtn);
 
@@ -421,9 +423,8 @@ bool BlindSelectWidget::eventFilter(QObject *obj, QEvent *event)
 void BlindSelectWidget::showTagPopup(int idx, QWidget *anchor)
 {
     if (!mTagPopup || idx < 0 || idx > 1) return;
-    TagData td = tagData(mGS->blindTag(idx));
-    mTagPopup->setText(QString("%1\n%2").arg(td.name, td.description));
-    mTagPopup->setFixedWidth(dp(260));
+    mTagPopup->setText(mGS->tagDescriptionFor(mGS->blindTag(idx)));
+    mTagPopup->setFixedWidth(dp(300));
     mTagPopup->adjustSize();
 
     QPoint globalAnchor = anchor->mapTo(this, QPoint(anchor->width() / 2, 0));
@@ -437,6 +438,42 @@ void BlindSelectWidget::showTagPopup(int idx, QWidget *anchor)
 void BlindSelectWidget::hideTagPopup()
 {
     if (mTagPopup) mTagPopup->hide();
+}
+
+void BlindSelectWidget::animateBossReroll(std::function<void()> applyChange)
+{
+    BlindCard &boss = mCards[2];
+    if (!boss.card) {
+        if (applyChange) applyChange();
+        refresh();
+        return;
+    }
+
+    hideTagPopup();
+    if (boss.bossRerollBtn) boss.bossRerollBtn->setEnabled(false);
+    const QPoint current = boss.card->pos();
+    const QPoint dropped(current.x(), height() + dp(24));
+
+    auto *out = new QPropertyAnimation(boss.card, "pos", this);
+    out->setDuration(230);
+    out->setStartValue(current);
+    out->setEndValue(dropped);
+    out->setEasingCurve(QEasingCurve::InCubic);
+    connect(out, &QPropertyAnimation::finished, this, [this, applyChange, dropped]() {
+        if (applyChange) applyChange();
+        refresh();
+        BlindCard &bossIn = mCards[2];
+        if (!bossIn.card) return;
+        const QPoint target = cardTargetPos(2);
+        bossIn.card->move(QPoint(target.x(), dropped.y()));
+        auto *in = new QPropertyAnimation(bossIn.card, "pos", this);
+        in->setDuration(300);
+        in->setStartValue(bossIn.card->pos());
+        in->setEndValue(target);
+        in->setEasingCurve(QEasingCurve::OutCubic);
+        in->start(QAbstractAnimation::DeleteWhenStopped);
+    });
+    out->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
 void BlindSelectWidget::resizeEvent(QResizeEvent *e)

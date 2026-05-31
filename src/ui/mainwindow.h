@@ -149,6 +149,7 @@ private:
     PackContent     mPendingPack;        // 当前正在打开的包
     QVector<CardData> mPendingPackHand;  // 开包界面临时翻出的一手牌
     bool mPackFromTag = false;
+    QVector<PackKind> mQueuedTagPacks;
 
     struct PendingSlotFlyIn {
         bool active = false;
@@ -220,6 +221,9 @@ private:
     void onInventoryConsumableUseRequested(int inventoryIdx, QVector<int> selectedPackHandIdx);
     void onPackFinished();
     void openImmediateTagPack(PackKind kind);
+    void consumeImmediateTagPack(PackKind kind);
+    void removeObtainedPackTag(PackKind kind);
+    void showBlindSelectAfterTagPack();
     void setBackgroundMoodForPhase();
     void setBackgroundMoodForPack(PackKind kind);
     void onDeckClicked(CardItem *card);
@@ -277,6 +281,7 @@ private:
     void onRoundWon(int blindReward, int handBonus, int interest);
     void onNextBlindClicked();
     void onGameOver(bool won);
+    void completeSkipBlind(int idx);
     struct ObtainedTagEntry {
         TagType type;
         QGraphicsPixmapItem *item;
@@ -284,6 +289,8 @@ private:
     QVector<ObtainedTagEntry> mObtainedTagIcons;
     void addObtainedTag(TagType type, int tagCol, int tagRow); // 在右下角加一个 tag 图标
     void removeObtainedTag(TagType type);                       // 标签被使用后再移除
+    void removeObtainedTags(TagType type, int count);
+    void transformObtainedTags(TagType from, TagType to, int count);
     void clearObtainedTags();
     void relayoutObtainedTags();
 

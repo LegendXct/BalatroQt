@@ -60,6 +60,8 @@ private:
     // 价格 tab 同步：rest / hover / drag 三态都通过这一只函数定位。cardBtn 是 QPushButton*
     // (ShopCardButton)；内部读 visibleCardSize 与 isHovered 算位置。
     void syncPriceLblForCardBtn(QWidget *cardBtn);
+    void ensureVoucherUiCount(int count);
+    void layoutVoucherFan();
 
     void onBuyShop(int slot);
     void onBuyAndUseShop(int slot);    // 商店里"购买并使用"塔罗/星球/幻灵牌
@@ -82,6 +84,7 @@ private:
     QWidget *mInfoSource = nullptr;     // 当前正在 hover 的源 widget，用于重定位
 
     QVector<OfferUi> mShopUi;
+    QWidget *mVoucherBox = nullptr;
     QVector<OfferUi> mVoucherUi;
     QVector<OfferUi> mBoosterUi;
 
@@ -89,7 +92,9 @@ private:
     // 选中后才出现"购买"和"购买&使用"两个按钮，单击同一张牌或别处会取消选中。
     int mSelectedShopSlot = -1;
     int mSelectedVoucherSlot = -1;
+    int mHoveredVoucherSlot = -1;
     int mSelectedBoosterSlot = -1;
+    bool mVoucherPurchaseAnimating = false;
 
     void onShopCardClicked(int slot);
     void onVoucherCardClicked(int slot);

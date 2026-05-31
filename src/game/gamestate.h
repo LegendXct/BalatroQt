@@ -123,6 +123,9 @@ public:
     void skipCurrentBlind();
     TagType blindTag(int idx) const;
     TagType lastSkippedTag() const { return mLastSkippedTag; }
+    int lastConsumedDoubleTags() const { return mLastConsumedDoubleTags; }
+    int projectedTagReward(TagType type) const;
+    QString tagDescriptionFor(TagType type) const;
     const QVector<TagType> &activeTags() const { return mActiveTags; }
 
     // 商店相关
@@ -134,6 +137,7 @@ public:
     bool canAddJokerWithEdition(Edition edition) const;
     bool buyVoucherOffer(int offerIdx);
     bool hasVoucher(VoucherType t) const;
+    bool telescopePlanetForPack(ConsumableType &out) const;
     const QVector<VoucherType> &redeemedVouchers() const { return mRedeemedVouchers; }
 
     const QHash<HandType, HandLevel> &handLevels() const { return mHandLevels; }
@@ -310,6 +314,7 @@ private:
     bool bossBlocksPlayedHand(const HandResult &result, int playedCount);
 
     bool mFirstShop = true;
+    int mVoucherRolledAnte = 0;
 
     QVector<Consumable> mConsumables;
     QVector<VoucherType> mRedeemedVouchers;
@@ -332,6 +337,7 @@ private:
     int mTagVoucherPendingShops = 0;
     int mTagCouponPendingShops = 0;
     int mTagD6PendingShops = 0;
+
     // 兼容字段：之前代码读 mTagVoucherNextShop bool，保留派生计算。
     bool mTagVoucherNextShop = false;
     PackKind mTagFreePackKind = PackKind::Standard;
@@ -342,6 +348,7 @@ private:
     QSet<HandType> mBossEyePlayedHands;
     TagType mBlindTags[2] = { TagType::Skip, TagType::Skip };
     TagType mLastSkippedTag = TagType::Skip;
+    int mLastConsumedDoubleTags = 0;
     QVector<TagType> mActiveTags;
 
     // 无尽模式 / 新增 Boss 状态
