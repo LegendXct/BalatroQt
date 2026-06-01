@@ -25,6 +25,7 @@ enum class PackSize {
 struct PackContent {
     PackKind kind = PackKind::Standard;
     PackSize size = PackSize::Normal;
+    int spriteVariant = 0;
     int optionsToShow = 3;      // 原版 config.extra：包里翻出几张
     int choicesAllowed = 1;     // 原版 config.choose：可拿/可用几张
 
@@ -35,7 +36,9 @@ struct PackContent {
 
 QString packDisplayName(PackKind k);
 QString packDisplayName(PackKind k, PackSize s);
+int     packSpriteVariantCount(PackKind k, PackSize s);
 QPoint  packSpritePos(PackKind k, PackSize s);
+QPoint  packSpritePos(PackKind k, PackSize s, int variant);
 
 PackContent generatePackContent(PackKind k,
                                 PackSize s = PackSize::Normal,

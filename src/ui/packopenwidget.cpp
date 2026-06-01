@@ -1367,7 +1367,7 @@ QPixmap PackOpenWidget::renderPackBigPixmap() const
     // 关键差异是这里要更大一些（≈ 280×376），并保留 alpha 以便后续 dissolve 平滑透。
     QPixmap sheet(":/textures/images/boosters.png");
     if (sheet.isNull()) return QPixmap();
-    QPoint c = packSpritePos(mContent.kind, mContent.size);
+    QPoint c = packSpritePos(mContent.kind, mContent.size, mContent.spriteVariant);
     QPixmap base = sheet.copy(c.x() * ConsumableItem::SRC_W,
                               c.y() * ConsumableItem::SRC_H,
                               ConsumableItem::SRC_W, ConsumableItem::SRC_H);

@@ -1,5 +1,6 @@
 #include "boosterpack.h"
 #include <QRandomGenerator>
+#include <QtGlobal>
 #include <algorithm>
 
 QString packDisplayName(PackKind k) {
@@ -21,31 +22,52 @@ QString packDisplayName(PackKind k, PackSize s) {
     return "";
 }
 
-QPoint packSpritePos(PackKind k, PackSize s) {
+int packSpriteVariantCount(PackKind k, PackSize s)
+{
+    switch (k) {
+    case PackKind::Arcana:
+    case PackKind::Celestial:
+    case PackKind::Standard:
+        return (s == PackSize::Normal) ? 4 : 2;
+    case PackKind::Spectral:
+        return (s == PackSize::Normal) ? 2 : 1;
+    case PackKind::Buffoon:
+        return (s == PackSize::Normal) ? 2 : 1;
+    }
+    return 1;
+}
+
+QPoint packSpritePos(PackKind k, PackSize s, int variant) {
+    const int count = qMax(1, packSpriteVariantCount(k, s));
+    const int v = ((variant % count) + count) % count;
     // 坐标来自原版 booster atlas：x 是同类变体列，y 是行。
     switch (k) {
     case PackKind::Arcana:
-        if (s == PackSize::Normal) return {0, 0};
-        if (s == PackSize::Jumbo)  return {0, 2};
-        return {2, 2};
+        if (s == PackSize::Normal) return {v, 0};
+        if (s == PackSize::Jumbo)  return {v, 2};
+        return {2 + v, 2};
     case PackKind::Celestial:
-        if (s == PackSize::Normal) return {0, 1};
-        if (s == PackSize::Jumbo)  return {0, 3};
-        return {2, 3};
+        if (s == PackSize::Normal) return {v, 1};
+        if (s == PackSize::Jumbo)  return {v, 3};
+        return {2 + v, 3};
     case PackKind::Spectral:
-        if (s == PackSize::Normal) return {0, 4};
+        if (s == PackSize::Normal) return {v, 4};
         if (s == PackSize::Jumbo)  return {2, 4};
         return {3, 4};
     case PackKind::Standard:
-        if (s == PackSize::Normal) return {0, 6};
-        if (s == PackSize::Jumbo)  return {0, 7};
-        return {2, 7};
+        if (s == PackSize::Normal) return {v, 6};
+        if (s == PackSize::Jumbo)  return {v, 7};
+        return {2 + v, 7};
     case PackKind::Buffoon:
-        if (s == PackSize::Normal) return {0, 8};
+        if (s == PackSize::Normal) return {v, 8};
         if (s == PackSize::Jumbo)  return {2, 8};
         return {3, 8};
     }
     return {0, 0};
+}
+
+QPoint packSpritePos(PackKind k, PackSize s) {
+    return packSpritePos(k, s, 0);
 }
 
 static int optionsFor(PackKind k, PackSize s) {
@@ -276,12 +298,12 @@ static ConsumableType randomUniqueSpectral(QVector<ConsumableType> &already)
 static ConsumableType randomPackConsumableWithSpecials(PackKind kind, QVector<ConsumableType> &already, bool omenGlobe)
 {
     auto *rng = QRandomGenerator::global();
-    // Source special rates: The Soul / Black Hole each roll at 0.3% in eligible packs.
+    // Project rule: The Soul / Black Hole each roll at 5% in eligible packs.
     if ((kind == PackKind::Arcana || kind == PackKind::Spectral) && !already.contains(ConsumableType::Spectral_Soul)) {
-        if (rng->generateDouble() > 0.997) { already.append(ConsumableType::Spectral_Soul); return ConsumableType::Spectral_Soul; }
+        if (rng->generateDouble() < 0.05) { already.append(ConsumableType::Spectral_Soul); return ConsumableType::Spectral_Soul; }
     }
     if ((kind == PackKind::Celestial || kind == PackKind::Spectral) && !already.contains(ConsumableType::Spectral_BlackHole)) {
-        if (rng->generateDouble() > 0.997) { already.append(ConsumableType::Spectral_BlackHole); return ConsumableType::Spectral_BlackHole; }
+        if (rng->generateDouble() < 0.05) { already.append(ConsumableType::Spectral_BlackHole); return ConsumableType::Spectral_BlackHole; }
     }
 
     if (kind == PackKind::Arcana) {

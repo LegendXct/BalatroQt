@@ -78,6 +78,7 @@ struct ShopOffer {
     CardData playingCard;
     PackKind pack = PackKind::Standard;
     PackSize packSize = PackSize::Normal;
+    int packVariant = 0;
     VoucherType voucher = VoucherType::Overstock;
     Edition jokerEdition = Edition::None;
     int cost = 0;
@@ -113,6 +114,7 @@ public:
     const QVector<ShopOffer>& boosterOffers() const { return mBoosterOffers; }
     QVector<ShopOffer>& boosterOffersMutable() { return mBoosterOffers; }
     QVector<ShopOffer>& voucherOffersMutable() { return mVoucherOffers; }
+    void setBoosterOfferPack(int idx, PackKind kind, PackSize size, bool freeByTag = false);
     bool canBuyBooster(int idx, int gold) const;
     ShopOffer takeBoosterOffer(int idx);
     bool moveBoosterOffer(int from, int to);
@@ -127,7 +129,18 @@ public:
     void setPlanetRate(double v) { mRates.planet = v; }
     void setPlayingCardRate(double v) { mRates.playingCard = v; }
     void setPlayingCardsEnhanced(bool v) { mPlayingCardsEnhanced = v; }
-    void setNextShopFree(bool v) { mNextShopFree = v; refreshCurrentOfferCosts(); }
+    void setNextShopFree(bool v) {
+        mNextShopFree = v;
+        if (v) {
+            for (ShopOffer &o : mShopOffers) {
+                if (!o.sold) { o.cost = 0; o.freeByTag = true; }
+            }
+            for (ShopOffer &o : mBoosterOffers) {
+                if (!o.sold) { o.cost = 0; o.freeByTag = true; }
+            }
+        }
+        refreshCurrentOfferCosts();
+    }
     bool nextShopFree() const { return mNextShopFree; }
     void setSpectralRate(double v) { mRates.spectral = v; }
     void setDiscountPercent(int v) { mDiscountPercent = v; }
@@ -136,7 +149,11 @@ public:
     void addPendingRarityJoker(JokerRarity rarity);
     bool canCreateRarityJoker(JokerRarity rarity) const;
     void appendVoucherOffer();
-    void setRerollDiscount(int v) { mRerollDiscount = v; if (!mNextShopRerollStartsFree) resetForNewBlind(); }
+    void setRerollDiscount(int v) {
+        mRerollDiscount = v;
+        if (!mNextShopRerollStartsFree)
+            mRerollCost = qMax(0, 5 - mRerollDiscount);
+    }
     void setNextShopRerollStartsFree() { mNextShopRerollStartsFree = true; mRerollCost = 0; }
     void setRedeemedVouchers(const QVector<VoucherType> &v) { mRedeemedVouchers = v; }
     void setOwnedJokers(const QVector<JokerType> &owned, bool allowDuplicates);
@@ -189,6 +206,7 @@ private:
     int rawCostFor(const ShopOffer &o) const;
     int applyDiscount(int rawCost) const;
     bool duplicatesOffer(const ShopOffer &candidate, const QVector<ShopOffer> &existing) const;
+    int choosePackVariant(PackKind kind, PackSize size, const QVector<ShopOffer> &existing) const;
 };
 
 #endif

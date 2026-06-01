@@ -165,6 +165,13 @@ public:
     }
     QSize visibleCardSize() const { return mVisibleCardSize; }
     bool isHovered() const { return mHovered; }
+    bool hoverLiftEnabled() const { return !mDisableHoverLift; }
+    void setDisableHoverLift(bool disabled)
+    {
+        if (mDisableHoverLift == disabled) return;
+        mDisableHoverLift = disabled;
+        update();
+    }
     void setStaticRotation(double deg)
     {
         if (qFuzzyCompare(mStaticRotDeg + 1.0, deg + 1.0)) return;
@@ -288,7 +295,7 @@ protected:
             // 按下时拖到 0.85（手牌拖动也是这个值），阴影距离明显拉远。
             const qreal lift = mPressed ? 0.85
                                         : (mLifted ? 0.55
-                                                   : (mHovered ? 0.30 : 0.0));
+                                                   : ((mHovered && !mDisableHoverLift) ? 0.30 : 0.0));
             const qreal shadowHeight = 0.1 + 0.45 * lift;
             const qreal kPx = 32.0;
             const qreal offX = -nx * 1.5 * shadowHeight * kPx;
@@ -302,7 +309,7 @@ protected:
                                                             : QSize(width(), height());
             pixSize.scale(target, Qt::KeepAspectRatio);
             const qreal cx = width() / 2.0;
-            const qreal cy = height() / 2.0 + (mHovered ? -8.0 : 0.0);
+            const qreal cy = height() / 2.0 + ((mHovered && !mDisableHoverLift) ? -8.0 : 0.0);
             const qreal w = pixSize.width();
             const qreal h = pixSize.height();
             const QRectF shadowRect(cx - w/2.0 + offX, cy - h/2.0 + offY, w, h);
@@ -345,7 +352,7 @@ protected:
 
         p.save();
         p.setOpacity(isEnabled() ? 1.0 : 0.42);
-        p.translate(width() / 2.0, height() / 2.0 + (mHovered ? -8.0 : 0.0));
+        p.translate(width() / 2.0, height() / 2.0 + ((mHovered && !mDisableHoverLift) ? -8.0 : 0.0));
 
         const qreal tiltX = mTiltX * 3.14159265358979323846 / 180.0;
         const qreal tiltY = mTiltY * 3.14159265358979323846 / 180.0;
@@ -381,6 +388,7 @@ private:
     bool mHovered = false;
     bool mLifted = false;
     bool mPressed = false;
+    bool mDisableHoverLift = false;
     bool mUseSilhouetteShadow = false; // true 给 booster 用 (异形)，否则双层圆角矩形 (joker/consumable/voucher)
     qreal mTiltX = 0.0; // degrees, same direction as CardItem/JokerItem
     qreal mTiltY = 0.0;
@@ -507,7 +515,7 @@ void ShopWidget::buildUi()
     // 原版优惠券区只比一张牌宽,但我们引入了 Voucher Tag 复制后可能出现 2~3 张,
     // 用一个较宽的初始尺寸+足够高度,确保扇形+弧形排列不会被裁切;真实宽度仍由
     // ensureVoucherBoxSize() 根据 offers.size() 动态调整。
-    mVoucherBox->setMinimumSize(dp(200), dp(330));
+    mVoucherBox->setMinimumSize(dp(220), dp(372));
     mVoucherBox->setAttribute(Qt::WA_StyledBackground, true);
     mVoucherBox->setStyleSheet(
         "QWidget#voucherBox { background:rgba(57,72,76,230); border:none; border-radius:14px; }"
@@ -575,7 +583,7 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
     // 否则 Qt 把超出 ou.card 顶边的 cardBtn 像素裁掉，看着像"商品上半截没了"。
     const int selectionLiftReserve = isVoucherSlot ? 24 : 36;
     const int topReserve = (priceTabH - 1) + selectionLiftReserve;
-    const int containerH = topReserve + btnH + (isVoucherSlot ? 46 : 12);
+    const int containerH = topReserve + btnH + (isVoucherSlot ? 64 : 12);
 
     ou.card = new QWidget(parent);
     ou.card->setFixedSize(dp(containerW), dp(containerH));
@@ -620,6 +628,7 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
     ou.cardBtn = scb;
     // 礼包用剪影阴影（包形不规则），其它矩形 sprite 走和槽位一致的双层圆角阴影。
     scb->setUseSilhouetteShadow(isBooster);
+    scb->setDisableHoverLift(isVoucherSlot);
     // button 留出 hover 缩放 overflow 空间——内部 pixmap 仍按 slotW × slotH 居中绘制，
     // hover 1.045 时仍在 button rect 内不被裁。
     ou.cardBtn->setFixedSize(dp(btnW), dp(btnH));
@@ -927,7 +936,7 @@ void ShopWidget::syncPriceLblForCardBtn(QWidget *cardBtn)
         ? (cardBtn->height() - scb->visibleCardSize().height()) / 2
         : 0;
     // hover 时画面上移 -4 px（与 ShopCardButton::paintEvent 的 translate 对齐）。
-    const int hoverShift = (scb && scb->isHovered()) ? -8 : 0;
+    const int hoverShift = (scb && scb->isHovered() && scb->hoverLiftEnabled()) ? -8 : 0;
     const QPoint cardTopLeftInThis = cardBtn->mapTo(this, QPoint(0, 0));
     const int px = cardTopLeftInThis.x() + (cardBtn->width() - ou->priceLbl->width()) / 2;
     const int py = cardTopLeftInThis.y() + visibleTopOffset
@@ -962,10 +971,15 @@ void ShopWidget::ensureVoucherBoxSize(int activeCount)
     if (!mVoucherBox) return;
     // 1 张 → 基础宽 200dp;2 张 → +110;3 张 → +220 …… 上限 4 张以内能完整显示。
     const int extra = qMax(0, activeCount - 1);
-    const int targetW = dp(200) + extra * dp(110);
-    if (mVoucherBox->minimumWidth() != targetW) {
-        mVoucherBox->setMinimumWidth(targetW);
-        if (mVoucherBox->width() < targetW) mVoucherBox->resize(targetW, mVoucherBox->height());
+    const int targetW = dp(220) + extra * dp(132);
+    const int targetH = dp(activeCount > 1 ? 382 : 352);
+    if (mVoucherBox->size() != QSize(targetW, targetH)) {
+        mVoucherBox->setMinimumSize(targetW, targetH);
+        mVoucherBox->setMaximumSize(targetW, targetH);
+        mVoucherBox->resize(targetW, targetH);
+        mVoucherBox->updateGeometry();
+        if (mVoucherBox->parentWidget() && mVoucherBox->parentWidget()->layout())
+            mVoucherBox->parentWidget()->layout()->activate();
     }
 }
 
@@ -1028,7 +1042,7 @@ void ShopWidget::layoutVoucherFan()
         QWidget *btn = ou.cardBtn ? ou.cardBtn : ou.card;
         const double rel = k - mid;
         const int targetCenterX = centerX + int(std::round(rel * spreadX));
-        const bool focused = (k == focusOrder) && (slot == mSelectedVoucherSlot);
+        const bool focused = (slot == mSelectedVoucherSlot);
         // 弧形排列保留(rel*22 垂直 + |rel|*8 弧形),但 hover 不再额外上抬。
         const int targetCenterY = centerY + int(std::round(rel * dp(22) + std::abs(rel) * dp(8))) - (focused ? dp(24) : 0);
         const int btnCenterXInCard = btn->x() + btn->width() / 2;
@@ -1367,13 +1381,14 @@ void ShopWidget::refresh()
         // 卡图由 ShopCardButton 自己绘制，保留原始像素清晰度，并在 hover 时做原版式顶点透视。
         // 关键：选中切换 / 价格刷新都会触发 refresh()，但 offer 本身没变时不要重渲卡图，
         // 否则带 shader 的牌面（Foil/Holographic 等）每次会产生轻微色差，看上去就是"光泽闪一下"。
-        const QString offerHash = QString("%1|j%2|e%3|c%4|p%5|s%6|v%7|r%8|u%9|h%10|d%11|l%12|b%13|sold%14")
+        const QString offerHash = QString("%1|j%2|e%3|c%4|p%5|s%6|pv%7|v%8|r%9|u%10|h%11|d%12|l%13|b%14|sold%15")
                                       .arg(int(o.kind))
                                       .arg(int(o.joker))
                                       .arg(int(o.jokerEdition))
                                       .arg(int(o.consumable))
                                       .arg(int(o.pack))
                                       .arg(int(o.packSize))
+                                      .arg(o.packVariant)
                                       .arg(int(o.voucher))
                                       .arg(int(o.playingCard.rank))
                                       .arg(int(o.playingCard.suit))
@@ -1451,16 +1466,17 @@ void ShopWidget::refresh()
         if (ou.cardBtn) {
             // 同步阴影 lift 状态：选中即抬升。
             if (auto *sc = dynamic_cast<ShopCardButton*>(ou.cardBtn)) sc->setLifted(selectedHere);
+            const bool animateSelectedLift = selectedHere && !voucherIdxV.isValid();
             QPointer<QWidget> btnGuard(ou.cardBtn);
-            QTimer::singleShot(0, this, [btnGuard, selectedHere]() {
+            QTimer::singleShot(0, this, [btnGuard, animateSelectedLift]() {
                 if (!btnGuard) return;
                 QWidget *btn = btnGuard.data();
                 QVariant base = btn->property("baseY");
                 int baseY = base.isValid() ? base.toInt() : btn->y();
                 // layout 可能在窗口缩放后重算 y；如果当前按钮回到了布局给的位置，更新基准。
-                if (!base.isValid() || (!selectedHere && qAbs(btn->y() - baseY) > dp(40))) baseY = btn->y();
+                if (!base.isValid() || (!animateSelectedLift && qAbs(btn->y() - baseY) > dp(40))) baseY = btn->y();
                 btn->setProperty("baseY", baseY);
-                const int targetY = baseY + (selectedHere ? -dp(36) : 0);
+                const int targetY = baseY + (animateSelectedLift ? -dp(36) : 0);
                 btn->setProperty("cardTargetY", targetY);
                 if (btn->y() == targetY) return;
                 auto *anim = new QPropertyAnimation(btn, "pos", btn);
@@ -1573,7 +1589,7 @@ QPixmap ShopWidget::offerPixmap(const ShopOffer &o) const
     if (o.kind == OfferKind::Pack) {
         QPixmap sheet(":/textures/images/boosters.png");
         if (sheet.isNull()) return QPixmap();
-        QPoint c = packSpritePos(o.pack, o.packSize);
+        QPoint c = packSpritePos(o.pack, o.packSize, o.packVariant);
         QPixmap base = sheet.copy(c.x() * ConsumableItem::SRC_W,
                                   c.y() * ConsumableItem::SRC_H,
                                   ConsumableItem::SRC_W, ConsumableItem::SRC_H);
@@ -1677,7 +1693,7 @@ QPixmap ShopWidget::playingCardPixmap(const CardData &c) const
             sp.drawPixmap(QRect(0, 0, W, H), enhSheet, QRect(sCol * W, sRow * H, W, H));
         }
         if (c.seal == Seal::Gold)
-            sealPix = BalatroShaders::renderVoucherPixmap(sealPix, 1.0);
+            sealPix = BalatroShaders::renderGoldSealPixmap(sealPix, 1.0);
         QPainter fp(&pix);
         fp.drawPixmap(QRect(0, 0, W, H), sealPix);
     }
@@ -1845,7 +1861,7 @@ void ShopWidget::updateDragPreview(DragGroup group, int from, int to)
             auto *scb = dynamic_cast<ShopCardButton*>(cardBtn);
             const int visOff = (scb && scb->visibleCardSize().isValid())
                 ? (cardBtn->height() - scb->visibleCardSize().height()) / 2 : 0;
-            const int hoverShift = (scb && scb->isHovered()) ? -8 : 0;
+            const int hoverShift = (scb && scb->isHovered() && scb->hoverLiftEnabled()) ? -8 : 0;
             const QPoint cardTopLeftInThis =
                 card->parentWidget() ? card->parentWidget()->mapTo(this, target) : target;
             const QPoint cardBtnInCard = cardBtn->pos();
@@ -1894,7 +1910,7 @@ void ShopWidget::clearDragPreview(bool animateBack)
             auto *scb = dynamic_cast<ShopCardButton*>(cardBtn);
             const int visOff = (scb && scb->visibleCardSize().isValid())
                 ? (cardBtn->height() - scb->visibleCardSize().height()) / 2 : 0;
-            const int hoverShift = (scb && scb->isHovered()) ? -8 : 0;
+            const int hoverShift = (scb && scb->isHovered() && scb->hoverLiftEnabled()) ? -8 : 0;
             const QPoint cardTopLeftInThis =
                 card->parentWidget() ? card->parentWidget()->mapTo(this, target) : target;
             const QPoint cardBtnInCard = cardBtn->pos();
@@ -2090,17 +2106,27 @@ void ShopWidget::positionSlotActionButtons(OfferUi &ou, bool hasUseBtn)
         bool ok = false;
         int visualY = cardGuard->property("cardTargetY").toInt(&ok);
         if (ok) p.setY(visualY);
+        QSize visualSize = cardGuard->size();
+        QPoint visualTopLeft = p;
+        if (auto *scb = dynamic_cast<ShopCardButton *>(cardGuard.data())) {
+            if (scb->visibleCardSize().isValid()) {
+                visualSize = scb->visibleCardSize();
+                visualTopLeft += QPoint((cardGuard->width() - visualSize.width()) / 2,
+                                        (cardGuard->height() - visualSize.height()) / 2);
+            }
+        }
         if (buyGuard && buyGuard->isVisible()) {
             // 挂在卡牌下方，和牌面留出细微缝隙；不再半压在牌面上，避免选中时按钮与卡片重叠。
-            int x = p.x() + (cardGuard->width() - buyGuard->width()) / 2;
-            int y = p.y() + cardGuard->height() + dp(3);
+            int x = visualTopLeft.x() + (visualSize.width() - buyGuard->width()) / 2;
+            int y = visualTopLeft.y() + visualSize.height() + dp(3);
+            y = qMin(y, containerGuard->height() - buyGuard->height());
             buyGuard->move(x, y);
             buyGuard->raise();
         }
         if (useGuard && hasUseBtn) {
             // 左边沿压住卡片右边框 1px：视觉上贴合卡牌，且左侧直角不会露出缝。
-            int x = p.x() + cardGuard->width() - dp(1);
-            int y = p.y() + cardGuard->height() / 2 - useGuard->height() / 2;
+            int x = visualTopLeft.x() + visualSize.width() - dp(1);
+            int y = visualTopLeft.y() + visualSize.height() / 2 - useGuard->height() / 2;
             useGuard->move(x, y);
             useGuard->raise();
         }

@@ -305,6 +305,7 @@ QVector<VoucherType> baseVoucherPool() {
 }
 
 void Shop::roll() {
+    const bool couponed = mNextShopFree;
     rerollShopOnly();
 
     if (mAllowVoucherThisShop) {
@@ -314,6 +315,19 @@ void Shop::roll() {
 
     mBoosterOffers.clear();
     for (int i = 0; i < 2; ++i) mBoosterOffers.append(randomBoosterOffer(mBoosterOffers));
+
+    if (couponed) {
+        for (ShopOffer &o : mShopOffers) {
+            if (o.sold) continue;
+            o.cost = 0;
+            o.freeByTag = true;
+        }
+        for (ShopOffer &o : mBoosterOffers) {
+            if (o.sold) continue;
+            o.cost = 0;
+            o.freeByTag = true;
+        }
+    }
 
     // 原版 Coupon Tag：触发的"免费"只作用于商店首次出现的小丑 + 礼包，
     // 不影响优惠券，重摇后新出的商品也不再免费。这里在首次 roll 完后立刻 clear，
@@ -416,6 +430,24 @@ ShopOffer Shop::takeBoosterOffer(int idx) {
     ShopOffer o = mBoosterOffers[idx];
     mBoosterOffers[idx].sold = true;
     return o;
+}
+
+void Shop::setBoosterOfferPack(int idx, PackKind kind, PackSize size, bool freeByTag)
+{
+    if (idx < 0 || idx >= mBoosterOffers.size()) return;
+
+    QVector<ShopOffer> existing = mBoosterOffers;
+    existing.removeAt(idx);
+
+    ShopOffer &o = mBoosterOffers[idx];
+    const bool keepFree = freeByTag || o.freeByTag || o.cost == 0;
+    o.kind = OfferKind::Pack;
+    o.pack = kind;
+    o.packSize = size;
+    o.packVariant = choosePackVariant(kind, size, existing);
+    o.sold = false;
+    o.freeByTag = keepFree;
+    o.cost = keepFree ? 0 : applyDiscount(rawCostFor(o));
 }
 
 bool Shop::moveBoosterOffer(int from, int to)
@@ -551,7 +583,10 @@ bool Shop::duplicatesOffer(const ShopOffer &candidate, const QVector<ShopOffer> 
                 return true;
             break;
         case OfferKind::Pack:
-            if (candidate.pack == o.pack && candidate.packSize == o.packSize) return true;
+            if (candidate.pack == o.pack &&
+                candidate.packSize == o.packSize &&
+                candidate.packVariant == o.packVariant)
+                return true;
             break;
         case OfferKind::Voucher:
             if (candidate.voucher == o.voucher) return true;
@@ -593,9 +628,9 @@ ShopOffer Shop::makeRarityJokerOffer(JokerRarity rarity, const QVector<ShopOffer
 
 Edition Shop::randomJokerEdition() const
 {
-    // Source poll_edition probabilities. Hone/Glow Up scale every edition except Negative.
+    // Project rule: Negative edition has a 5% shop roll chance.
     double p = QRandomGenerator::global()->generateDouble();
-    if (p > 1.0 - 0.003) return Edition::Negative;
+    if (p > 1.0 - 0.05) return Edition::Negative;
     if (p > 1.0 - 0.006 * mJokerEditionRate) return Edition::Polychrome;
     if (p > 1.0 - 0.02 * mJokerEditionRate) return Edition::Holographic;
     if (p > 1.0 - 0.04 * mJokerEditionRate) return Edition::Foil;
@@ -659,6 +694,46 @@ ShopOffer Shop::randomShopOffer(const QVector<ShopOffer> &alreadyRolled) const {
     }
 
     // 兜底：如果某一类池子被抽空，就允许最后一次结果返回，保证商店不会崩。
+    QVector<ShopOffer> fallbackOffers;
+    auto appendConsumableFallback = [&](OfferKind kind, ConsumableType first, ConsumableType last, int baseCost) {
+        QVector<ConsumableType> choices;
+        for (int v = int(first); v <= int(last); ++v) {
+            ShopOffer candidate;
+            candidate.kind = kind;
+            candidate.consumable = static_cast<ConsumableType>(v);
+            if (!duplicatesOffer(candidate, alreadyRolled))
+                choices.append(candidate.consumable);
+        }
+        if (choices.isEmpty()) return;
+        ShopOffer fallback;
+        fallback.kind = kind;
+        fallback.consumable = choices[QRandomGenerator::global()->bounded(choices.size())];
+        fallback.cost = mNextShopFree ? 0 : applyDiscount(baseCost);
+        fallbackOffers.append(fallback);
+    };
+    if (mRates.tarot > 0.0) {
+        appendConsumableFallback(OfferKind::Tarot,
+                                 ConsumableType::Tarot_Fool,
+                                 ConsumableType::Tarot_World,
+                                 3);
+    }
+    if (mRates.planet > 0.0) {
+        appendConsumableFallback(OfferKind::Planet,
+                                 ConsumableType::Planet_Pluto,
+                                 ConsumableType::Planet_Eris,
+                                 3);
+    }
+    if (mRates.spectral > 0.0) {
+        // randomSpectralType() excludes Soul/Black Hole; keep this fallback on that same pool.
+        appendConsumableFallback(OfferKind::Spectral,
+                                 ConsumableType::Spectral_Familiar,
+                                 ConsumableType::Spectral_Cryptid,
+                                 4);
+    }
+    if (!fallbackOffers.isEmpty()) {
+        return fallbackOffers[QRandomGenerator::global()->bounded(fallbackOffers.size())];
+    }
+
     if (o.cost <= 0) {
         o.kind = OfferKind::Tarot;
         o.consumable = randomTarotType();
@@ -689,33 +764,34 @@ ShopOffer Shop::randomBoosterOffer(const QVector<ShopOffer> &alreadyRolled) cons
     struct Candidate {
         PackKind kind;
         PackSize size;
+        int variant;
         int weight;   // 原版权重 ×100
         int cost;
     };
 
     const QVector<Candidate> pool = {
-        {PackKind::Arcana, PackSize::Normal, 100, 4}, {PackKind::Arcana, PackSize::Normal, 100, 4},
-        {PackKind::Arcana, PackSize::Normal, 100, 4}, {PackKind::Arcana, PackSize::Normal, 100, 4},
-        {PackKind::Arcana, PackSize::Jumbo, 100, 6},  {PackKind::Arcana, PackSize::Jumbo, 100, 6},
-        {PackKind::Arcana, PackSize::Mega, 25, 8},    {PackKind::Arcana, PackSize::Mega, 25, 8},
+        {PackKind::Arcana, PackSize::Normal, 0, 100, 4}, {PackKind::Arcana, PackSize::Normal, 1, 100, 4},
+        {PackKind::Arcana, PackSize::Normal, 2, 100, 4}, {PackKind::Arcana, PackSize::Normal, 3, 100, 4},
+        {PackKind::Arcana, PackSize::Jumbo, 0, 100, 6},  {PackKind::Arcana, PackSize::Jumbo, 1, 100, 6},
+        {PackKind::Arcana, PackSize::Mega, 0, 25, 8},    {PackKind::Arcana, PackSize::Mega, 1, 25, 8},
 
-        {PackKind::Celestial, PackSize::Normal, 100, 4}, {PackKind::Celestial, PackSize::Normal, 100, 4},
-        {PackKind::Celestial, PackSize::Normal, 100, 4}, {PackKind::Celestial, PackSize::Normal, 100, 4},
-        {PackKind::Celestial, PackSize::Jumbo, 100, 6},  {PackKind::Celestial, PackSize::Jumbo, 100, 6},
-        {PackKind::Celestial, PackSize::Mega, 25, 8},    {PackKind::Celestial, PackSize::Mega, 25, 8},
+        {PackKind::Celestial, PackSize::Normal, 0, 100, 4}, {PackKind::Celestial, PackSize::Normal, 1, 100, 4},
+        {PackKind::Celestial, PackSize::Normal, 2, 100, 4}, {PackKind::Celestial, PackSize::Normal, 3, 100, 4},
+        {PackKind::Celestial, PackSize::Jumbo, 0, 100, 6},  {PackKind::Celestial, PackSize::Jumbo, 1, 100, 6},
+        {PackKind::Celestial, PackSize::Mega, 0, 25, 8},    {PackKind::Celestial, PackSize::Mega, 1, 25, 8},
 
-        {PackKind::Spectral, PackSize::Normal, 30, 4}, {PackKind::Spectral, PackSize::Normal, 30, 4},
-        {PackKind::Spectral, PackSize::Jumbo, 30, 6},
-        {PackKind::Spectral, PackSize::Mega, 7, 8},
+        {PackKind::Spectral, PackSize::Normal, 0, 30, 4}, {PackKind::Spectral, PackSize::Normal, 1, 30, 4},
+        {PackKind::Spectral, PackSize::Jumbo, 0, 30, 6},
+        {PackKind::Spectral, PackSize::Mega, 0, 7, 8},
 
-        {PackKind::Standard, PackSize::Normal, 100, 4}, {PackKind::Standard, PackSize::Normal, 100, 4},
-        {PackKind::Standard, PackSize::Normal, 100, 4}, {PackKind::Standard, PackSize::Normal, 100, 4},
-        {PackKind::Standard, PackSize::Jumbo, 100, 6},  {PackKind::Standard, PackSize::Jumbo, 100, 6},
-        {PackKind::Standard, PackSize::Mega, 25, 8},    {PackKind::Standard, PackSize::Mega, 25, 8},
+        {PackKind::Standard, PackSize::Normal, 0, 100, 4}, {PackKind::Standard, PackSize::Normal, 1, 100, 4},
+        {PackKind::Standard, PackSize::Normal, 2, 100, 4}, {PackKind::Standard, PackSize::Normal, 3, 100, 4},
+        {PackKind::Standard, PackSize::Jumbo, 0, 100, 6},  {PackKind::Standard, PackSize::Jumbo, 1, 100, 6},
+        {PackKind::Standard, PackSize::Mega, 0, 25, 8},    {PackKind::Standard, PackSize::Mega, 1, 25, 8},
 
-        {PackKind::Buffoon, PackSize::Normal, 60, 4}, {PackKind::Buffoon, PackSize::Normal, 60, 4},
-        {PackKind::Buffoon, PackSize::Jumbo, 60, 6},
-        {PackKind::Buffoon, PackSize::Mega, 15, 8},
+        {PackKind::Buffoon, PackSize::Normal, 0, 60, 4}, {PackKind::Buffoon, PackSize::Normal, 1, 60, 4},
+        {PackKind::Buffoon, PackSize::Jumbo, 0, 60, 6},
+        {PackKind::Buffoon, PackSize::Mega, 0, 15, 8},
     };
 
     for (int attempt = 0; attempt < 40; ++attempt) {
@@ -733,6 +809,7 @@ ShopOffer Shop::randomBoosterOffer(const QVector<ShopOffer> &alreadyRolled) cons
         o.kind = OfferKind::Pack;
         o.pack = chosen.kind;
         o.packSize = chosen.size;
+        o.packVariant = chosen.variant;
         o.cost = mNextShopFree ? 0 : applyDiscount(chosen.cost);
         if (!duplicatesOffer(o, alreadyRolled)) return o;
     }
@@ -741,8 +818,27 @@ ShopOffer Shop::randomBoosterOffer(const QVector<ShopOffer> &alreadyRolled) cons
     o.kind = OfferKind::Pack;
     o.pack = PackKind::Arcana;
     o.packSize = PackSize::Normal;
+    o.packVariant = choosePackVariant(o.pack, o.packSize, alreadyRolled);
     o.cost = mNextShopFree ? 0 : applyDiscount(4);
     return o;
+}
+
+int Shop::choosePackVariant(PackKind kind, PackSize size, const QVector<ShopOffer> &existing) const
+{
+    QVector<int> variants;
+    const int count = qMax(1, packSpriteVariantCount(kind, size));
+    for (int i = 0; i < count; ++i) variants.append(i);
+
+    for (const ShopOffer &o : existing) {
+        if (o.sold || o.kind != OfferKind::Pack) continue;
+        if (o.pack != kind || o.packSize != size) continue;
+        variants.removeAll(o.packVariant);
+    }
+
+    if (variants.isEmpty()) {
+        for (int i = 0; i < count; ++i) variants.append(i);
+    }
+    return variants[QRandomGenerator::global()->bounded(variants.size())];
 }
 
 CardData Shop::randomPlayingCard(bool enhancedPossible, const QVector<ShopOffer> &alreadyRolled) const {

@@ -213,8 +213,28 @@ static void wheelOfFortune(UseContext &ctx)
 
 static void addPlanets(UseContext &ctx, int count)
 {
+    QVector<ConsumableType> used;
+    for (const Consumable &c : ctx.state.consumables()) {
+        if (c.kind == ConsumableKind::Planet)
+            used.append(c.type);
+    }
+    auto randomUniquePlanet = [&used]() {
+        QVector<ConsumableType> pool = {
+            ConsumableType::Planet_Pluto,   ConsumableType::Planet_Mercury,
+            ConsumableType::Planet_Uranus,  ConsumableType::Planet_Venus,
+            ConsumableType::Planet_Saturn,  ConsumableType::Planet_Jupiter,
+            ConsumableType::Planet_Earth,   ConsumableType::Planet_Mars,
+            ConsumableType::Planet_Neptune, ConsumableType::Planet_PlanetX,
+            ConsumableType::Planet_Ceres,   ConsumableType::Planet_Eris,
+        };
+        for (ConsumableType t : used) pool.removeAll(t);
+        if (pool.isEmpty()) return randomPlanetType();
+        ConsumableType picked = pool[QRandomGenerator::global()->bounded(pool.size())];
+        used.append(picked);
+        return picked;
+    };
     for (int i = 0; i < count; ++i) {
-        if (!ctx.state.addConsumable(randomPlanetType())) break;
+        if (!ctx.state.addConsumable(randomUniquePlanet())) break;
     }
 }
 

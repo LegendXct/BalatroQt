@@ -592,11 +592,24 @@ QPixmap renderDissolvePixmap(const QPixmap &base, double dissolve, const QColor 
     return processPixmap(base, ShaderKind::Dissolve, intensity, false, dissolve, burn1, burn2);
 }
 
+static bool pixmapHasVisibleAlpha(const QPixmap &pix)
+{
+    if (pix.isNull()) return false;
+    const QImage img = pix.toImage().convertToFormat(QImage::Format_ARGB32);
+    for (int y = 0; y < img.height(); ++y) {
+        const QRgb *row = reinterpret_cast<const QRgb *>(img.constScanLine(y));
+        for (int x = 0; x < img.width(); ++x) {
+            if (qAlpha(row[x]) > 8) return true;
+        }
+    }
+    return false;
+}
+
 QPixmap renderGoldSealPixmap(const QPixmap &base, double intensity)
 {
     bool ok = false;
     QPixmap gpu = renderShaderPixmapGpu(base, QStringLiteral("goldseal"), intensity, false, &ok);
-    return (ok && !gpu.isNull()) ? gpu : processPixmap(base, ShaderKind::GoldSeal, intensity, false);
+    return (ok && pixmapHasVisibleAlpha(gpu)) ? gpu : processPixmap(base, ShaderKind::GoldSeal, intensity, false);
 }
 
 QImage makeBackgroundImage(const QSizeF &logicalSize, const QColor &c1, const QColor &c2, const QColor &c3,

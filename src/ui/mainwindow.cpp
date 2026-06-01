@@ -2275,6 +2275,7 @@ void MainWindow::showSettingsOverlay()
 void MainWindow::hideSettingsOverlay()
 {
     if (mSettingsOverlay) mSettingsOverlay->hide();
+    resumeGameProcesses();
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -6000,6 +6001,8 @@ void MainWindow::openImmediateTagPack(PackKind kind)
                                        owned,
                                        false,
                                        mGameState->grosMichelExtinct());
+    mPendingPack.spriteVariant =
+        QRandomGenerator::global()->bounded(qMax(1, packSpriteVariantCount(kind, size)));
     mPendingPackHand.clear();
     if (kind == PackKind::Arcana || kind == PackKind::Spectral) {
         mPendingPackHand = mGameState->drawPackHand();
