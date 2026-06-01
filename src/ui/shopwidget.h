@@ -29,6 +29,9 @@ signals:
     // 购买小丑/消耗牌前先把起点交给 MainWindow，随后 changed 刷新时直接让真实卡片飞入槽位。
     // targetArea: 1 = Joker 槽，2 = 消耗牌槽，3 = 牌组/其它，0 = 清除待播动画。
     void shopItemBoughtForAnimation(const QPixmap &pixmap, const QPoint &globalCenter, int targetArea);
+    // 商店里"购买并使用"行星/黑洞：本身不进消耗牌槽，需要 MainWindow 在卡片位置生成一张幽灵
+    // 卡同步做 juice + 淡出，配合侧栏 playHandLevelUpAnimation 的三拍演出。
+    void shopConsumableUseAnimation(int consumableType, const QPoint &globalCenter);
 
 protected:
     void resizeEvent(QResizeEvent *e) override;

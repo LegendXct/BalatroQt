@@ -89,6 +89,7 @@ private:
     QPushButton *mBtnSortSuit = nullptr; // 花色理牌
     QPushButton *mBtnDiscard = nullptr; // 弃牌
     QPushButton *mBtnBestPlay = nullptr; // 最佳出牌提示
+    QPushButton *mBtnForesight = nullptr; // 占卜:模拟当前选中手牌得分,进度条预览
     QGraphicsTextItem *mHandCountLabel  = nullptr;  // 8/8
     QPointer<class QVariantAnimation> mHandCountLabelAnim;  // 手牌行下沉时 8/8 标签的动画
     QGraphicsTextItem *mDeckLabel       = nullptr;  // 52/52
@@ -139,6 +140,12 @@ private:
     void scheduleGame(int delayMs, std::function<void()> fn);  // 替代计分链里的 singleShot
     void pauseGameProcesses();
     void resumeGameProcesses();
+    // 设置里的倍速:scheduleGame / animateScoreTotalThenFinalize 等待时间会除以这个倍数。
+    double mGameSpeedFactor = 1.0;
+    void setGameSpeedFactor(double f) { mGameSpeedFactor = qMax(0.25, f); }
+    int scaledDelay(int delayMs) const {
+        return qMax(0, qRound(delayMs / qMax(0.25, mGameSpeedFactor)));
+    }
 
     QVector<ConsumableItem*> mConsumableItems;
 
@@ -180,6 +187,7 @@ private:
     QGraphicsProxyWidget *mSortProxy    = nullptr;
     QGraphicsProxyWidget *mDiscardProxy = nullptr;
     QGraphicsProxyWidget *mBestPlayProxy = nullptr;
+    QGraphicsProxyWidget *mForesightProxy = nullptr;
 
     QLabel *mBlindChipLbl = nullptr;
 
@@ -237,6 +245,9 @@ private:
 
     void refreshConsumableSlots();
     void layoutConsumableItems(bool animate = true);
+    // 商店 "购买并使用" 行星/黑洞:在商店卡片位置生成一张幽灵 ConsumableItem,
+    // 与侧栏 playHandLevelUpAnimation 三拍演出同步 juice + 淡出。
+    void spawnShopPlanetUseFloater(int consumableType, const QPoint &globalCenter);
     void onConsumableClicked(ConsumableItem *item, Qt::MouseButton btn);
     void onConsumablePressed(ConsumableItem *item, Qt::MouseButton btn);
     void onConsumableDragMoved(ConsumableItem *item, QPointF scenePos);
@@ -276,6 +287,7 @@ private:
     void onSortByNum();
     void onSortBySuit();
     void onBestPlayHint();
+    void onForesightClicked();    // 占卜:模拟得分,进度条预览闪现后回退
     void setPlayPhaseVisible(bool v);
 
     void onRoundWon(int blindReward, int handBonus, int interest);
@@ -409,6 +421,8 @@ private:
     QPointF mSortBtnHome;
     QPointF mDiscardBtnHome;
     QPointF mBestPlayBtnHome;
+    QPointF mForesightBtnHome;
+    bool mForesightPreviewActive = false;   // 占卜预览动画进行中,避免重复点击叠加
 
     void updateHandPreview();
     void playScoreEvent(const ScoreEvent &ev, double percent = -1.0);
@@ -434,6 +448,7 @@ private:
     void showMainMenuOverlay();
     void hideMainMenuOverlay();
     QPointer<QWidget> mMainMenuOverlay;
+    bool mHasOngoingRun = false;   // 启动直进主菜单时 "继续当前局" 灰掉,开过新局后亮起
     void showStatsOverlay();
     void showCollectionOverlay();
     void showDeckCustomizeOverlay();

@@ -917,7 +917,9 @@ MainWindow::MainWindow(QWidget *parent)
 
     QTimer::singleShot(0, this, [this]() {
         if (mBlindSelectWidget) mBlindSelectWidget->hide();
-        mGameState->startGame();
+        // 启动直接进入主菜单——"继续当前局" 此时灰掉,
+        // 必须先点 "开始新的一局" 才会真正初始化游戏状态进入对局界面。
+        showMainMenuOverlay();
     });
 }
 
@@ -2043,7 +2045,7 @@ void MainWindow::showOptionsOverlay()
     v->addWidget(title);
 
     const int kBtnH = dp(78);     // 进一步抬高，按钮厚实些与原版主菜单观感对齐
-    const QStringList items = {"设置", "开始新的一局", "主菜单", "统计数据", "收藏", "定制牌组"};
+    const QStringList items = {"设置", "开始新的一局", "主菜单", "统计数据", "定制牌组"};
     for (const QString &txt : items) {
         auto *b = new QPushButton(txt, panel);
         b->setFont(titleFont);
@@ -2064,11 +2066,6 @@ void MainWindow::showOptionsOverlay()
             connect(b, &QPushButton::clicked, this, [this]() {
                 hideOptionsOverlay();
                 showStatsOverlay();
-            });
-        } else if (txt == "收藏") {
-            connect(b, &QPushButton::clicked, this, [this]() {
-                hideOptionsOverlay();
-                showCollectionOverlay();
             });
         } else if (txt == "定制牌组") {
             connect(b, &QPushButton::clicked, this, [this]() {
@@ -2121,6 +2118,7 @@ void MainWindow::startNewRunFromOptions()
     // 不再 setUpdatesEnabled(false)，因为整窗禁用/恢复更新也会在部分机器上触发黑底中间帧。
     resetTransientOverlaysForNewRun();
     mGameState->startGame();
+    mHasOngoingRun = true;   // 一旦开过新局,主菜单里 "继续当前局" 就该亮起
     refreshHand();
     refreshJokerSlots();
     refreshConsumableSlots();
@@ -2238,14 +2236,66 @@ void MainWindow::showSettingsOverlay()
     makeSliderRow("音效音量", int(std::round(audio->sfxVolume() * 100.0)),
                   [audio](int v) { audio->setSfxVolume(v / 100.0); });
 
-    // 简单提示：原版还有画质等设置，本项目未实现。
-    auto *note = new QLabel("画质 / 全屏等更多选项待后续接入", panel);
-    QFont noteFont = mCNFont; noteFont.setPixelSize(uiPx(14));
-    note->setFont(noteFont);
-    note->setStyleSheet("color:#9bb6bd; background:transparent; border:none;");
-    note->setAlignment(Qt::AlignCenter);
-    v->addSpacing(dp(8));
-    v->addWidget(note);
+    // 倍速:1x/2x/4x/8x —— 通过 mGameSpeedFactor 缩短计分链上每个 scheduleGame 的等待时间。
+    {
+        auto *row = new QWidget(panel);
+        row->setStyleSheet("background:transparent; border:none;");
+        auto *h = new QHBoxLayout(row);
+        h->setContentsMargins(0, 0, 0, 0);
+        h->setSpacing(dp(10));
+
+        auto *lbl = new QLabel("倍速", row);
+        lbl->setFont(labelFont);
+        lbl->setStyleSheet("color:#eaffff; background:transparent; border:none;");
+        lbl->setFixedWidth(dp(110));
+        h->addWidget(lbl);
+
+        auto *btnRow = new QWidget(row);
+        btnRow->setStyleSheet("background:transparent; border:none;");
+        auto *bh = new QHBoxLayout(btnRow);
+        bh->setContentsMargins(0, 0, 0, 0);
+        bh->setSpacing(dp(8));
+
+        const QVector<double> speeds = { 1.0, 2.0, 4.0, 8.0 };
+        QVector<QPushButton*> btns;
+        for (double s : speeds) {
+            auto *b = new QPushButton(QString("%1x").arg(int(s)), btnRow);
+            b->setFont(labelFont);
+            b->setMinimumHeight(dp(34));
+            b->setCheckable(true);
+            btns.append(b);
+            bh->addWidget(b, 1);
+        }
+
+        auto applyStyles = [btns]() {
+            for (auto *b : btns) {
+                const bool on = b->isChecked();
+                b->setStyleSheet(QString(
+                    "QPushButton { background:%1; color:%2;"
+                    " border:2px solid %3; border-radius:10px; padding:4px 10px;"
+                    " font-weight:bold; }"
+                    "QPushButton:hover { background:%4; }"
+                ).arg(on ? "#fda200" : "#1f2a2c",
+                      on ? "#101216" : "#eaffff",
+                      on ? "#ffe6a8" : "#3b4347",
+                      on ? "#ffb730" : "#2a3539"));
+            }
+        };
+
+        for (int i = 0; i < btns.size(); ++i) {
+            const double s = speeds[i];
+            btns[i]->setChecked(qFuzzyCompare(s, mGameSpeedFactor));
+            connect(btns[i], &QPushButton::clicked, this, [this, btns, speeds, i, applyStyles]() {
+                for (int j = 0; j < btns.size(); ++j) btns[j]->setChecked(j == i);
+                setGameSpeedFactor(speeds[i]);
+                applyStyles();
+            });
+        }
+        applyStyles();
+
+        h->addWidget(btnRow, 1);
+        v->addWidget(row);
+    }
 
     auto *back = new QPushButton("返回", panel);
     QFont btnFont = mCNFont; btnFont.setPixelSize(uiPx(20)); btnFont.setBold(true);
@@ -2460,18 +2510,23 @@ void MainWindow::showDeckCustomizeOverlay()
 void MainWindow::showMainMenuOverlay()
 {
     // 参考原版 main_menu：大 Balatro 标题 + Play/Continue/Options/Quit 列。
-    // 用同样的 in-scene QWidget 模式（避免 QOpenGLWidget 上弹原生 QDialog）。
-    QWidget *host = mPlayPage ? mPlayPage : this;
+    // 主菜单需要"全屏另一界面",不再像 overlay 那样半透明叠在游戏画面上——
+    // 父级挂在 centralWidget(),覆盖左侧面板 + 右侧场景;并用纯不透明背景把游戏整体盖掉。
+    QWidget *host = centralWidget() ? centralWidget()
+                                    : (mPlayPage ? mPlayPage : this);
+    // "继续当前局" 的可用状态依赖 mHasOngoingRun,缓存会让状态过时——
+    // 直接销毁并重建,保证启动 vs. 局中调出时的按钮状态都新鲜。
     if (mMainMenuOverlay) {
-        mMainMenuOverlay->setGeometry(host->rect());
-        mMainMenuOverlay->raise();
-        mMainMenuOverlay->show();
-        return;
+        mMainMenuOverlay->hide();
+        mMainMenuOverlay->deleteLater();
+        mMainMenuOverlay = nullptr;
     }
 
     auto *overlay = new QWidget(host);
     overlay->setAttribute(Qt::WA_StyledBackground, true);
-    overlay->setStyleSheet("background:rgba(0,0,0,200);");
+    // 不透明背景:整体覆盖游戏 UI,玩家感觉是切到另一页面而不是浮层。
+    overlay->setStyleSheet("background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
+                           " stop:0 #30384d, stop:1 #202839);");
     mMainMenuOverlay = overlay;
 
     auto *root = new QVBoxLayout(overlay);
@@ -2536,25 +2591,22 @@ void MainWindow::showMainMenuOverlay()
         return b;
     };
 
-    // 开始新一局：橙色，主操作。
+    // 继续当前局：仅当已开过至少一局后可用,启动直进主菜单时禁用。
+    auto *btnContinue = makeMenuButton("继续当前局", "#4ca893", "#5fbfa8", mHasOngoingRun);
+    connect(btnContinue, &QPushButton::clicked, this, &MainWindow::hideMainMenuOverlay);
+
+    // 开始新一局:橙色,主操作。
     auto *btnPlay = makeMenuButton("开始新的一局", "#fda200", "#ffb730", true);
     connect(btnPlay, &QPushButton::clicked, this, [this]() {
         hideMainMenuOverlay();
         startNewRunFromOptions();
     });
 
-    auto *btnContinue = makeMenuButton("继续当前局", "#4ca893", "#5fbfa8", true);
-    connect(btnContinue, &QPushButton::clicked, this, &MainWindow::hideMainMenuOverlay);
-
     auto *btnSettings = makeMenuButton("设置", "#646eb7", "#7681d0", true);
     connect(btnSettings, &QPushButton::clicked, this, [this]() {
         hideMainMenuOverlay();
         showSettingsOverlay();
     });
-
-    // 这些原版有但本项目暂未实现：标灰。
-    makeMenuButton("收藏", "#374244", "#374244", false);
-    makeMenuButton("统计数据", "#374244", "#374244", false);
 
     auto *btnQuit = makeMenuButton("退出游戏", "#fe5f55", "#ff7066", true);
     connect(btnQuit, &QPushButton::clicked, this, []() { QCoreApplication::quit(); });
@@ -2737,6 +2789,13 @@ void MainWindow::setupSceneButtons() {
     mBestPlayProxy->setZValue(50);
     connect(mBtnBestPlay, &QPushButton::clicked, this, &MainWindow::onBestPlayHint);
 
+    // 占卜按钮:与"最佳出牌"同色系但偏青绿,位置放在"弃牌"右侧。
+    mBtnForesight = makeSceneBtn("占卜", "#2ec4b6", "#46d8c8");
+    mForesightProxy = mScene->addWidget(mBtnForesight);
+    mForesightProxy->setZValue(50);
+    connect(mBtnForesight, &QPushButton::clicked, this, &MainWindow::onForesightClicked);
+    mBtnForesight->setEnabled(false);   // 无选中手牌时灰掉
+
     layoutSceneButtons();
 }
 
@@ -2744,21 +2803,24 @@ void MainWindow::layoutSceneButtons() {
     if (!mPlayProxy || !mSortProxy || !mDiscardProxy || !mBestPlayProxy) return;
     const int btnW = 176;
     const int gap = 16;
-    const int totalW = btnW * 4 + gap * 3;
+    const int slotCount = mForesightProxy ? 5 : 4;
+    const int totalW = btnW * slotCount + gap * (slotCount - 1);
     const int startX = (mSceneW - HAND_RIGHT_RESERVE - totalW) / 2;
     const int y = mBtnY;
 
-    // 顺序：最佳出牌 / 出牌 / 理牌 / 弃牌
+    // 顺序:最佳出牌 / 出牌 / 理牌 / 弃牌 / 占卜
     mBestPlayProxy->setPos(startX, y);
     mPlayProxy->setPos(startX + (btnW + gap), y);
     mSortProxy->setPos(startX + (btnW + gap) * 2, y);
     mDiscardProxy->setPos(startX + (btnW + gap) * 3, y);
+    if (mForesightProxy) mForesightProxy->setPos(startX + (btnW + gap) * 4, y);
 
     // 记录按钮原位,出牌时滑出屏幕,计分完成后滑回。
     mBestPlayBtnHome = mBestPlayProxy->pos();
     mPlayBtnHome     = mPlayProxy->pos();
     mSortBtnHome     = mSortProxy->pos();
     mDiscardBtnHome  = mDiscardProxy->pos();
+    if (mForesightProxy) mForesightBtnHome = mForesightProxy->pos();
 }
 
 void MainWindow::updateSceneSize() {
@@ -2980,6 +3042,8 @@ void MainWindow::setupConnections() {
             this, &MainWindow::onPackBuyRequested);
     connect(mShopWidget, &ShopWidget::shopItemBoughtForAnimation,
             this, &MainWindow::prepareSlotFlyInAnimation);
+    connect(mShopWidget, &ShopWidget::shopConsumableUseAnimation,
+            this, &MainWindow::spawnShopPlanetUseFloater);
 
     connect(mBlindSelectWidget, &BlindSelectWidget::skipClicked,
             this, &MainWindow::onSkipBlind);
@@ -3307,6 +3371,9 @@ void MainWindow::refreshCounters() {
     bool hasSelected = !mSelected.isEmpty();
     mBtnPlay->setEnabled(mGameState->handsLeft() > 0 && hasSelected);
     mBtnDiscard->setEnabled(mGameState->discardLeft() > 0 && hasSelected);
+    // 占卜:仅在有选中手牌且未在动画中时可用。
+    if (mBtnForesight)
+        mBtnForesight->setEnabled(hasSelected && !mForesightPreviewActive);
 
     if (mDeckLabel) {
         // 显示 "剩余/总数"，与原版保持一致。
@@ -4195,6 +4262,7 @@ void MainWindow::onPlayClicked() {
     mScoringInProgress = true;
     if (mBtnPlay) mBtnPlay->setEnabled(false);
     if (mBtnDiscard) mBtnDiscard->setEnabled(false);
+    if (mBtnForesight) mBtnForesight->setEnabled(false);
 
     // 出牌:按钮飞出屏幕 + 手牌下移,8/8 标签随手牌一起下移。
     mHandY = mHandYScoring;
@@ -4441,6 +4509,98 @@ void MainWindow::onBestPlayHint() {
     updateHandPreview();
 }
 
+void MainWindow::onForesightClicked()
+{
+    // 占卜:基于当前选中手牌做一次无副作用得分模拟,把进度条短暂推到
+    // "出完这手后" 的位置,然后回退。回合分数标签 mLblScore 不变,增加神秘感。
+    if (!mGameState || !mScoreProgressBar) return;
+    if (mGameState->phase() != GamePhase::Blind) return;
+    if (mScoringInProgress) return;
+    if (mSelected.isEmpty()) return;
+    if (mForesightPreviewActive) return;
+
+    QVector<int> ordered = mSelected;
+    std::sort(ordered.begin(), ordered.end());
+
+    const double projected = mGameState->estimatePlayScore(ordered);
+    const double target = mGameState->targetScore();
+    const double cur = mGameState->score();
+    if (!std::isfinite(target) || target <= 0.0) return;
+
+    const double previewScore = cur + (std::isfinite(projected) ? projected : 0.0);
+    const double ratio = qBound(0.0, previewScore / target, 1.0);
+    const int previewBarValue = qBound(0, int(std::round(ratio * 1000.0)), 1000);
+    const int previewPercent = qBound(0, int(std::round(ratio * 100.0)), 100);
+    const int savedBarValue = mScoreProgressBar->value();
+    const QString savedStyle = mScoreProgressBar->styleSheet();
+    const QString savedFormat = mScoreProgressBar->format();
+
+    // 正在跑的进度条动画先停掉,避免和预览动画打架。
+    if (mScoreProgressAnim && mScoreProgressAnim->state() == QAbstractAnimation::Running)
+        mScoreProgressAnim->stop();
+
+    mForesightPreviewActive = true;
+    if (mBtnForesight) mBtnForesight->setEnabled(false);
+    AudioManager::instance()->play(QStringLiteral("tarot1"), 1.25, 0.55);
+
+    // 应用 "预览" 样式:仍保留原本蓝-青渐变的已得分段,边框 + 新增段换成琥珀色,
+    // 让玩家一眼就分辨"原始进度 vs. 占卜预测进度"。
+    const double splitRatio = (previewScore > 0.0) ? qBound(0.0, cur / previewScore, 1.0) : 0.0;
+    const double splitNext = qMin(1.0, splitRatio + 0.04);
+    mScoreProgressBar->setStyleSheet(QString(
+        "QProgressBar {"
+        " background:rgba(8,18,24,112);"
+        " border:3px solid #fda200;"
+        " border-radius:14px;"
+        " color:#fff5d6;"
+        " text-align:center;"
+        " padding:2px;"
+        "}"
+        "QProgressBar::chunk {"
+        " border-radius:11px;"
+        " background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
+        " stop:0 #009dff, stop:%1 #23e6ff, stop:%2 #ffe28a, stop:1 #ffae33);"
+        "}"
+        ).arg(splitRatio, 0, 'f', 3)
+         .arg(splitNext, 0, 'f', 3));
+    mScoreProgressBar->setFormat(QString::fromUtf8("\xe2\x89\x88%1%").arg(previewPercent));
+
+    // 上滑到预测值(280ms),停 1.4s(期间样式表里 chunk 渐变不变,等同于"闪光"段保持显示),
+    // 再下滑回原值(280ms),最后还原样式表与百分比文本。
+    auto *up = new QPropertyAnimation(mScoreProgressBar, "value", this);
+    up->setDuration(280);
+    up->setStartValue(savedBarValue);
+    up->setEndValue(previewBarValue);
+    up->setEasingCurve(QEasingCurve::OutCubic);
+    up->start(QAbstractAnimation::DeleteWhenStopped);
+
+    QPointer<MainWindow> self(this);
+    QTimer::singleShot(1400 + up->duration(), this, [self, savedBarValue, savedStyle, savedFormat]() {
+        if (!self || !self->mScoreProgressBar) {
+            if (self) self->mForesightPreviewActive = false;
+            return;
+        }
+        QProgressBar *bar = self->mScoreProgressBar;
+        // 先把 chunk 颜色恢复成 savedStyle,这样下滑动画里"减少"的那段不会拖着琥珀色一起退。
+        bar->setStyleSheet(savedStyle);
+        bar->setFormat(savedFormat);
+        auto *back = new QPropertyAnimation(bar, "value", self.data());
+        back->setDuration(280);
+        back->setStartValue(bar->value());
+        back->setEndValue(savedBarValue);
+        back->setEasingCurve(QEasingCurve::OutCubic);
+        QPointer<MainWindow> me = self;
+        QObject::connect(back, &QPropertyAnimation::finished, self.data(), [me]() {
+            if (!me) return;
+            me->mForesightPreviewActive = false;
+            // 选中状态没变 → 让按钮重新可用;refreshCounters 也会做这件事,这里只是兜底。
+            if (me->mBtnForesight && !me->mSelected.isEmpty())
+                me->mBtnForesight->setEnabled(true);
+        });
+        back->start(QAbstractAnimation::DeleteWhenStopped);
+    });
+}
+
 void MainWindow::onGameOver(bool won)
 {
     if (mGameOverHandled) return;
@@ -4450,6 +4610,7 @@ void MainWindow::onGameOver(bool won)
     AudioManager::instance()->play(won ? QStringLiteral("win") : QStringLiteral("gong"), 1.0, 0.90);
     if (mBtnPlay) mBtnPlay->setEnabled(false);
     if (mBtnDiscard) mBtnDiscard->setEnabled(false);
+    if (mBtnForesight) mBtnForesight->setEnabled(false);
     showGameOverOverlay(won);
 }
 
@@ -5433,6 +5594,14 @@ void MainWindow::animateConsumableUseThen(int idx, std::function<void()> after)
     item->setZValue(780);
     item->setTransformOriginPoint(TOP_SLOT_W / 2.0, TOP_SLOT_H / 2.0);
 
+    // 行星牌 / 黑洞:对齐原版 card.lua:1264 use_consumeable —— 卡牌先抬起,然后跟
+    // common_events.lua:464 level_up_hand 的三拍同步做 3 次 juice + tarot1。
+    // 三拍结束后再触发 useConsumable,让卡牌一直可见到整段升级演出走完才被移除。
+    const auto &cs = mGameState->consumables();
+    const bool isPlanetLike = (idx >= 0 && idx < cs.size())
+        && (kindOf(cs[idx].type) == ConsumableKind::Planet
+            || cs[idx].type == ConsumableType::Spectral_BlackHole);
+
     auto *group = new QParallelAnimationGroup(this);
     auto *posAnim = new QPropertyAnimation(item, "pos", group);
     posAnim->setDuration(170);
@@ -5448,12 +5617,120 @@ void MainWindow::animateConsumableUseThen(int idx, std::function<void()> after)
 
     group->addAnimation(posAnim);
     group->addAnimation(scaleAnim);
-    connect(group, &QParallelAnimationGroup::finished, this, [this, group, guard, after]() {
+    connect(group, &QParallelAnimationGroup::finished, this, [this, group, guard, after, isPlanetLike]() {
         if (guard) guard->setEnabled(true);
+        if (!isPlanetLike) {
+            if (after) after();
+            group->deleteLater();
+            return;
+        }
+        // 行星 / 黑洞:把抬起后的 ConsumableItem 从 mConsumableItems 摘出,这样紧接着触发
+        // 的 useConsumable -> consumablesChanged -> refreshConsumableSlots 不会把它一并删掉。
+        // 立即调用 after(),让 playHandLevelUpAnimation 与卡牌动画同步开演;detached 的
+        // "幽灵"卡片在演出期间做 3 次 juice + tarot1,1200ms 后淡出销毁。
+        if (guard) {
+            int slot = mConsumableItems.indexOf(guard.data());
+            if (slot >= 0) mConsumableItems.removeAt(slot);
+            guard->setAcceptedMouseButtons(Qt::NoButton);
+            guard->setEnabled(false);
+        }
         if (after) after();
+        if (!guard) { group->deleteLater(); return; }
+
+        const int beatDelays[3] = { 80, 360, 660 };
+        for (int beat = 0; beat < 3; ++beat) {
+            QPointer<ConsumableItem> g2 = guard;
+            QTimer::singleShot(scaledDelay(beatDelays[beat]), this, [g2]() {
+                if (g2) g2->juiceUp(1.18, 220);
+                AudioManager::instance()->play(QStringLiteral("tarot1"), 1.0, 1.0);
+            });
+        }
+        // playHandLevelUpAnimation 总长 ~1180ms,1200ms 后开始淡出兜住最后一次 juice 的 down 段。
+        QPointer<ConsumableItem> g3 = guard;
+        QTimer::singleShot(scaledDelay(1200), this, [this, g3]() {
+            if (!g3) return;
+            auto *fade = new QVariantAnimation(this);
+            fade->setDuration(scaledDelay(260));
+            fade->setStartValue(1.0);
+            fade->setEndValue(0.0);
+            QPointer<ConsumableItem> gg = g3;
+            connect(fade, &QVariantAnimation::valueChanged, this, [gg](const QVariant &v) {
+                if (gg) gg->setOpacity(v.toDouble());
+            });
+            connect(fade, &QVariantAnimation::finished, this, [this, gg]() {
+                if (!gg) return;
+                if (gg->scene()) mScene->removeItem(gg.data());
+                gg->deleteLater();
+            });
+            fade->start(QAbstractAnimation::DeleteWhenStopped);
+        });
         group->deleteLater();
     });
     group->start();
+}
+
+void MainWindow::spawnShopPlanetUseFloater(int consumableType, const QPoint &globalCenter)
+{
+    // 把"购买并使用"的星球/黑洞,在它原来在商店里的位置生成一张幽灵 ConsumableItem,
+    // 与消耗牌槽内 use 的动画对齐:抬起 + 3 拍 juice + tarot1 + 淡出。整段时长 ~1.5s,
+    // 期间侧栏 playHandLevelUpAnimation 也在跑——两边节奏同步。
+    if (!mView || !mScene) return;
+    auto type = static_cast<ConsumableType>(consumableType);
+    Consumable c = createConsumable(type);
+
+    auto *floater = new ConsumableItem(c);
+    const QPoint viewPt = mView->mapFromGlobal(globalCenter);
+    const QPointF scenePt = mView->mapToScene(viewPt);
+    floater->setPos(scenePt - QPointF(TOP_SLOT_W / 2.0, TOP_SLOT_H / 2.0));
+    floater->setZValue(800);
+    floater->setEnabled(false);
+    floater->setAcceptedMouseButtons(Qt::NoButton);
+    floater->setAcceptHoverEvents(false);
+    floater->setTransformOriginPoint(TOP_SLOT_W / 2.0, TOP_SLOT_H / 2.0);
+    mScene->addItem(floater);
+
+    // 抬升:与消耗牌槽内 animateConsumableUseThen 同样 170ms / 上移 42px / scale 1.13。
+    QPointer<ConsumableItem> guard(floater);
+    auto *group = new QParallelAnimationGroup(this);
+    auto *posAnim = new QPropertyAnimation(floater, "pos", group);
+    posAnim->setDuration(scaledDelay(170));
+    posAnim->setStartValue(floater->pos());
+    posAnim->setEndValue(floater->pos() + QPointF(0, -42));
+    posAnim->setEasingCurve(QEasingCurve::OutCubic);
+    auto *scaleAnim = new QPropertyAnimation(floater, "scale", group);
+    scaleAnim->setDuration(scaledDelay(170));
+    scaleAnim->setStartValue(1.0);
+    scaleAnim->setEndValue(1.13);
+    scaleAnim->setEasingCurve(QEasingCurve::OutCubic);
+    group->addAnimation(posAnim);
+    group->addAnimation(scaleAnim);
+    group->start(QAbstractAnimation::DeleteWhenStopped);
+
+    const int beatDelays[3] = { 80, 360, 660 };
+    for (int beat = 0; beat < 3; ++beat) {
+        QPointer<ConsumableItem> g2 = guard;
+        QTimer::singleShot(scaledDelay(170 + beatDelays[beat]), this, [g2]() {
+            if (g2) g2->juiceUp(1.18, 220);
+            AudioManager::instance()->play(QStringLiteral("tarot1"), 1.0, 1.0);
+        });
+    }
+    QTimer::singleShot(scaledDelay(170 + 1200), this, [this, guard]() {
+        if (!guard) return;
+        auto *fade = new QVariantAnimation(this);
+        fade->setDuration(scaledDelay(260));
+        fade->setStartValue(1.0);
+        fade->setEndValue(0.0);
+        QPointer<ConsumableItem> gg = guard;
+        connect(fade, &QVariantAnimation::valueChanged, this, [gg](const QVariant &v) {
+            if (gg) gg->setOpacity(v.toDouble());
+        });
+        connect(fade, &QVariantAnimation::finished, this, [this, gg]() {
+            if (!gg) return;
+            if (gg->scene()) mScene->removeItem(gg.data());
+            gg->deleteLater();
+        });
+        fade->start(QAbstractAnimation::DeleteWhenStopped);
+    });
 }
 
 void MainWindow::onConsumableClicked(ConsumableItem *item, Qt::MouseButton btn)
@@ -5876,7 +6153,8 @@ void MainWindow::scheduleGame(int delayMs, std::function<void()> fn)
 {
     QTimer *t = new QTimer(this);
     t->setSingleShot(true);
-    t->setInterval(qMax(0, delayMs));
+    // 设置里的"倍速"通过这一处生效:所有计分链的 delay 都按当前倍率缩短。
+    t->setInterval(scaledDelay(delayMs));
     connect(t, &QTimer::timeout, this, [this, t, fn]() {
         mGameTimers.removeAll(t);
         t->deleteLater();
@@ -6159,6 +6437,7 @@ void MainWindow::onBlindStarted()
     if (mPlayProxy && !mPlayBtnHome.isNull())    mPlayProxy->setPos(mPlayBtnHome);
     if (mSortProxy && !mSortBtnHome.isNull())    mSortProxy->setPos(mSortBtnHome);
     if (mDiscardProxy && !mDiscardBtnHome.isNull()) mDiscardProxy->setPos(mDiscardBtnHome);
+    if (mForesightProxy && !mForesightBtnHome.isNull()) mForesightProxy->setPos(mForesightBtnHome);
 
     refreshCounters();
 }
@@ -6566,6 +6845,7 @@ void MainWindow::setPlayPhaseVisible(bool v)
     if (mPlayProxy)      mPlayProxy->setVisible(v);
     if (mSortProxy)      mSortProxy->setVisible(v);
     if (mDiscardProxy)   mDiscardProxy->setVisible(v);
+    if (mForesightProxy) mForesightProxy->setVisible(v);
     if (mHandCountLabel) mHandCountLabel->setVisible(v);
     for (auto *c : mHandCards)   c->setVisible(v);
     for (auto *c : mPlayedCards) c->setVisible(v);
@@ -6732,7 +7012,7 @@ void MainWindow::animateScoreTotalThenFinalize(double gained, int /*delayAfterEv
 
     auto *anim = new QVariantAnimation(this);
     mScoreCountAnim = anim;   // 跟踪它，打开菜单时可暂停/恢复
-    anim->setDuration(520);
+    anim->setDuration(scaledDelay(520));   // 倍速一并影响总分计数动画
     anim->setStartValue(before);
     anim->setEndValue(after);
     anim->setEasingCurve(QEasingCurve::OutCubic);
@@ -6869,6 +7149,7 @@ void MainWindow::showGameOverOverlay(bool won)
             for (auto *c : mHandCards) { if (c->scene()) mScene->removeItem(c); c->deleteLater(); }
             mHandCards.clear();
             mGameState->startGame();
+            mHasOngoingRun = true;
             refreshGold();
             refreshCounters();
             refreshJokerSlots();
@@ -7487,6 +7768,7 @@ void MainWindow::hidePlayControlsForScoring()
     slideOut(mPlayProxy,    mPlayBtnHome);
     slideOut(mSortProxy,    mSortBtnHome);
     slideOut(mDiscardProxy, mDiscardBtnHome);
+    slideOut(mForesightProxy, mForesightBtnHome);
 }
 
 void MainWindow::showPlayControlsAfterScoring()
@@ -7505,4 +7787,5 @@ void MainWindow::showPlayControlsAfterScoring()
     slideIn(mPlayProxy,    mPlayBtnHome);
     slideIn(mSortProxy,    mSortBtnHome);
     slideIn(mDiscardProxy, mDiscardBtnHome);
+    slideIn(mForesightProxy, mForesightBtnHome);
 }

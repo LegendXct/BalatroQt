@@ -1069,14 +1069,12 @@ void ShopWidget::layoutVoucherFan()
         if (auto *scb = dynamic_cast<ShopCardButton *>(ou.cardBtn))
             scb->setStaticRotation(rel * (focused ? 3.5 : 5.5));
 
+        // 价格标签和商店其他牌一样常驻在卡牌上方,不再因为 focus/选中状态隐藏。
         if (ou.cardBtn)
-            ou.cardBtn->setProperty("suppressPrice", !focused);
-        if (!focused) {
-            if (ou.priceLbl) ou.priceLbl->hide();
-            if (ou.buyBtn && slot != mSelectedVoucherSlot) ou.buyBtn->hide();
-        } else {
-            syncPriceLblForCardBtn(ou.cardBtn);
-        }
+            ou.cardBtn->setProperty("suppressPrice", false);
+        if (!focused && ou.buyBtn && slot != mSelectedVoucherSlot)
+            ou.buyBtn->hide();
+        syncPriceLblForCardBtn(ou.cardBtn);
     }
 }
 
@@ -2177,6 +2175,25 @@ void ShopWidget::onBuyAndUseShop(int slot) {
     const QString useSound = (slot >= 0 && slot < offers.size())
         ? soundForOfferKind(offers[slot].kind)
         : QStringLiteral("tarot1");
+
+    // 行星/黑洞买并立即使用:卡牌不会进消耗牌槽,因此 MainWindow 看不到一个可抬升的
+    // ConsumableItem。这里在买入前先抓拍它的全局中心,如果买入成功就让 MainWindow
+    // 在那个位置生成一张幽灵卡演完动画——和消耗牌槽内使用的视觉对齐。
+    ConsumableType animType = ConsumableType::Tarot_Fool;
+    QPoint useCenter;
+    bool wantUseAnim = false;
+    if (slot >= 0 && slot < offers.size() && slot < mShopUi.size()) {
+        const ShopOffer &o = offers[slot];
+        const bool isPlanetLike = (o.kind == OfferKind::Planet)
+            || (o.kind == OfferKind::Spectral && o.consumable == ConsumableType::Spectral_BlackHole);
+        QWidget *cardBtn = mShopUi[slot].cardBtn;
+        if (isPlanetLike && cardBtn && cardBtn->isVisible()) {
+            animType = o.consumable;
+            useCenter = cardBtn->mapToGlobal(QPoint(cardBtn->width() / 2, cardBtn->height() / 2));
+            wantUseAnim = true;
+        }
+    }
+
     if (mGS->buyAndUseShopConsumable(slot, {})) {
         QTimer::singleShot(100, this, [cost]() {
             AudioManager::instance()->play(QStringLiteral("card1"), 1.0, 1.0);
@@ -2186,6 +2203,8 @@ void ShopWidget::onBuyAndUseShop(int slot) {
         QTimer::singleShot(180, this, [useSound]() {
             AudioManager::instance()->play(useSound, 1.0, 1.0);
         });
+        if (wantUseAnim)
+            emit shopConsumableUseAnimation(int(animType), useCenter);
         mSelectedShopSlot = -1;
         refresh();
     } else {

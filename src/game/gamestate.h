@@ -230,6 +230,8 @@ public:
 
     // 最佳出牌提示：遍历所有出牌组合/排列，返回得分最高的一组手牌下标（按最优顺序）。
     QVector<int> findBestPlay();
+    // 占卜按钮:对当前选中手牌做一次无副作用计分模拟,用于进度条预览(随机效果取期望值)。
+    double estimatePlayScore(const QVector<int> &orderedIndices) { return simulatePlayScore(orderedIndices); }
     // 把指定手牌按给定顺序移到手牌最前，排序模式切到 Manual。
     void bringHandCardsToFront(const QVector<int> &indices);
     // 按指定 uid 序列重新排列手牌。最佳出牌"取消"时需要把手牌恢复到玩家最近
