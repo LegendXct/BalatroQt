@@ -1138,10 +1138,10 @@ void MainWindow::setupLeftPanel() {
         " border-radius:14px;"
         " color:#eaffff;"
         " text-align:center;"
-        " padding:2px;"
+        " padding:0px;"
         "}"
         "QProgressBar::chunk {"
-        " border-radius:11px;"
+        " border-radius:14px;"
         " background:qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #009dff, stop:0.58 #23e6ff, stop:1 #fda200);"
         "}"
         );
@@ -3283,10 +3283,10 @@ void MainWindow::updateScoreProgressBar(double displayedScore, bool animate)
         " border-radius:14px;"
         " color:#eaffff;"
         " text-align:center;"
-        " padding:2px;"
+        " padding:0px;"
         "}"
         "QProgressBar::chunk {"
-        " border-radius:11px;"
+        " border-radius:14px;"
         " background:qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #009dff, stop:0.58 #23e6ff, stop:1 %2);"
         "}"
         ).arg(border, chunkEnd));
@@ -3372,8 +3372,14 @@ void MainWindow::refreshCounters() {
     mBtnPlay->setEnabled(mGameState->handsLeft() > 0 && hasSelected);
     mBtnDiscard->setEnabled(mGameState->discardLeft() > 0 && hasSelected);
     // 占卜:仅在有选中手牌且未在动画中时可用。
-    if (mBtnForesight)
-        mBtnForesight->setEnabled(hasSelected && !mForesightPreviewActive);
+    if (mBtnForesight) {
+        if (mGameState->phase() != GamePhase::Blind || mScoringInProgress)
+            mForesightPreviewActive = false;
+        mBtnForesight->setEnabled(mGameState->phase() == GamePhase::Blind
+                                  && hasSelected
+                                  && !mScoringInProgress
+                                  && !mForesightPreviewActive);
+    }
 
     if (mDeckLabel) {
         // 显示 "剩余/总数"，与原版保持一致。
@@ -4554,10 +4560,10 @@ void MainWindow::onForesightClicked()
         " border-radius:14px;"
         " color:#fff5d6;"
         " text-align:center;"
-        " padding:2px;"
+        " padding:0px;"
         "}"
         "QProgressBar::chunk {"
-        " border-radius:11px;"
+        " border-radius:14px;"
         " background:qlineargradient(x1:0,y1:0,x2:1,y2:0,"
         " stop:0 #009dff, stop:%1 #23e6ff, stop:%2 #ffe28a, stop:1 #ffae33);"
         "}"
@@ -5601,12 +5607,35 @@ void MainWindow::animateConsumableUseThen(int idx, std::function<void()> after)
     const bool isPlanetLike = (idx >= 0 && idx < cs.size())
         && (kindOf(cs[idx].type) == ConsumableKind::Planet
             || cs[idx].type == ConsumableType::Spectral_BlackHole);
+    const bool isWheel = (idx >= 0 && idx < cs.size())
+        && cs[idx].type == ConsumableType::Tarot_Wheel;
+
+    const bool handShouldSink = isPlanetLike
+        && mGameState
+        && mGameState->phase() == GamePhase::Blind
+        && !(mPackOpenWidget && mPackOpenWidget->isVisible());
+    if (handShouldSink) {
+        hidePlayControlsForScoring();
+        mHandY = mHandYScoring;
+        layoutHandCards();
+    }
+    const bool shopShouldSlide = isPlanetLike && mShopWidget && mShopWidget->isVisible();
+    const QPoint shopHome = shopShouldSlide ? mShopWidget->pos() : QPoint();
+    if (shopShouldSlide) {
+        auto *shopDown = new QPropertyAnimation(mShopWidget, "pos", this);
+        shopDown->setDuration(scaledDelay(260));
+        shopDown->setStartValue(mShopWidget->pos());
+        shopDown->setEndValue(QPoint(mShopWidget->x(), mPlayPage ? mPlayPage->height() + 20 : mShopWidget->y() + 500));
+        shopDown->setEasingCurve(QEasingCurve::InCubic);
+        shopDown->start(QAbstractAnimation::DeleteWhenStopped);
+    }
 
     auto *group = new QParallelAnimationGroup(this);
     auto *posAnim = new QPropertyAnimation(item, "pos", group);
-    posAnim->setDuration(170);
+    posAnim->setDuration(isPlanetLike ? 260 : 170);
     posAnim->setStartValue(item->pos());
-    posAnim->setEndValue(item->pos() + QPointF(0, -42));
+    const QPointF planetCenter((mSceneW - TOP_SLOT_W) / 2.0, (mSceneH - TOP_SLOT_H) / 2.0);
+    posAnim->setEndValue(isPlanetLike ? planetCenter : item->pos() + QPointF(0, -42));
     posAnim->setEasingCurve(QEasingCurve::OutCubic);
 
     auto *scaleAnim = new QPropertyAnimation(item, "scale", group);
@@ -5617,9 +5646,17 @@ void MainWindow::animateConsumableUseThen(int idx, std::function<void()> after)
 
     group->addAnimation(posAnim);
     group->addAnimation(scaleAnim);
-    connect(group, &QParallelAnimationGroup::finished, this, [this, group, guard, after, isPlanetLike]() {
+    connect(group, &QParallelAnimationGroup::finished, this, [this, group, guard, after, isPlanetLike, isWheel, handShouldSink, shopShouldSlide, shopHome]() {
         if (guard) guard->setEnabled(true);
         if (!isPlanetLike) {
+            if (isWheel && guard) {
+                guard->juiceUp(1.18, 420);
+                QTimer::singleShot(scaledDelay(260), this, [after]() {
+                    if (after) after();
+                });
+                group->deleteLater();
+                return;
+            }
             if (after) after();
             group->deleteLater();
             return;
@@ -5642,13 +5679,24 @@ void MainWindow::animateConsumableUseThen(int idx, std::function<void()> after)
             QPointer<ConsumableItem> g2 = guard;
             QTimer::singleShot(scaledDelay(beatDelays[beat]), this, [g2]() {
                 if (g2) g2->juiceUp(1.18, 220);
-                AudioManager::instance()->play(QStringLiteral("tarot1"), 1.0, 1.0);
             });
         }
         // playHandLevelUpAnimation 总长 ~1180ms,1200ms 后开始淡出兜住最后一次 juice 的 down 段。
         QPointer<ConsumableItem> g3 = guard;
-        QTimer::singleShot(scaledDelay(1200), this, [this, g3]() {
-            if (!g3) return;
+        QTimer::singleShot(scaledDelay(1200), this, [this, g3, handShouldSink, shopShouldSlide, shopHome]() {
+            if (!g3) {
+                if (handShouldSink && mGameState && mGameState->phase() == GamePhase::Blind) {
+                    mHandY = mHandYNormal;
+                    layoutHandCards();
+                    showPlayControlsAfterScoring();
+                }
+                if (shopShouldSlide && mShopWidget) {
+                    mShopWidget->show();
+                    mShopWidget->raise();
+                    mShopWidget->move(shopHome);
+                }
+                return;
+            }
             auto *fade = new QVariantAnimation(this);
             fade->setDuration(scaledDelay(260));
             fade->setStartValue(1.0);
@@ -5657,10 +5705,26 @@ void MainWindow::animateConsumableUseThen(int idx, std::function<void()> after)
             connect(fade, &QVariantAnimation::valueChanged, this, [gg](const QVariant &v) {
                 if (gg) gg->setOpacity(v.toDouble());
             });
-            connect(fade, &QVariantAnimation::finished, this, [this, gg]() {
-                if (!gg) return;
-                if (gg->scene()) mScene->removeItem(gg.data());
-                gg->deleteLater();
+            connect(fade, &QVariantAnimation::finished, this, [this, gg, handShouldSink, shopShouldSlide, shopHome]() {
+                if (gg) {
+                    if (gg->scene()) mScene->removeItem(gg.data());
+                    gg->deleteLater();
+                }
+                if (handShouldSink && mGameState && mGameState->phase() == GamePhase::Blind) {
+                    mHandY = mHandYNormal;
+                    layoutHandCards();
+                    showPlayControlsAfterScoring();
+                }
+                if (shopShouldSlide && mShopWidget) {
+                    mShopWidget->show();
+                    mShopWidget->raise();
+                    auto *shopUp = new QPropertyAnimation(mShopWidget, "pos", this);
+                    shopUp->setDuration(scaledDelay(260));
+                    shopUp->setStartValue(mShopWidget->pos());
+                    shopUp->setEndValue(shopHome);
+                    shopUp->setEasingCurve(QEasingCurve::OutCubic);
+                    shopUp->start(QAbstractAnimation::DeleteWhenStopped);
+                }
             });
             fade->start(QAbstractAnimation::DeleteWhenStopped);
         });
@@ -5675,6 +5739,12 @@ void MainWindow::spawnShopPlanetUseFloater(int consumableType, const QPoint &glo
     // 与消耗牌槽内 use 的动画对齐:抬起 + 3 拍 juice + tarot1 + 淡出。整段时长 ~1.5s,
     // 期间侧栏 playHandLevelUpAnimation 也在跑——两边节奏同步。
     if (!mView || !mScene) return;
+    if (mShopConsumableUseAnimating) {
+        mPendingHandLevelAnimation = true;
+        return;
+    }
+    mShopConsumableUseAnimating = true;
+    mDelayHandLevelForConsumableUse = true;
     auto type = static_cast<ConsumableType>(consumableType);
     Consumable c = createConsumable(type);
 
@@ -5689,13 +5759,24 @@ void MainWindow::spawnShopPlanetUseFloater(int consumableType, const QPoint &glo
     floater->setTransformOriginPoint(TOP_SLOT_W / 2.0, TOP_SLOT_H / 2.0);
     mScene->addItem(floater);
 
+    const bool shopShouldSlide = mShopWidget && mShopWidget->isVisible();
+    const QPoint shopHome = shopShouldSlide ? mShopWidget->pos() : QPoint();
+    if (shopShouldSlide) {
+        auto *shopDown = new QPropertyAnimation(mShopWidget, "pos", this);
+        shopDown->setDuration(scaledDelay(260));
+        shopDown->setStartValue(mShopWidget->pos());
+        shopDown->setEndValue(QPoint(mShopWidget->x(), mPlayPage ? mPlayPage->height() + 20 : mShopWidget->y() + 500));
+        shopDown->setEasingCurve(QEasingCurve::InCubic);
+        shopDown->start(QAbstractAnimation::DeleteWhenStopped);
+    }
+
     // 抬升:与消耗牌槽内 animateConsumableUseThen 同样 170ms / 上移 42px / scale 1.13。
     QPointer<ConsumableItem> guard(floater);
     auto *group = new QParallelAnimationGroup(this);
     auto *posAnim = new QPropertyAnimation(floater, "pos", group);
-    posAnim->setDuration(scaledDelay(170));
+    posAnim->setDuration(scaledDelay(260));
     posAnim->setStartValue(floater->pos());
-    posAnim->setEndValue(floater->pos() + QPointF(0, -42));
+    posAnim->setEndValue(QPointF((mSceneW - TOP_SLOT_W) / 2.0, (mSceneH - TOP_SLOT_H) / 2.0));
     posAnim->setEasingCurve(QEasingCurve::OutCubic);
     auto *scaleAnim = new QPropertyAnimation(floater, "scale", group);
     scaleAnim->setDuration(scaledDelay(170));
@@ -5704,18 +5785,32 @@ void MainWindow::spawnShopPlanetUseFloater(int consumableType, const QPoint &glo
     scaleAnim->setEasingCurve(QEasingCurve::OutCubic);
     group->addAnimation(posAnim);
     group->addAnimation(scaleAnim);
+    connect(group, &QParallelAnimationGroup::finished, this, [this]() {
+        mDelayHandLevelForConsumableUse = false;
+        if (mPendingHandLevelAnimation) {
+            mPendingHandLevelAnimation = false;
+            QTimer::singleShot(0, this, &MainWindow::onHandLevelsChanged);
+        }
+    });
     group->start(QAbstractAnimation::DeleteWhenStopped);
 
     const int beatDelays[3] = { 80, 360, 660 };
     for (int beat = 0; beat < 3; ++beat) {
         QPointer<ConsumableItem> g2 = guard;
-        QTimer::singleShot(scaledDelay(170 + beatDelays[beat]), this, [g2]() {
+        QTimer::singleShot(scaledDelay(260 + beatDelays[beat]), this, [g2]() {
             if (g2) g2->juiceUp(1.18, 220);
-            AudioManager::instance()->play(QStringLiteral("tarot1"), 1.0, 1.0);
         });
     }
-    QTimer::singleShot(scaledDelay(170 + 1200), this, [this, guard]() {
-        if (!guard) return;
+    QTimer::singleShot(scaledDelay(260 + 1200), this, [this, guard, shopShouldSlide, shopHome]() {
+        if (!guard) {
+            if (shopShouldSlide && mShopWidget) {
+                mShopWidget->show();
+                mShopWidget->raise();
+                mShopWidget->move(shopHome);
+            }
+            mShopConsumableUseAnimating = false;
+            return;
+        }
         auto *fade = new QVariantAnimation(this);
         fade->setDuration(scaledDelay(260));
         fade->setStartValue(1.0);
@@ -5724,10 +5819,26 @@ void MainWindow::spawnShopPlanetUseFloater(int consumableType, const QPoint &glo
         connect(fade, &QVariantAnimation::valueChanged, this, [gg](const QVariant &v) {
             if (gg) gg->setOpacity(v.toDouble());
         });
-        connect(fade, &QVariantAnimation::finished, this, [this, gg]() {
-            if (!gg) return;
-            if (gg->scene()) mScene->removeItem(gg.data());
-            gg->deleteLater();
+        connect(fade, &QVariantAnimation::finished, this, [this, gg, shopShouldSlide, shopHome]() {
+            if (gg) {
+                if (gg->scene()) mScene->removeItem(gg.data());
+                gg->deleteLater();
+            }
+            if (shopShouldSlide && mShopWidget) {
+                mShopWidget->show();
+                mShopWidget->raise();
+                auto *shopUp = new QPropertyAnimation(mShopWidget, "pos", this);
+                shopUp->setDuration(scaledDelay(260));
+                shopUp->setStartValue(mShopWidget->pos());
+                shopUp->setEndValue(shopHome);
+                shopUp->setEasingCurve(QEasingCurve::OutCubic);
+                shopUp->start(QAbstractAnimation::DeleteWhenStopped);
+            }
+            mShopConsumableUseAnimating = false;
+            if (mPendingHandLevelAnimation && !mHandLevelAnimating) {
+                mPendingHandLevelAnimation = false;
+                QTimer::singleShot(0, this, &MainWindow::onHandLevelsChanged);
+            }
         });
         fade->start(QAbstractAnimation::DeleteWhenStopped);
     });
@@ -6285,6 +6396,18 @@ void MainWindow::openImmediateTagPack(PackKind kind)
     if (kind == PackKind::Arcana || kind == PackKind::Spectral) {
         mPendingPackHand = mGameState->drawPackHand();
         refreshCounters();
+    }
+    if (mScoreCountAnim) {
+        mScoreCountAnim->stop();
+        mScoreCountAnim->deleteLater();
+        mScoreCountAnim = nullptr;
+    }
+    if (mScoreProgressAnim && mScoreProgressAnim->state() == QAbstractAnimation::Running)
+        mScoreProgressAnim->stop();
+    if (mLblScore) setLabelScaledText(mLblScore, "0", uiPx(38));
+    if (mScoreProgressBar) {
+        mScoreProgressBar->setValue(0);
+        mScoreProgressBar->setFormat("0%");
     }
 
     mPackFromTag = true;
@@ -7238,8 +7361,19 @@ void MainWindow::onHandLevelsChanged()
             ++upgradedCount;
         }
     }
+    if (upgradedCount == 0) {
+        mPrevHandLevels = nowLevels;
+        return;
+    }
+    if (mScoringInProgress) {
+        mPrevHandLevels = nowLevels;
+        return;
+    }
+    if (mHandLevelAnimating || mDelayHandLevelForConsumableUse) {
+        mPendingHandLevelAnimation = true;
+        return;
+    }
     mPrevHandLevels = nowLevels;
-    if (upgradedCount == 0) return;
     if (mScoringInProgress) return;   // 计分流程中（SpaceJoker / The Arm）让位给得分演出
     if (mHandLevelAnimating) return;  // 上一次升级动画还在跑，新一次仅刷新快照即可
 
@@ -7290,18 +7424,17 @@ void MainWindow::playHandLevelUpAnimation(HandType t, int prevLevel, int newLeve
     const int tEnd       = 1180;
 
     AudioManager::instance()->play(QStringLiteral("button"), 0.8, 0.7);
-    scheduleGame(200, [this, token]() {
+    scheduleGame(tBeatMult, [this, token]() {
         if (token != mHandLevelAnimToken) return;
         AudioManager::instance()->play(QStringLiteral("tarot1"), 1.0, 1.0);
     });
-    scheduleGame(1100, [this, token]() {
+    scheduleGame(tBeatChips, [this, token]() {
         if (token != mHandLevelAnimToken) return;
         AudioManager::instance()->play(QStringLiteral("tarot1"), 1.0, 1.0);
     });
-    scheduleGame(2000, [this, token]() {
+    scheduleGame(tBeatLevel, [this, token]() {
         if (token != mHandLevelAnimToken) return;
         AudioManager::instance()->play(QStringLiteral("tarot1"), 1.0, 1.0);
-        AudioManager::instance()->play(QStringLiteral("button"), 0.9, 0.7);
     });
 
     const int deltaMult  = newMult  - prevMult;
@@ -7363,6 +7496,10 @@ void MainWindow::playHandLevelUpAnimation(HandType t, int prevLevel, int newLeve
         if (token != mHandLevelAnimToken) return;
         AudioManager::instance()->play(QStringLiteral("button"), 1.1, 0.7);
         mHandLevelAnimating = false;
+        if (mPendingHandLevelAnimation) {
+            mPendingHandLevelAnimation = false;
+            QTimer::singleShot(0, this, &MainWindow::onHandLevelsChanged);
+        }
         updateHandPreview();
     });
 }
@@ -7389,18 +7526,17 @@ void MainWindow::playAllHandsLevelUpAnimation()
     const int tEnd       = 1180;
 
     AudioManager::instance()->play(QStringLiteral("button"), 0.8, 0.7);
-    scheduleGame(200, [this, token]() {
+    scheduleGame(tBeatMult, [this, token]() {
         if (token != mHandLevelAnimToken) return;
         AudioManager::instance()->play(QStringLiteral("tarot1"), 1.0, 1.0);
     });
-    scheduleGame(1100, [this, token]() {
+    scheduleGame(tBeatChips, [this, token]() {
         if (token != mHandLevelAnimToken) return;
         AudioManager::instance()->play(QStringLiteral("tarot1"), 1.0, 1.0);
     });
-    scheduleGame(2000, [this, token]() {
+    scheduleGame(tBeatLevel, [this, token]() {
         if (token != mHandLevelAnimToken) return;
         AudioManager::instance()->play(QStringLiteral("tarot1"), 1.0, 1.0);
-        AudioManager::instance()->play(QStringLiteral("button"), 1.1, 0.7);
     });
 
     scheduleGame(tBeatMult, [this, token]() {
@@ -7605,6 +7741,12 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev, double percent)
     const double statusPitch = 0.8 + percent * 0.2;
 
     switch (ev.kind) {
+    case ScoreEventKind::NotAllowed:
+        AudioManager::instance()->play(QStringLiteral("cancel"), 0.85, 0.85);
+        color = QColor("#fe5f55");
+        text = QStringLiteral("Not Allowed");
+        break;
+
     case ScoreEventKind::ScoringCardChip:
         AudioManager::instance()->play(QStringLiteral("chips1"), statusPitch, 1.0);
         color = QColor("#009dff");

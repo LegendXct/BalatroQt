@@ -404,7 +404,45 @@ void GameState::dealCards(DrawContext ctx) {
     else if (mSortMode == HandSortMode::BySuit)
         std::sort(mHand.begin(), mHand.end(), suitComp);
     refreshCeruleanForced();
+    if (ctx != DrawContext::AfterDiscard)
+        applyCrimsonHeartDebuffForNextHand();
     emit handChanged();
+}
+
+void GameState::applyCrimsonHeartDebuffForNextHand()
+{
+    bool changed = false;
+    if (mCrimsonHeartDisabled >= 0 && mCrimsonHeartDisabled < mJokers.size()
+        && mJokers[mCrimsonHeartDisabled].isDebuffed) {
+        mJokers[mCrimsonHeartDisabled].isDebuffed = false;
+        changed = true;
+    }
+    mCrimsonHeartDisabled = -1;
+
+    if (mPhase != GamePhase::Blind
+        || mBlindType != BlindType::Boss
+        || mBossEffect != BossEffect::CrimsonHeart
+        || hasJokerType(JokerType::Chicot)
+        || mJokers.isEmpty()) {
+        if (changed) emit jokersChanged();
+        return;
+    }
+
+    QVector<int> candidates;
+    candidates.reserve(mJokers.size());
+    for (int i = 0; i < mJokers.size(); ++i) {
+        if (mJokers.size() > 1 && i == mLastCrimsonHeartDisabled) continue;
+        candidates.append(i);
+    }
+    if (candidates.isEmpty()) {
+        for (int i = 0; i < mJokers.size(); ++i) candidates.append(i);
+    }
+
+    const int pick = candidates[QRandomGenerator::global()->bounded(candidates.size())];
+    mCrimsonHeartDisabled = pick;
+    mLastCrimsonHeartDisabled = pick;
+    mJokers[pick].isDebuffed = true;
+    emit jokersChanged();
 }
 
 void GameState::playCards(const QVector<int> &indices) {
@@ -440,12 +478,14 @@ void GameState::playCards(const QVector<int> &indices) {
     if (bossBlocksPlayedHand(result, played.size())) {
         // 原版会阻止非法出牌并给提示；当前 Qt 版先保证不会卡死：
         // 这手按 0 分处理并正常进入收牌/补牌流程。
-        result.name = "Boss 限制";
+        result.name = "Not Allowed";
         result.chips = 0;
         result.mult = 0;
         result.xmult = 1.0;
         result.baseChips = 0;
         result.baseMult = 0;
+        result.events.clear();
+        result.events.append({ ScoreEventKind::NotAllowed, -1, -1, -1, 0, 1.0 });
         mPendingHandScore = 0;
         mPendingPlayedIndices = sorted;
         mPendingShattered = QVector<bool>(played.size(), false);
@@ -454,14 +494,6 @@ void GameState::playCards(const QVector<int> &indices) {
         mLastResult = result;
         emit handPlayed();
         return;
-    }
-
-    // 绯红之心(Crimson Heart)：每出一手随机禁用 1 张小丑，本手结算后恢复。
-    mCrimsonHeartDisabled = -1;
-    if (mBossEffect == BossEffect::CrimsonHeart && !hasJokerType(JokerType::Chicot)
-        && !mJokers.isEmpty()) {
-        mCrimsonHeartDisabled = QRandomGenerator::global()->bounded(mJokers.size());
-        mJokers[mCrimsonHeartDisabled].isDebuffed = true;
     }
 
     HandLevel &lv = mHandLevels[result.type];
@@ -1090,9 +1122,10 @@ void GameState::discardCards(const QVector<int> &indices)
     }
 
     // Batch 7：焦痕小丑——每回合第一次弃牌升级该牌型
-    if (mFirstDiscardThisRound && hasJokerType(JokerType::BurntJoker) && !discarded.isEmpty()) {
+    const int burntCopies = countResolvedJokersOfType(mJokers, JokerType::BurntJoker);
+    if (mFirstDiscardThisRound && burntCopies > 0 && !discarded.isEmpty()) {
         HandResult dr = HandEvaluator::evaluate(discarded, currentHandMods());
-        levelUpHand(dr.type);
+        levelUpHand(dr.type, burntCopies);
     }
     mFirstDiscardThisRound = false;
     cleanupDepletedJokers();   // 拉面降到 ×1.0 时销毁
@@ -1432,6 +1465,8 @@ bool GameState::buyShopOffer(int idx) {
         mGold -= t.cost;
         Joker j = createJoker(t.joker);
         j.edition = t.jokerEdition;
+        if (j.type == JokerType::Throwback)
+            j.counter = mTotalSkipsThisRun;
         mJokers.append(j);
         updateOwnedSellValues();
         syncShopJokerRules();
@@ -1517,7 +1552,6 @@ bool GameState::buyVoucherOffer(int idx) {
     applyVoucher(t.voucher);
     syncShopJokerRules();
     mShop.refreshCurrentOfferCosts();
-    mShop.ensureShopOfferCount();
 
     emit goldChanged();
     emit shopChanged();
@@ -1917,11 +1951,21 @@ QVector<int> GameState::findBestPlay()
     // 灵媒(The Psychic)：必须出 5 张
     if (mBossEffect == BossEffect::ThePsychic && !hasJokerType(JokerType::Chicot))
         minI = maxI;
+    int forcedIdx = -1;
+    if (mBossEffect == BossEffect::CeruleanBell && !hasJokerType(JokerType::Chicot) && mCeruleanForcedUid > 0) {
+        for (int i = 0; i < n; ++i) {
+            if (mHand[i].uid == mCeruleanForcedUid) {
+                forcedIdx = i;
+                break;
+            }
+        }
+    }
 
     QVector<int> best;
     double bestScore = -1.0;
 
     for (quint32 mask = 1; mask < (1u << n); ++mask) {
+        if (forcedIdx >= 0 && !(mask & (1u << forcedIdx))) continue;
         int pc = 0;
         for (int b = 0; b < n; ++b) if (mask & (1u << b)) ++pc;
         if (pc < minI || pc > maxI) continue;
@@ -2580,6 +2624,7 @@ void GameState::startGame()
     mEndlessMode = false;
     mCardsPlayedThisAnte.clear();
     mCrimsonHeartDisabled = -1;
+    mLastCrimsonHeartDisabled = -1;
     mVerdantLeafActive = false;
     mCeruleanForcedUid = -1;
 
@@ -2714,6 +2759,7 @@ void GameState::startBlind(BlindType type)
     mBlindStartingDiscards = mDiscardLeft;   // 延迟满足：判断本回合是否用过弃牌
 
     mCrimsonHeartDisabled = -1;
+    mLastCrimsonHeartDisabled = -1;
     mVerdantLeafActive = false;
     mCeruleanForcedUid = -1;
 
@@ -3141,7 +3187,7 @@ static bool isFaceRankForLegendary(const CardData &card)
 void GameState::notifyPlayingCardDestroyed(const CardData &card)
 {
     // 原版 Caino：每摧毁 1 张人头牌，获得 X1 倍率；初始为 X1。
-    if (hasJokerType(JokerType::Caino) && isFaceRankForLegendary(card)) {
+    if (hasJokerType(JokerType::Caino) && isFaceCard(card)) {
         mCainoXMult += 1.0;
         emit jokersChanged();
     }

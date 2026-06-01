@@ -760,7 +760,13 @@ void ShopWidget::showOfferInfo(QWidget *source)
             Joker tmp = createJoker(offer->joker);
             // name 不再前缀 edition——edition 全部放副面板
             name = tmp.name;
-            bodyHtml = CardTooltipFormat::fromLuaMarkup(tmp.description);
+            QString desc = tmp.description;
+            if (offer->joker == JokerType::Throwback && mGS) {
+                const double x = 1.0 + 0.25 * qMax(0, mGS->totalSkipsThisRun());
+                desc += QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
+                            .arg(x, 0, 'f', 2);
+            }
+            bodyHtml = CardTooltipFormat::fromLuaMarkup(desc);
             const JokerRarity rr = jokerRarity(offer->joker);
             mainBadges.append({CardTooltipFormat::rarityName(rr),
                                CardTooltipFormat::rarityColor(rr)});
@@ -1031,6 +1037,8 @@ void ShopWidget::layoutVoucherFan()
     for (int k = 0; k < activeCount; ++k)
         if (k != focusOrder) order.append(k);
     order.append(focusOrder);
+    order.clear();
+    for (int k = 0; k < activeCount; ++k) order.append(k);
 
     for (int renderIdx = 0; renderIdx < order.size(); ++renderIdx) {
         const int k = order[renderIdx];
@@ -1058,6 +1066,9 @@ void ShopWidget::layoutVoucherFan()
             anim->setEasingCurve(QEasingCurve::OutCubic);
             QPointer<ShopWidget> self(this);
             QPointer<QWidget> btnGuard(ou.cardBtn);
+            connect(anim, &QPropertyAnimation::valueChanged, this, [self, btnGuard]() {
+                if (self && btnGuard) self->syncPriceLblForCardBtn(btnGuard);
+            });
             connect(anim, &QPropertyAnimation::finished, this, [self, btnGuard]() {
                 if (self && btnGuard) self->syncPriceLblForCardBtn(btnGuard);
             });
@@ -1355,6 +1366,11 @@ void ShopWidget::refresh()
             QString ed = editionDisplayName(o.jokerEdition);
             name = ed.isEmpty() ? tmp.name : (ed + " " + tmp.name);
             body = tmp.description;
+            if (o.joker == JokerType::Throwback && mGS) {
+                const double x = 1.0 + 0.25 * qMax(0, mGS->totalSkipsThisRun());
+                body += QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
+                            .arg(x, 0, 'f', 2);
+            }
             if (!ed.isEmpty()) body += "\n" + editionDescription(o.jokerEdition);
         } else if (o.kind == OfferKind::Pack) {
             name = packDisplayName(o.pack, o.packSize);
@@ -2186,13 +2202,17 @@ void ShopWidget::onBuyAndUseShop(int slot) {
         const ShopOffer &o = offers[slot];
         const bool isPlanetLike = (o.kind == OfferKind::Planet)
             || (o.kind == OfferKind::Spectral && o.consumable == ConsumableType::Spectral_BlackHole);
+        const bool isWheel = (o.kind == OfferKind::Tarot && o.consumable == ConsumableType::Tarot_Wheel);
         QWidget *cardBtn = mShopUi[slot].cardBtn;
-        if (isPlanetLike && cardBtn && cardBtn->isVisible()) {
+        if ((isPlanetLike || isWheel) && cardBtn && cardBtn->isVisible()) {
             animType = o.consumable;
             useCenter = cardBtn->mapToGlobal(QPoint(cardBtn->width() / 2, cardBtn->height() / 2));
             wantUseAnim = true;
         }
     }
+
+    if (wantUseAnim)
+        emit shopConsumableUseAnimation(int(animType), useCenter);
 
     if (mGS->buyAndUseShopConsumable(slot, {})) {
         QTimer::singleShot(100, this, [cost]() {
@@ -2203,8 +2223,6 @@ void ShopWidget::onBuyAndUseShop(int slot) {
         QTimer::singleShot(180, this, [useSound]() {
             AudioManager::instance()->play(useSound, 1.0, 1.0);
         });
-        if (wantUseAnim)
-            emit shopConsumableUseAnimation(int(animType), useCenter);
         mSelectedShopSlot = -1;
         refresh();
     } else {

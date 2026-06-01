@@ -398,6 +398,7 @@ void JokerItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) 
     const int frame = floatingAnimated ? shaderCacheFrame() : -1;
     const QString key = QString::number(int(mJoker.type)) + QLatin1Char('|')
                       + QString::number(int(mJoker.edition)) + QLatin1Char('|')
+                      + QString::number(mJoker.isDebuffed ? 1 : 0) + QLatin1Char('|')
                       + QString::number(frame);
     static QHash<QString, QPixmap> cache;
     static QStringList order;
@@ -415,6 +416,8 @@ void JokerItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) 
         QPixmap body = sSheet->copy(src);
         if (mJoker.edition != Edition::None)
             body = BalatroShaders::renderEditionPixmap(body, mJoker.edition);
+        if (mJoker.isDebuffed)
+            body = BalatroShaders::renderDebuffedPixmap(body);
         cp.drawPixmap(QRect(0, 0, SRC_W, SRC_H), body);
         paintLegendaryFloatingSprite(&cp, sSheet, mJoker.type);
         paintHologramFloatingSprite(&cp, sSheet, mJoker.type);

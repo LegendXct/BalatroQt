@@ -367,6 +367,7 @@ void Shop::ensureShopOfferCount()
         mShopOffers.append(randomShopOffer(mShopOffers));
     while (mShopOffers.size() > mShopSlots)
         mShopOffers.removeLast();
+    refreshCurrentOfferCosts();
 }
 
 void Shop::refreshCurrentOfferCosts()
@@ -473,6 +474,14 @@ void Shop::resetForNewBlind() {
 
 void Shop::changeShopSlots(int delta) {
     mShopSlots = qMax(1, mShopSlots + delta);
+    if (delta > 0) {
+        QVector<ShopOffer> kept;
+        kept.reserve(mShopOffers.size());
+        for (const ShopOffer &offer : mShopOffers) {
+            if (!offer.sold) kept.append(offer);
+        }
+        mShopOffers = kept;
+    }
 }
 
 void Shop::setOwnedJokers(const QVector<JokerType> &owned, bool allowDuplicates)

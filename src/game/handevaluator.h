@@ -24,6 +24,7 @@ enum class HandType {
 };
 
 enum class ScoreEventKind {
+    NotAllowed,
     ScoringCardChip,    // 计分牌的 chipValue + Bonus/Stone 增强(蓝)
     EnhancementMult,    // 计分牌 Mult 增强 +4(红)
     EnhancementXMult,   // 计分牌 Glass ×2(红 xmult)

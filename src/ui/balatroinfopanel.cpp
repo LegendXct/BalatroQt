@@ -271,7 +271,9 @@ BalatroInfoCluster::BalatroInfoCluster(const QFont &cnFont, QWidget *parent)
     mRowLayout->setContentsMargins(0, 0, 0, 0);
     mRowLayout->setSpacing(8);
     mRowLayout->setAlignment(Qt::AlignTop | Qt::AlignLeft);
+    mRowLayout->setSizeConstraint(QLayout::SetFixedSize);
     mMain = new BalatroInfoPanel(mCNFont, this);
+    mMain->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
     mRowLayout->addWidget(mMain, 0, Qt::AlignTop);
 }
 
@@ -297,6 +299,7 @@ void BalatroInfoCluster::addSidePanel(const BalatroInfoPanel::SideEntry &entry)
     // 副面板：name 走暗底白字（不包白盒），body 仍是白底圆角文字区。
     p->setContent(entry.name, entry.body, entry.badges,
                   qMax(110, entry.preferredWidth), /*nameHasWhiteBox=*/false);
+    p->setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Preferred);
     mRowLayout->addWidget(p, 0, Qt::AlignTop);
     mSidePanels.append(p);
 }
@@ -318,4 +321,5 @@ void BalatroInfoCluster::relayout()
         if (auto *lay = layout()) lay->activate();
         adjustSize();
     }
+    setFixedSize(sizeHint());
 }

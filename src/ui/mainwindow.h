@@ -424,6 +424,10 @@ private:
     QPointF mForesightBtnHome;
     bool mForesightPreviewActive = false;   // 占卜预览动画进行中,避免重复点击叠加
 
+    bool mDelayHandLevelForConsumableUse = false;
+    bool mPendingHandLevelAnimation = false;
+    bool mShopConsumableUseAnimating = false;
+
     void updateHandPreview();
     void playScoreEvent(const ScoreEvent &ev, double percent = -1.0);
     void animateScoreTotalThenFinalize(double gained, int delayAfterEvents);
