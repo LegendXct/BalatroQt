@@ -1,4 +1,5 @@
 #include "deck.h"
+#include "demoscript.h"
 #include <QRandomGenerator>
 #include <stdexcept>
 
@@ -38,6 +39,9 @@ void Deck::reset() {
         mDrawPile.append(clearTransientFlags(c));
     mDiscardPile.clear();
     shuffle();
+    // 演示模式：洗完后再把脚本规定的 8 张换到 mDrawPile 前面，保证开局手牌稳定。
+    // 必须在 shuffle 之后做，否则会被随机打散；只换位置，不新增/删卡。
+    if (DemoScript::active()) DemoScript::reorderDeckForNextBlind(mDrawPile);
 }
 
 void Deck::shuffle() {

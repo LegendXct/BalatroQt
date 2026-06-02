@@ -48,6 +48,7 @@
 #include <limits>
 #include "../utils/shadereffects.h"
 #include "../audio/audiomanager.h"
+#include "../game/demoscript.h"
 #include "balatroinfopanel.h"
 #include "cardtooltipformat.h"
 
@@ -2297,6 +2298,58 @@ void MainWindow::showSettingsOverlay()
         v->addWidget(row);
     }
 
+    // 演示模式开关：勾上之后每次"开始新的一局"都按 demoscript 的剧本运行。
+    // 切换不影响当前正在进行的盲注/商店；只影响下一次新游戏。
+    {
+        auto *row = new QWidget(panel);
+        row->setStyleSheet("background:transparent; border:none;");
+        auto *h = new QHBoxLayout(row);
+        h->setContentsMargins(0, 0, 0, 0);
+        h->setSpacing(dp(10));
+
+        auto *lbl = new QLabel("演示模式", row);
+        lbl->setFont(labelFont);
+        lbl->setStyleSheet("color:#eaffff; background:transparent; border:none;");
+        lbl->setFixedWidth(dp(110));
+        h->addWidget(lbl);
+
+        auto *toggle = new QPushButton(DemoScript::active() ? "已开启" : "已关闭", row);
+        toggle->setFont(labelFont);
+        toggle->setMinimumHeight(dp(34));
+        toggle->setCheckable(true);
+        toggle->setChecked(DemoScript::active());
+
+        auto applyStyle = [toggle]() {
+            const bool on = toggle->isChecked();
+            toggle->setText(on ? "已开启" : "已关闭");
+            toggle->setStyleSheet(QString(
+                "QPushButton { background:%1; color:%2;"
+                " border:2px solid %3; border-radius:10px; padding:4px 14px;"
+                " font-weight:bold; }"
+                "QPushButton:hover { background:%4; }"
+            ).arg(on ? "#fda200" : "#1f2a2c",
+                  on ? "#101216" : "#eaffff",
+                  on ? "#ffe6a8" : "#3b4347",
+                  on ? "#ffb730" : "#2a3539"));
+        };
+        applyStyle();
+
+        connect(toggle, &QPushButton::clicked, this, [applyStyle, toggle]() {
+            DemoScript::setActive(toggle->isChecked());
+            applyStyle();
+        });
+
+        h->addWidget(toggle, 1);
+        v->addWidget(row);
+
+        auto *hint = new QLabel("勾选后每次开始新的一局都进入固定剧本（小盲对子+顺子 / 大盲人头同花 / Boss 支柱同花顺）。", row);
+        QFont hintFont = mCNFont; hintFont.setPixelSize(uiPx(12));
+        hint->setFont(hintFont);
+        hint->setStyleSheet("color:#9aa8a9; background:transparent; border:none;");
+        hint->setWordWrap(true);
+        v->addWidget(hint);
+    }
+
     auto *back = new QPushButton("返回", panel);
     QFont btnFont = mCNFont; btnFont.setPixelSize(uiPx(20)); btnFont.setBold(true);
     back->setFont(btnFont);
@@ -2647,6 +2700,10 @@ void MainWindow::setupScene() {
     mView->viewport()->setAttribute(Qt::WA_TranslucentBackground, true);
     mView->viewport()->setAutoFillBackground(false);
     mView->setBackgroundBrush(QBrush(Qt::NoBrush));
+    // Windows 全屏 + QGraphicsView 的 viewport 上某些显卡驱动会把默认光标当作"透明"显示，
+    // 必须显式给 view 和 viewport 都设 ArrowCursor，否则进入对局背景区域光标就消失。
+    mView->setCursor(Qt::ArrowCursor);
+    mView->viewport()->setCursor(Qt::ArrowCursor);
 
     mView->setViewportUpdateMode(QGraphicsView::BoundingRectViewportUpdate);
     mView->setOptimizationFlag(QGraphicsView::DontAdjustForAntialiasing, true);

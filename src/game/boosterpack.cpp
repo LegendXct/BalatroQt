@@ -1,4 +1,5 @@
 #include "boosterpack.h"
+#include "demoscript.h"
 #include <QRandomGenerator>
 #include <QtGlobal>
 #include <algorithm>
@@ -324,6 +325,10 @@ PackContent generatePackContent(PackKind k, PackSize s, bool omenGlobe,
     pc.size = s;
     pc.optionsToShow = optionsFor(k, s);
     pc.choicesAllowed = choicesFor(s);
+
+    // 演示模式：天体包必含 Jupiter、奥秘包必含 Justice。其它种类不干预。
+    if (DemoScript::active() && DemoScript::scriptedPackContent(k, s, pc))
+        return pc;
 
     QVector<ConsumableType> usedConsumables;
     QVector<JokerType> usedJokers;

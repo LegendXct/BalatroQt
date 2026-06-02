@@ -1,4 +1,5 @@
 #include "bossblind.h"
+#include "demoscript.h"
 #include <QRandomGenerator>
 #include <QVector>
 
@@ -75,6 +76,11 @@ int bossChipRow(BossEffect e)
 struct BossCandidate { BossEffect effect; int minAnte; int maxAnte; };
 
 BossEffect randomBossEffect(int ante) {
+    // 演示模式：脚本指定的 ante（默认仅第一 Ante）固定为支柱；脚本说"不干预"再走原 RNG。
+    if (DemoScript::active()) {
+        BossEffect scripted = DemoScript::scriptedBoss(ante);
+        if (scripted != BossEffect::None) return scripted;
+    }
     // 终盘 Boss：ante 为 8 的倍数时（含无尽模式的 16/24…）固定出现。
     if (ante > 0 && ante % 8 == 0) {
         static const BossEffect finishers[] = {

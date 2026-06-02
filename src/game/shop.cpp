@@ -1,4 +1,5 @@
 #include "shop.h"
+#include "demoscript.h"
 #include <QRandomGenerator>
 #include <QtGlobal>
 #include <cmath>
@@ -308,6 +309,19 @@ void Shop::roll() {
     const bool couponed = mNextShopFree;
     rerollShopOnly();
 
+    if (DemoScript::active()) {
+        // 演示模式：把 voucher 与 booster 槽完全交给脚本（不走 mAllowVoucherThisShop 与
+        // randomBoosterOffer），保证每次商店出现固定内容。
+        DemoScript::scriptedVoucherOffers(mVoucherOffers);
+        DemoScript::scriptedBoosterOffers(mBoosterOffers);
+        if (couponed) {
+            for (ShopOffer &o : mShopOffers)    { if (!o.sold) { o.cost = 0; o.freeByTag = true; } }
+            for (ShopOffer &o : mBoosterOffers) { if (!o.sold) { o.cost = 0; o.freeByTag = true; } }
+        }
+        mNextShopFree = false;
+        return;
+    }
+
     if (mAllowVoucherThisShop) {
         mVoucherOffers.clear();
         mVoucherOffers.append(randomVoucherOffer());
@@ -336,6 +350,14 @@ void Shop::roll() {
 }
 
 void Shop::rerollShopOnly() {
+    if (DemoScript::active()) {
+        // 演示模式：完全用脚本接管主货架（不参与稀有/版本 pending、不走 randomShopOffer）。
+        // 待处理的 pending edition/rarity 直接丢弃——脚本里不会用到，避免污染下一次重摇。
+        mPendingRarityJokers.clear();
+        mPendingEditionJokers.clear();
+        DemoScript::scriptedShopOffers(mShopOffers, mShopSlots);
+        return;
+    }
     mShopOffers.clear();
 
     while (!mPendingRarityJokers.isEmpty() && mShopOffers.size() < mShopSlots) {

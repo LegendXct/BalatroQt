@@ -1,4 +1,5 @@
 #include "gamestate.h"
+#include "demoscript.h"
 #include <QSet>
 #include <QRandomGenerator>
 #include <limits>
@@ -1015,6 +1016,8 @@ void GameState::finishWinningRound()
     mSuppressGoldSignal = false;
 
     mPhase = GamePhase::Shop;
+    // 演示模式：进商店 → shopVisit++（在 mShop.roll 调用之前，让 Shop hook 读到正确编号）
+    if (DemoScript::active()) DemoScript::onEnterShop();
     mChaosFreeRerollUsed = false;   // Batch 7：进商店重置混沌小丑免费重摇
     syncShopJokerRules();
     // 原版：每个 Ante 只有击败 Boss 后的商店出现优惠券(基础 1 张)。
@@ -1238,6 +1241,8 @@ void GameState::rerollShop() {
 
     mGold -= cost;
     syncShopJokerRules();
+    // 演示模式：rerollCount++（在 rerollShopOnly 之前，让 Shop hook 看到正确的重摇次数）
+    if (DemoScript::active()) DemoScript::onShopReroll();
     mShop.onReroll();
     mShop.rerollShopOnly();   // ← 只 reroll 商品区,不动 booster
 
@@ -2565,6 +2570,9 @@ bool GameState::useConsumableOnPackHand(int consumableIdx,
 
 void GameState::startGame()
 {
+    // 演示模式：在所有 RNG 命中点之前把脚本计数器归零，保证本局完整走脚本一遍。
+    if (DemoScript::active()) DemoScript::onStartGame();
+
     mDeck = Deck();
     mHand.clear();
     mAwaitingScoreFinalize = false;
@@ -2791,6 +2799,9 @@ void GameState::startBlind(BlindType type)
     // 原版每个盲注开始都会用当前完整牌组重新洗牌；上一盲注结束时手里没打出的牌也要回到牌组。
     mDeck.returnCards(mHand);
     mHand.clear();
+    // 演示模式：在 reset 之前 ++blindEntered，让 Deck::reset 里的 reorderDeckForNextBlind
+    // 读到正确的盲注编号（1=小盲, 2=大盲, 3=Boss）。
+    if (DemoScript::active()) DemoScript::onEnterBlind();
     mDeck.reset();
     triggerBlindSelectJokers(type);   // Batch 4：乌合之众/弹珠/窃贼/占卜师/证书/疯狂
     dealCards();
