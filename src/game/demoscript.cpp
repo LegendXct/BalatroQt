@@ -108,8 +108,15 @@ void DemoScript::scriptedShopOffers(QVector<ShopOffer> &out, int slotCount)
         out.append(makeJokerOffer(JokerType::HangingChad, Edition::Negative));
         out.append(makeJokerOffer(JokerType::Cartomancer, Edition::None));
     } else if (sShopVisit == 2) {
-        // 第二商店（大盲后）：脚本只展示设置不买，3 槽用 3 张不同小丑避免视觉重复。
-        out.append(makeJokerOffer(JokerType::HalfJoker));
+        // 第二商店（大盲后）：3 槽 = 海王星(同花顺升级) + 2 张陪衬小丑。
+        // 海王星会被买入消耗品槽，留到 Boss 起手用。
+        {
+            ShopOffer planet;
+            planet.kind = OfferKind::Planet;
+            planet.consumable = ConsumableType::Planet_Neptune;
+            planet.cost = 3;
+            out.append(planet);
+        }
         out.append(makeJokerOffer(JokerType::JollyJoker));
         out.append(makeJokerOffer(JokerType::Misprint));
     } else if (sShopVisit == 3) {
@@ -178,10 +185,10 @@ void DemoScript::scriptedBoosterOffers(QVector<ShopOffer> &out)
         out.append(makePack(PackKind::Buffoon, PackSize::Mega,   6));
         out.append(makePack(PackKind::Arcana,  PackSize::Normal, 4));
     } else if (sShopVisit == 2) {
-        // 大盲后第二商店：超级塔罗包($6) 给 Boss 段准备道具（皇后/正义 5 选 2）；
-        // 另一个槽位放标准包做陪衬。
+        // 大盲后第二商店：超级塔罗包($6) 给 Boss 段道具 + 超级游戏卡包($6)
+        // 展示 5 种蜡封/增强组合（红/蓝/金/紫蜡封 + 幸运/钢铁/万能增强）。
         out.append(makePack(PackKind::Arcana,   PackSize::Mega,   6));
-        out.append(makePack(PackKind::Standard, PackSize::Normal, 4));
+        out.append(makePack(PackKind::Standard, PackSize::Mega,   6));
     } else {
         out.append(makePack(PackKind::Standard, PackSize::Normal, 4));
         out.append(makePack(PackKind::Standard, PackSize::Normal, 4));
@@ -199,20 +206,38 @@ bool DemoScript::scriptedPackContent(PackKind kind, PackSize size, PackContent &
     };
 
     if (kind == PackKind::Buffoon && size == PackSize::Mega) {
-        // 超级小丑包：4 选 1。多彩侠盗 + 3 张陪衬小丑。
-        // 侠盗 = 其他所有小丑出售价值合计加入倍率——和现有 5 张小丑配合在 Boss 一击爆分。
+        // 超级小丑包：4 选 1。多彩抽象小丑 + 3 张陪衬。
+        // 抽象小丑：每张小丑牌 +3 倍率——6 张满槽时给 +18 倍率。
         fillBase(4, 1);
         out.jokers = {
-            JokerType::Swashbuckler,   // 演示重点：多彩
+            JokerType::AbstractJoker,  // 演示重点：多彩
             JokerType::JollyJoker,
             JokerType::Banner,
             JokerType::EvenSteven,
         };
         out.jokerEditions = {
-            Edition::Polychrome,       // 侠盗挂多彩——包内 hover 和拿走后都带 shader
+            Edition::Polychrome,       // 抽象小丑挂多彩——包内 hover 和拿走后都带 shader
             Edition::None,
             Edition::None,
             Edition::None,
+        };
+        return true;
+    }
+    if (kind == PackKind::Standard && size == PackSize::Mega) {
+        // 超级游戏卡包：5 选 2。展示蜡封 + 增强组合，覆盖红/蓝/金/紫四种蜡封 + 幸运/钢铁/万能三种增强。
+        fillBase(5, 2);
+        auto mk = [](Rank r, Suit s, Enhancement e, Seal sl) {
+            CardData c; c.rank = r; c.suit = s; c.enhancement = e; c.seal = sl;
+            c.assignNewUid();
+            return c;
+        };
+        using R = Rank; using S = Suit; using E = Enhancement; using SL = Seal;
+        out.standardCards = {
+            mk(R::King,  S::Spades,   E::Lucky, SL::Red),    // 红蜡封幸运 ♠K
+            mk(R::Eight, S::Diamonds, E::Steel, SL::Blue),   // 蓝蜡封钢铁 ♦8
+            mk(R::Six,   S::Hearts,   E::None,  SL::None),   // 中间：普通 ♥6
+            mk(R::Nine,  S::Clubs,    E::None,  SL::Gold),   // 金蜡封 ♣9
+            mk(R::Queen, S::Hearts,   E::Wild,  SL::Purple), // 紫蜡封万能 ♥Q
         };
         return true;
     }

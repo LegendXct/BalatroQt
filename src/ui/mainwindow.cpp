@@ -548,20 +548,78 @@ static QPushButton *makeBtn(const QString &text, const QString &bg, const QStrin
 }
 
 
+// 自绘药丸进度条：Qt QProgressBar::chunk 的 border-radius 在部分驱动 / 缩放下失灵——
+// 直接 paintEvent 接管 渲染，按 [背景药丸 → 彩色填充(clip 到药丸) → 黄色药丸边框 → 文字] 的
+// 顺序画，彩色矩形天然被 clip 不会戳出框。继承 QProgressBar 保留 value/setValue 动画属性。
+class PillScoreProgressBar : public QProgressBar
+{
+public:
+    using QProgressBar::QProgressBar;
+    void setBorderColor(const QColor &c) { mBorderColor = c; update(); }
+    void setChunkEndColor(const QColor &c) { mChunkC = c; update(); }
+
+protected:
+    void paintEvent(QPaintEvent *) override {
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing);
+        QRectF r = rect().adjusted(1.0, 1.0, -1.0, -1.0);  // 内缩 1px 给边框留位
+        const qreal radius = r.height() / 2.0;
+        QPainterPath pill;
+        pill.addRoundedRect(r, radius, radius);
+
+        // 1) 半透明深底
+        p.fillPath(pill, QColor(8, 18, 24, 112));
+
+        // 2) 彩色填充——clip 到药丸路径里，矩形怎么宽都不会戳出黄色边框
+        const double vRange = qMax(1, maximum() - minimum());
+        const double frac = qBound(0.0, double(value() - minimum()) / vRange, 1.0);
+        if (frac > 0.001) {
+            p.save();
+            p.setClipPath(pill);
+            QRectF chunk = r;
+            chunk.setWidth(r.width() * frac);
+            QLinearGradient g(r.topLeft(), r.topRight());
+            g.setColorAt(0.0,  QColor("#009dff"));
+            g.setColorAt(0.58, QColor("#23e6ff"));
+            g.setColorAt(1.0,  mChunkC);
+            p.fillRect(chunk, g);
+            p.restore();
+        }
+
+        // 3) 黄色药丸边框画在最上层——遮住任何尝试戳出来的彩色矩形角
+        p.setPen(QPen(mBorderColor, 3));
+        p.setBrush(Qt::NoBrush);
+        p.drawPath(pill);
+
+        // 4) 百分比文字
+        if (!format().isEmpty()) {
+            p.setPen(QColor("#eaffff"));
+            p.setFont(font());
+            p.drawText(rect(), Qt::AlignCenter,
+                       QString::number(int(std::round(frac * 100.0))) + "%");
+        }
+    }
+
+private:
+    QColor mBorderColor = QColor("#fda200");  // 默认黄色药丸边框
+    QColor mChunkC      = QColor("#fda200");  // 填充梯度尾色
+};
+
+
 static void setLabelScaledText(QLabel *lbl, const QString &text, int nomPx)
 {
     QFont f = lbl->font();
     f.setPixelSize(nomPx);
-    const int w = lbl->width();
-    // 用户反馈10：之前下限 nomPx/2 会在 10+ 位的分数 / 倍率上仍然装不下；
-    // 这里把下限放宽到 nomPx/3 但不低于 10px，保证再长的位数也能完整显示。
+    // 之前只在 w > 20 时缩字号；若 layout 还没算完 width 可能是 0，
+    // 这种情况下用 minimumWidth / parent 宽度做兜底，避免把 "1.23e15" 这种长串
+    // 当成"能装下" 直接按 42px 输出导致溢出截断。
+    int w = lbl->width();
+    if (w <= 20) w = qMax(lbl->minimumWidth(), 120);
     const int minPx = qMax(10, nomPx / 3);
-    if (w > 20) {
-        QFontMetrics fm(f);
-        while (f.pixelSize() > minPx && fm.horizontalAdvance(text) > w - 16) {
-            f.setPixelSize(f.pixelSize() - 1);
-            fm = QFontMetrics(f);
-        }
+    QFontMetrics fm(f);
+    while (f.pixelSize() > minPx && fm.horizontalAdvance(text) > w - 16) {
+        f.setPixelSize(f.pixelSize() - 1);
+        fm = QFontMetrics(f);
     }
     lbl->setFont(f);
     lbl->setText(text);
@@ -569,15 +627,17 @@ static void setLabelScaledText(QLabel *lbl, const QString &text, int nomPx)
 
 static QString formatScoreNumber(double num)
 {
-    if (std::isnan(num)) return QStringLiteral("NaNeInf");
+    if (std::isnan(num)) return QStringLiteral("NaN");
     if (std::isinf(num)) return QStringLiteral("Inf");
     const bool neg = num < 0.0;
     num = std::abs(num);
-    if (num >= 100000000000.0) {
+    // 原版 number_with_commas + scientific：到 10^11 量级切到科学计数法。
+    // 2 位小数尾数（原本 3 位）让 "1.23e15" 这种 7 字符表达式在 170px 槽位里 1× 字号就放得下。
+    if (num >= 1e11) {
         int exp = int(std::floor(std::log10(std::max(num, 1.0))));
         double mantissa = num / std::pow(10.0, exp);
         return QString("%1%2e%3").arg(neg ? "-" : "")
-                                  .arg(QString::number(mantissa, 'f', 3))
+                                  .arg(QString::number(mantissa, 'f', 2))
                                   .arg(exp);
     }
     qint64 n = qRound64(num);
@@ -1124,7 +1184,7 @@ void MainWindow::setupLeftPanel() {
     sbl->addStretch();
     scoreVBox->addWidget(scoreTop);
 
-    mScoreProgressBar = new QProgressBar(scoreBox);
+    mScoreProgressBar = new PillScoreProgressBar(scoreBox);
     mScoreProgressBar->setRange(0, 1000);
     mScoreProgressBar->setValue(0);
     mScoreProgressBar->setFixedHeight(dp(34));
@@ -1133,31 +1193,15 @@ void MainWindow::setupLeftPanel() {
     mScoreProgressBar->setAlignment(Qt::AlignCenter);
     QFont pbf = mPixelFont; pbf.setPixelSize(uiPx(17));
     mScoreProgressBar->setFont(pbf);
-    mScoreProgressBar->setStyleSheet(
-        "QProgressBar {"
-        " background:rgba(8,18,24,112);"
-        " border:none;"
-        " border-radius:14px;"
-        " color:#eaffff;"
-        " text-align:center;"
-        " padding:0px;"
-        "}"
-        "QProgressBar::chunk {"
-        " border-radius:14px;"
-        " background:qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #009dff, stop:0.58 #23e6ff, stop:1 #fda200);"
-        "}"
-        );
+    // 自绘进度条不读 stylesheet 的 QProgressBar::chunk —— 颜色 / 边框统一由 paintEvent 控。
     mScoreProgressGlow = new QGraphicsDropShadowEffect(mScoreProgressBar);
     mScoreProgressGlow->setBlurRadius(16);
     mScoreProgressGlow->setOffset(0, 0);
     mScoreProgressGlow->setColor(QColor(35, 230, 255, 120));
     mScoreProgressBar->setGraphicsEffect(mScoreProgressGlow);
     scoreVBox->addWidget(mScoreProgressBar);
-
-    // Qt 的 QProgressBar::chunk 即使写了 border-radius，在部分驱动/缩放下仍会按矩形渲染，
-    // 让"药丸"框架的圆角处露出彩色矩形的四角。给整个 widget 装一个 antialias 的 QBitmap
-    // mask 解决——eventFilter 里在 resize 时同步重建。
-    mScoreProgressBar->installEventFilter(this);
+    // PillScoreProgressBar 自己的 paintEvent 已经在画层里把彩色填充 clip 到药丸路径里，
+    // 之前那套 QBitmap mask + eventFilter 不再需要。
 
     // 进度条发光脉动：原本走 QVariantAnimation 默认 60 FPS valueChanged，
     // 每一帧都改 QGraphicsDropShadowEffect 的 blur/color，触发整条进度条 +
@@ -1221,6 +1265,9 @@ void MainWindow::setupLeftPanel() {
     mLblChips->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
     QFont cf = mPixelFont; cf.setPixelSize(uiPx(42));
     mLblChips->setFont(cf);
+    // 显式给一个最小宽度，保证 setLabelScaledText 在 layout 没算完时
+    // 也有合理的 width 估算，长数字 / 科学计数法不会按 42px 输出超框。
+    mLblChips->setMinimumWidth(dp(150));
     mLblChips->setStyleSheet(
         "background: #009dff; color: white;"
         "border-radius: 8px; padding: 4px 12px;"
@@ -1237,6 +1284,7 @@ void MainWindow::setupLeftPanel() {
     // 倍率数字靠左贴近中间的 ×。
     mLblMult->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     mLblMult->setFont(cf);
+    mLblMult->setMinimumWidth(dp(150));
     mLblMult->setStyleSheet(
         "background:#fe5f55; color:white;"
         "border-radius:8px; padding:4px 12px;"
@@ -3335,22 +3383,15 @@ void MainWindow::updateScoreProgressBar(double displayedScore, bool animate)
     const int percent = qBound(0, int(std::round(std::min(ratio, 1.0) * 100.0)), 100);
     mScoreProgressBar->setFormat(QString("%1%").arg(percent));
 
-    const QString border = barValue >= 1000 ? "#ffb000" : "#27566b";
-    const QString chunkEnd = barValue >= 1000 ? "#ffdf68" : "#fda200";
-    mScoreProgressBar->setStyleSheet(QString(
-        "QProgressBar {"
-        " background:rgba(8,18,24,112);"
-        " border:3px solid %1;"
-        " border-radius:14px;"
-        " color:#eaffff;"
-        " text-align:center;"
-        " padding:0px;"
-        "}"
-        "QProgressBar::chunk {"
-        " border-radius:14px;"
-        " background:qlineargradient(x1:0,y1:0,x2:1,y2:0, stop:0 #009dff, stop:0.58 #23e6ff, stop:1 %2);"
-        "}"
-        ).arg(border, chunkEnd));
+    // 自绘进度条：颜色直接走 setter，paint 时即可读到最新值，绕过 stylesheet 那套
+    // 部分驱动下会让彩色矩形戳出药丸的 bug。
+    // PillScoreProgressBar 没有 Q_OBJECT 宏（避免 moc 拖进来），所以走 static_cast；
+    // mScoreProgressBar 始终是 PillScoreProgressBar 实例，安全。
+    if (mScoreProgressBar) {
+        auto *pill = static_cast<PillScoreProgressBar*>(mScoreProgressBar);
+        pill->setBorderColor(QColor(barValue >= 1000 ? "#ffb000" : "#fda200"));
+        pill->setChunkEndColor(QColor(barValue >= 1000 ? "#ffdf68" : "#fda200"));
+    }
 
     if (!animate) {
         mScoreProgressBar->setValue(barValue);
@@ -6391,24 +6432,8 @@ void MainWindow::resumeGameProcesses()
 
 bool MainWindow::eventFilter(QObject *obj, QEvent *ev)
 {
-    // 进度条药丸 mask：QProgressBar::chunk 的 border-radius 在部分平台失灵，
-    // 改用 QBitmap mask 把整个 widget clip 成药丸形——chunk 怎么画都不会出框。
-    if (obj == mScoreProgressBar
-        && (ev->type() == QEvent::Resize || ev->type() == QEvent::Show)) {
-        const QSize sz = mScoreProgressBar->size();
-        if (sz.width() > 0 && sz.height() > 0) {
-            QBitmap bm(sz);
-            bm.fill(Qt::color0);   // 透明
-            QPainter p(&bm);
-            p.setRenderHint(QPainter::Antialiasing);
-            p.setBrush(Qt::color1); // 不透明
-            p.setPen(Qt::NoPen);
-            const int r = sz.height() / 2;
-            p.drawRoundedRect(bm.rect(), r, r);
-            p.end();
-            mScoreProgressBar->setMask(bm);
-        }
-    }
+    // 进度条不再需要 QBitmap mask——PillScoreProgressBar 的 paintEvent 内已经走
+    // setClipPath(pill) 把彩色填充 clip 在药丸里，自然不会戳出黄色边框。
     // 火焰已改用 GPU 渲染 FlameShaderWidget；之前在这里拦截 mChipFlame/mMultFlame
     // 的 Paint 事件用 BalatroShaders::paintFlame 走 CPU 渲染，现在不再需要。
     if (obj == mPlayPage && ev->type() == QEvent::Resize) {

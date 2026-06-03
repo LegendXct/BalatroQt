@@ -653,7 +653,9 @@ void PackOpenWidget::showOptionTooltip(int idx)
     // 越界保护
     if (x < 6) x = 6;
     if (x + mInfoTooltip->width() > width() - 6) x = width() - mInfoTooltip->width() - 6;
-    if (y < 6) y = topLeftInThis.y() + card->height() + 8;
+    // 之前 y < 6 会把信息框翻到卡牌下方——超级塔罗包 5 选 2 时第 4 张就会撞上这条边界
+    // 出现"上下不齐"。改成 clamp 到顶部，所有 hover 信息一律在卡牌上方，UI 统一。
+    if (y < 6) y = 6;
     mInfoTooltip->move(x, y);
     mInfoTooltip->raise();
     mInfoTooltip->show();
