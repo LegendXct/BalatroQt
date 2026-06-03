@@ -1973,6 +1973,14 @@ QVector<int> GameState::findBestPlay()
 
     for (quint32 mask = 1; mask < (1u << n); ++mask) {
         if (forcedIdx >= 0 && !(mask & (1u << forcedIdx))) continue;
+        // 跳过任何包含"背面朝下"卡的子集——The Mark / The House / The Fish / The Wheel
+        // 等 Boss 会把部分手牌发成背面，玩家本身就看不到这些牌的点数/花色，
+        // 让"最佳出牌"也只在玩家能看见的牌里选，符合"不作弊"语义。
+        bool maskHasFaceDown = false;
+        for (int b = 0; b < n; ++b) {
+            if ((mask & (1u << b)) && !mHand[b].faceUp) { maskHasFaceDown = true; break; }
+        }
+        if (maskHasFaceDown) continue;
         int pc = 0;
         for (int b = 0; b < n; ++b) if (mask & (1u << b)) ++pc;
         if (pc < minI || pc > maxI) continue;

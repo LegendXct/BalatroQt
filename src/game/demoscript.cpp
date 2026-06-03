@@ -177,8 +177,12 @@ void DemoScript::scriptedBoosterOffers(QVector<ShopOffer> &out)
         // 超级小丑包($6) + 普通塔罗包($4)
         out.append(makePack(PackKind::Buffoon, PackSize::Mega,   6));
         out.append(makePack(PackKind::Arcana,  PackSize::Normal, 4));
+    } else if (sShopVisit == 2) {
+        // 大盲后第二商店：超级塔罗包($6) 给 Boss 段准备道具（皇后/正义 5 选 2）；
+        // 另一个槽位放标准包做陪衬。
+        out.append(makePack(PackKind::Arcana,   PackSize::Mega,   6));
+        out.append(makePack(PackKind::Standard, PackSize::Normal, 4));
     } else {
-        // 第二商店：路演里只展示设置，不开包
         out.append(makePack(PackKind::Standard, PackSize::Normal, 4));
         out.append(makePack(PackKind::Standard, PackSize::Normal, 4));
     }
@@ -195,24 +199,38 @@ bool DemoScript::scriptedPackContent(PackKind kind, PackSize size, PackContent &
     };
 
     if (kind == PackKind::Buffoon && size == PackSize::Mega) {
-        // 超级小丑包：4 选 1。多彩公牛 + 3 张陪衬小丑。
+        // 超级小丑包：4 选 1。多彩侠盗 + 3 张陪衬小丑。
+        // 侠盗 = 其他所有小丑出售价值合计加入倍率——和现有 5 张小丑配合在 Boss 一击爆分。
         fillBase(4, 1);
         out.jokers = {
-            JokerType::Bull,           // 演示重点：多彩
+            JokerType::Swashbuckler,   // 演示重点：多彩
             JokerType::JollyJoker,
             JokerType::Banner,
             JokerType::EvenSteven,
         };
         out.jokerEditions = {
-            Edition::Polychrome,       // 公牛挂多彩——包内 hover 和拿走后都带 shader
+            Edition::Polychrome,       // 侠盗挂多彩——包内 hover 和拿走后都带 shader
             Edition::None,
             Edition::None,
             Edition::None,
         };
         return true;
     }
+    if (kind == PackKind::Arcana && size == PackSize::Mega) {
+        // 超级塔罗包：5 选 2。必含皇后(+Mult 增强) 和正义(+Glass 增强)，其余 3 张陪衬。
+        // 玩家在大盲注后的第二商店看到，给 Boss 段的"打玻璃 + 打倍率"准备道具。
+        fillBase(5, 2);
+        out.consumables = {
+            ConsumableType::Tarot_Empress,    // 选 ≤2 张：Mult 增强
+            ConsumableType::Tarot_Justice,    // 选 1 张：玻璃增强
+            ConsumableType::Tarot_Hierophant, // 陪衬：Bonus 增强
+            ConsumableType::Tarot_Magician,   // 陪衬：Lucky 增强
+            ConsumableType::Tarot_Strength,   // 陪衬：点数 +1
+        };
+        return true;
+    }
     if (kind == PackKind::Arcana) {
-        // 普通塔罗包：3 选 1。第一张固定灵魂(Spectral_Soul)——使用后强制开特里布莱。
+        // 普通塔罗包（第一商店用）：3 选 1。第一张固定灵魂(Spectral_Soul)——使用后强制开特里布莱。
         // 注意：原版灵魂是从塔罗包里以 5% 概率混入，我们这里直接塞首位。
         fillBase(3, 1);
         out.consumables = {

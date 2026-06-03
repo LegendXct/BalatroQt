@@ -1319,8 +1319,9 @@ void MainWindow::setupLeftPanel() {
         applyVis(mMultFlame, mMultFlameReal);
     });
     // 火焰可见时每 tick 都跑 paintFlame（CPU per-pixel 分形 noise）。
-    // 33ms (30FPS) 仍然是用户卡顿的主因之一；调到 60ms (~16FPS) 视觉差异有限但 CPU 减半。
-    mFlameTick->start(60);
+    // 33ms (30FPS) → 60ms → 100ms：在 6 张小丑 + Boss 红底场景下 CPU 已经吃满，
+    // 把火焰节流到 10FPS 视觉上几乎看不出差异，CPU 占用再降一档。
+    mFlameTick->start(100);
 
     QWidget *bottomRow = new QWidget(mLeftPanel);
     bottomRow->setAttribute(Qt::WA_StyledBackground, true);
@@ -7790,6 +7791,22 @@ void MainWindow::updateHandPreview()
         // 否则上一帧若是大数字，"0" 会沿用缩小后的字号，看起来偏位。
         setLabelScaledText(mLblChips, "0", uiPx(42));
         setLabelScaledText(mLblMult,  "0", uiPx(42));
+        return;
+    }
+    // 选中里有背面朝下的牌时，预览栏全部打问号——和 hover tooltip 的处理一致，
+    // 不能让玩家在 The Mark 这种 Boss 下通过选中就反推出手牌内容。
+    const auto &handRef = mGameState->hand();
+    bool hasFaceDown = false;
+    for (int idx : mSelected) {
+        if (idx >= 0 && idx < handRef.size() && !handRef[idx].faceUp) {
+            hasFaceDown = true; break;
+        }
+    }
+    if (hasFaceDown) {
+        mLblHandName ->setText(QStringLiteral("? ? ?"));
+        mLblHandLevel->setText("");
+        setLabelScaledText(mLblChips, "?", uiPx(42));
+        setLabelScaledText(mLblMult,  "?", uiPx(42));
         return;
     }
     HandResult r = mGameState->previewSelection(mSelected);
