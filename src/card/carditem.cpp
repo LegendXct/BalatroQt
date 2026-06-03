@@ -384,6 +384,41 @@ void CardItem::moveTo(const QPointF &target, int durationMs) {
     anim->setStartValue(current);
     anim->setEndValue(target);
     anim->start();
+
+    // 重排倾斜（对齐原版 Moveable:move_r：des_r ∝ 水平速度）：被其它牌挤动横向滑动时
+    // 朝运动方向倾斜，随到位回正。被拖动的牌走 setPos+mDragTilt，这里跳过避免叠加。
+    if (mDragging) return;
+    const double dx = target.x() - current.x();
+    double tiltMax = dx * 0.09;
+    if (tiltMax > 16.0) tiltMax = 16.0;
+    if (tiltMax < -16.0) tiltMax = -16.0;
+    QVariantAnimation *tilt = findChild<QVariantAnimation*>(QStringLiteral("CardMoveTilt"),
+                                                            Qt::FindDirectChildrenOnly);
+    if (qAbs(tiltMax) < 0.2) {
+        if (tilt) tilt->stop();
+        if (!qFuzzyIsNull(mMoveTilt)) { mMoveTilt = 0.0; applyTransform(); }
+        return;
+    }
+    if (!tilt) {
+        tilt = new QVariantAnimation(this);
+        tilt->setObjectName(QStringLiteral("CardMoveTilt"));
+        connect(tilt, &QVariantAnimation::valueChanged, this, [this](const QVariant &v) {
+            mMoveTilt = v.toDouble();
+            applyTransform();
+        });
+        connect(tilt, &QVariantAnimation::finished, this, [this]() {
+            mMoveTilt = 0.0; applyTransform();
+        });
+    } else {
+        tilt->stop();
+    }
+    // 倾斜衰减时长与移动时长解耦：重排时 moveTo 常用 60ms 的小步移动，若倾斜也只持续 60ms
+    // 就一闪而过看不见。固定用 ~300ms 衰减，让"被挤走→倾斜→回正"清晰可见。
+    tilt->setDuration(qMax(durationMs, 300));
+    tilt->setStartValue(tiltMax);
+    tilt->setEndValue(0.0);
+    tilt->setEasingCurve(QEasingCurve::OutCubic);
+    tilt->start();
 }
 
 void CardItem::flip() {
@@ -569,8 +604,8 @@ void CardItem::applyTransform()
         );
     t = persp * t;
 
-    // 应用 Z 轴扇形旋转 + 悬浮抖动 + 拖拽速度倾斜叠加。
-    t.rotateRadians(zRot + qDegreesToRadians(mJitterRot + mDragTilt));
+    // 应用 Z 轴扇形旋转 + 悬浮抖动 + 拖拽速度倾斜 + 重排移动倾斜叠加。
+    t.rotateRadians(zRot + qDegreesToRadians(mJitterRot + mDragTilt + mMoveTilt));
 
     // 翻牌时的水平 pinch（仅 X 缩放），围绕中心 → 模拟绕 Y 轴翻面，对齐原版 pinch.x。
     if (mFlipXScale != 1.0) {
@@ -584,7 +619,7 @@ void CardItem::applyTransform()
     // 被透视投影"拽下来"。位置和缩放各自通过 itemChange 同步。
     if (mShadow) {
         mShadow->setTransformOriginPoint(WIDTH / 2.0, HEIGHT / 2.0);
-        mShadow->setRotation(mBaseRotation + mJitterRot + mDragTilt);
+        mShadow->setRotation(mBaseRotation + mJitterRot + mDragTilt + mMoveTilt);
     }
 }
 

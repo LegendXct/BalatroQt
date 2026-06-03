@@ -13,6 +13,7 @@
 #include <QThread>
 #include <QVector>
 #include <QVector2D>
+#include <QVector4D>
 #include <QtMath>
 #include <memory>
 
@@ -494,6 +495,366 @@ static Renderer &renderer()
     return r;
 }
 
+// ── 主菜单漩涡背景：独立的离屏渲染器，跑原版 splash 片元 shader（带 u_full_alpha 铺满全屏）──
+static QString splashVertexSource()
+{
+    return QStringLiteral(R"GLSL(
+#ifdef GL_ES
+precision highp float;
+#endif
+attribute vec2 a_pos;
+varying vec2 v_screen;
+uniform vec2 u_screen_size;
+void main() {
+    gl_Position = vec4(a_pos, 0.0, 1.0);
+    v_screen = (a_pos * 0.5 + 0.5) * u_screen_size;
+}
+)GLSL");
+}
+
+static QString splashFragmentSource()
+{
+    return QStringLiteral(R"GLSL(
+#ifdef GL_ES
+precision highp float;
+#endif
+uniform float u_time;
+uniform float u_vort_speed;
+uniform vec4 u_colour_1;
+uniform vec4 u_colour_2;
+uniform vec2 u_screen_size;
+varying vec2 v_screen;
+
+#define PIXEL_SIZE_FAC 700.0
+#define BLACK (0.6*vec4(79.0/255.0,99.0/255.0,103.0/255.0,1.0/0.6))
+
+void main() {
+    float pixel_size = length(u_screen_size.xy) / PIXEL_SIZE_FAC;
+    vec2 uv = (floor(v_screen.xy * (1.0 / pixel_size)) * pixel_size - 0.5 * u_screen_size.xy) / length(u_screen_size.xy);
+    float uv_len = length(uv);
+
+    float speed = u_time * u_vort_speed;
+    float new_pixel_angle = atan(uv.y, uv.x) + (2.2 + 0.4 * min(6.0, speed)) * uv_len - 1.0 - speed * 0.05 - min(6.0, speed) * speed * 0.02;
+    vec2 mid = (u_screen_size.xy / length(u_screen_size.xy)) / 2.0;
+    vec2 sv = vec2((uv_len * cos(new_pixel_angle) + mid.x), (uv_len * sin(new_pixel_angle) + mid.y)) - mid;
+
+    sv *= 30.0;
+    speed = u_time * 6.0 * u_vort_speed + 1033.0;
+    vec2 uv2 = vec2(sv.x + sv.y);
+
+    for (int i = 0; i < 5; i++) {
+        uv2 += sin(max(sv.x, sv.y)) + sv;
+        sv  += 0.5 * vec2(cos(5.1123314 + 0.353 * uv2.y + speed * 0.131121), sin(uv2.x - 0.113 * speed));
+        sv  -= 1.0 * cos(sv.x + sv.y) - 1.0 * sin(sv.x * 0.711 - sv.y);
+    }
+
+    float smoke_res = min(2.0, max(-2.0, 1.5 + length(sv) * 0.12 - 0.17 * min(10.0, u_time * 1.2 - 4.0)));
+    if (smoke_res < 0.2) {
+        smoke_res = (smoke_res - 0.2) * 0.6 + 0.2;
+    }
+
+    float c1p = max(0.0, 1.0 - 2.0 * abs(1.0 - smoke_res));
+    float c2p = max(0.0, 1.0 - 2.0 * smoke_res);
+    float cb = 1.0 - min(1.0, c1p + c2p);
+
+    vec4 ret_col = u_colour_1 * c1p + u_colour_2 * c2p + vec4(cb * BLACK.rgb, cb * u_colour_1.a);
+    // 必须 max(0, ...) 钳制：否则黑区 mod_flash 变成负数，把本应是深石板灰(BLACK)的
+    // 过渡区压成纯黑，整体偏暗。原版同样是 max(0, ...)。白色高光只加在红/蓝最亮处。
+    float mod_flash = max(0.0, max(c1p, c2p) * 5.0 - 4.4);
+    vec4 col = ret_col * (1.0 - mod_flash) + mod_flash * vec4(1.0, 1.0, 1.0, 1.0);
+    // 提高饱和度(×1.4)与亮度(×1.16)，贴近原版主菜单更鲜亮的红蓝（原版叠了 bloom/CRT 显得更亮）。
+    float lum = dot(col.rgb, vec3(0.299, 0.587, 0.114));
+    col.rgb = clamp(mix(vec3(lum), col.rgb, 1.4) * 1.16, 0.0, 1.0);
+    col.a = 1.0;   // 主菜单背景：整屏不透明
+    gl_FragColor = col;
+}
+)GLSL");
+}
+
+class SplashRenderer
+{
+public:
+    bool ensure();
+    QPixmap render(const QSize &size, float time, const QColor &c1, const QColor &c2, float vortSpeed);
+
+private:
+    bool m_failed = false;
+    std::unique_ptr<QOffscreenSurface> m_surface;
+    std::unique_ptr<QOpenGLContext> m_context;
+    std::unique_ptr<QOpenGLShaderProgram> m_program;
+};
+
+bool SplashRenderer::ensure()
+{
+    if (m_failed) return false;
+    if (m_context && m_program) return true;
+    if (!QGuiApplication::instance()) { m_failed = true; return false; }
+    if (QThread::currentThread() != QGuiApplication::instance()->thread()) { m_failed = true; return false; }
+
+    QSurfaceFormat fmt;
+    fmt.setRenderableType(QSurfaceFormat::OpenGL);
+    fmt.setVersion(2, 0);
+    fmt.setProfile(QSurfaceFormat::NoProfile);
+    fmt.setDepthBufferSize(0);
+    fmt.setStencilBufferSize(0);
+    fmt.setAlphaBufferSize(8);
+
+    m_surface.reset(new QOffscreenSurface());
+    m_surface->setFormat(fmt);
+    m_surface->create();
+    if (!m_surface->isValid()) { m_failed = true; return false; }
+
+    m_context.reset(new QOpenGLContext());
+    m_context->setFormat(fmt);
+    if (!m_context->create()) { m_failed = true; return false; }
+    if (!m_context->makeCurrent(m_surface.get())) { m_failed = true; return false; }
+
+    m_program.reset(new QOpenGLShaderProgram());
+    if (!m_program->addShaderFromSourceCode(QOpenGLShader::Vertex, splashVertexSource()) ||
+        !m_program->addShaderFromSourceCode(QOpenGLShader::Fragment, splashFragmentSource())) {
+        qWarning("SplashRenderer: shader compile failed: %s", qPrintable(m_program->log()));
+        m_failed = true;
+        return false;
+    }
+    m_program->bindAttributeLocation("a_pos", 0);
+    if (!m_program->link()) {
+        qWarning("SplashRenderer: shader link failed: %s", qPrintable(m_program->log()));
+        m_failed = true;
+        return false;
+    }
+    m_context->doneCurrent();
+    return true;
+}
+
+QPixmap SplashRenderer::render(const QSize &size, float time, const QColor &c1, const QColor &c2, float vortSpeed)
+{
+    if (size.isEmpty()) return QPixmap();
+    if (!ensure()) return QPixmap();
+    if (!m_context->makeCurrent(m_surface.get())) return QPixmap();
+    QOpenGLFunctions *gl = m_context->functions();
+    if (!gl) { m_context->doneCurrent(); return QPixmap(); }
+
+    QOpenGLFramebufferObject fbo(size);
+    if (!fbo.isValid()) { m_context->doneCurrent(); return QPixmap(); }
+
+    fbo.bind();
+    gl->glViewport(0, 0, size.width(), size.height());
+    gl->glDisable(GL_DEPTH_TEST);
+    gl->glDisable(GL_CULL_FACE);
+    gl->glDisable(GL_BLEND);
+    gl->glClearColor(0.f, 0.f, 0.f, 1.f);
+    gl->glClear(GL_COLOR_BUFFER_BIT);
+
+    m_program->bind();
+    m_program->setUniformValue("u_time", time);
+    m_program->setUniformValue("u_vort_speed", vortSpeed);
+    m_program->setUniformValue("u_colour_1", QVector4D(c1.redF(), c1.greenF(), c1.blueF(), 1.0f));
+    m_program->setUniformValue("u_colour_2", QVector4D(c2.redF(), c2.greenF(), c2.blueF(), 1.0f));
+    m_program->setUniformValue("u_screen_size", QVector2D(float(size.width()), float(size.height())));
+
+    const GLfloat verts[] = {
+        -1.f, -1.f,
+         1.f, -1.f,
+        -1.f,  1.f,
+         1.f,  1.f
+    };
+    m_program->enableAttributeArray(0);
+    m_program->setAttributeArray(0, GL_FLOAT, verts, 2);
+    gl->glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    m_program->disableAttributeArray(0);
+    m_program->release();
+    fbo.release();
+
+    QImage out = fbo.toImage().convertToFormat(QImage::Format_RGB32);
+    QPixmap result = QPixmap::fromImage(out);
+    m_context->doneCurrent();
+    return result;
+}
+
+static SplashRenderer &splashRenderer()
+{
+    static SplashRenderer r;
+    return r;
+}
+
+// ── 计分火焰：把原版 flame.fs 渲到离屏 FBO，返回带透明边的 QPixmap ──
+// 用 QPixmap 贴到普通控件里（数字浮在火焰之上），避免半透明 QOpenGLWidget 盖不住
+// 下层控件、与分数框之间出现缝隙/边框的问题。
+static QString flameVertexSource()
+{
+    return QStringLiteral(R"GLSL(
+#ifdef GL_ES
+precision highp float;
+#endif
+attribute vec2 a_pos;
+varying vec2 v_tex;
+void main() {
+    gl_Position = vec4(a_pos, 0.0, 1.0);
+    // 翻转 y：FBO toImage() 会上下翻一次，若不补偿，火焰会头朝下（底部高光跑到顶上）。
+    v_tex = vec2(a_pos.x * 0.5 + 0.5, 0.5 - a_pos.y * 0.5);
+}
+)GLSL");
+}
+
+static QString flameFragmentSource()
+{
+    return QStringLiteral(R"GLSL(
+#ifdef GL_ES
+precision highp float;
+#endif
+uniform float u_time;
+uniform float u_amount;
+uniform vec4 u_colour_1;
+uniform vec4 u_colour_2;
+uniform float u_id;
+varying vec2 v_tex;
+#define PIXEL_SIZE_FAC 60.0
+void main() {
+    float intensity = min(10.0, u_amount);
+    if (intensity < 0.1) { discard; }
+
+    vec2 uv = v_tex - vec2(0.5);
+    vec2 floored_uv = floor(uv * PIXEL_SIZE_FAC) / PIXEL_SIZE_FAC;
+    vec2 uv_scaled_centered = floored_uv;
+    uv_scaled_centered += uv_scaled_centered * 0.01 * (sin(-1.123 * floored_uv.x + 0.2 * u_time) * cos(5.3332 * floored_uv.y + u_time * 0.931));
+    vec2 flame_up_vec = vec2(0.0, mod(4.0 * u_time, 10000.0) - 5000.0 + mod(1.781 * u_id, 1000.0));
+
+    float scale_fac = (7.5 + 3.0 / (2.0 + 2.0 * intensity));
+    vec2 sv = uv_scaled_centered * scale_fac + flame_up_vec;
+    float speed = mod(20.781 * u_id, 100.0) + sin(u_time + u_id) * cos(u_time * 0.151 + u_id);
+    vec2 sv2 = vec2(0.0, 0.0);
+
+    for (int i = 0; i < 5; i++) {
+        sv2 += sv + 0.05 * sv2.yx * (mod(float(i), 2.0) > 1.0 ? -1.0 : 1.0) + 0.3 * (cos(length(sv) * 0.411) + 0.3344 * sin(length(sv)) - 0.23 * cos(length(sv)));
+        sv += 0.5 * vec2(
+            cos(cos(sv2.y) + speed * 0.0812) * sin(3.22 + sv2.x - speed * 0.1531),
+            sin(-sv2.x * 1.21222 + 0.113785 * speed) * cos(sv2.y * 0.91213 - 0.13582 * speed));
+    }
+
+    float smoke_res = max(0.0, ((length((sv - flame_up_vec) / scale_fac * 5.0) + 0.1 * (length(uv_scaled_centered) - 0.5)) * (2.0 / (2.0 + intensity * 0.2))));
+    smoke_res = intensity < 0.1 ? 1.0 : smoke_res + max(0.0, 2.0 - 0.3 * intensity) * max(0.0, 2.0 * (uv_scaled_centered.y - 0.5) * (uv_scaled_centered.y - 0.5));
+
+    if (abs(uv.x) > 0.4) smoke_res += 10.0 * (abs(uv.x) - 0.4);
+    if (length((uv - vec2(0.0, 0.1)) * vec2(0.19, 1.0)) < min(0.1, intensity * 0.5) && smoke_res > 1.0) {
+        smoke_res += min(8.5, intensity * 10.0) * (length((uv - vec2(0.0, 0.1)) * vec2(0.19, 1.0)) - 0.1);
+    }
+
+    vec4 ret_col = u_colour_1;
+    if (smoke_res > 1.0) {
+        discard;
+    } else {
+        if (uv.y < 0.12) {
+            ret_col = ret_col * (1.0 - 0.5 * (0.12 - uv.y)) + 2.5 * (0.12 - uv.y) * u_colour_2;
+            ret_col += ret_col * (-2.0 + 0.5 * intensity * smoke_res) * (0.12 - uv.y);
+        }
+        ret_col.a = clamp(ret_col.a, 0.0, 1.0);
+    }
+    gl_FragColor = ret_col;
+}
+)GLSL");
+}
+
+class FlameRenderer
+{
+public:
+    bool ensure();
+    QPixmap render(const QSize &size, float time, float amount, const QColor &c1, const QColor &c2, float id);
+
+private:
+    bool m_failed = false;
+    std::unique_ptr<QOffscreenSurface> m_surface;
+    std::unique_ptr<QOpenGLContext> m_context;
+    std::unique_ptr<QOpenGLShaderProgram> m_program;
+};
+
+bool FlameRenderer::ensure()
+{
+    if (m_failed) return false;
+    if (m_context && m_program) return true;
+    if (!QGuiApplication::instance()) { m_failed = true; return false; }
+    if (QThread::currentThread() != QGuiApplication::instance()->thread()) { m_failed = true; return false; }
+
+    QSurfaceFormat fmt;
+    fmt.setRenderableType(QSurfaceFormat::OpenGL);
+    fmt.setVersion(2, 0);
+    fmt.setProfile(QSurfaceFormat::NoProfile);
+    fmt.setDepthBufferSize(0);
+    fmt.setStencilBufferSize(0);
+    fmt.setAlphaBufferSize(8);
+
+    m_surface.reset(new QOffscreenSurface());
+    m_surface->setFormat(fmt);
+    m_surface->create();
+    if (!m_surface->isValid()) { m_failed = true; return false; }
+
+    m_context.reset(new QOpenGLContext());
+    m_context->setFormat(fmt);
+    if (!m_context->create()) { m_failed = true; return false; }
+    if (!m_context->makeCurrent(m_surface.get())) { m_failed = true; return false; }
+
+    m_program.reset(new QOpenGLShaderProgram());
+    if (!m_program->addShaderFromSourceCode(QOpenGLShader::Vertex, flameVertexSource()) ||
+        !m_program->addShaderFromSourceCode(QOpenGLShader::Fragment, flameFragmentSource())) {
+        qWarning("FlameRenderer: shader compile failed: %s", qPrintable(m_program->log()));
+        m_failed = true;
+        return false;
+    }
+    m_program->bindAttributeLocation("a_pos", 0);
+    if (!m_program->link()) {
+        qWarning("FlameRenderer: shader link failed: %s", qPrintable(m_program->log()));
+        m_failed = true;
+        return false;
+    }
+    m_context->doneCurrent();
+    return true;
+}
+
+QPixmap FlameRenderer::render(const QSize &size, float time, float amount, const QColor &c1, const QColor &c2, float id)
+{
+    if (size.isEmpty() || amount < 0.1f) return QPixmap();
+    if (!ensure()) return QPixmap();
+    if (!m_context->makeCurrent(m_surface.get())) return QPixmap();
+    QOpenGLFunctions *gl = m_context->functions();
+    if (!gl) { m_context->doneCurrent(); return QPixmap(); }
+
+    QOpenGLFramebufferObject fbo(size);
+    if (!fbo.isValid()) { m_context->doneCurrent(); return QPixmap(); }
+
+    fbo.bind();
+    gl->glViewport(0, 0, size.width(), size.height());
+    gl->glDisable(GL_DEPTH_TEST);
+    gl->glDisable(GL_CULL_FACE);
+    gl->glDisable(GL_BLEND);
+    gl->glClearColor(0.f, 0.f, 0.f, 0.f);
+    gl->glClear(GL_COLOR_BUFFER_BIT);
+
+    m_program->bind();
+    m_program->setUniformValue("u_time", time);
+    m_program->setUniformValue("u_amount", amount);
+    m_program->setUniformValue("u_colour_1", QVector4D(c1.redF(), c1.greenF(), c1.blueF(), c1.alphaF()));
+    m_program->setUniformValue("u_colour_2", QVector4D(c2.redF(), c2.greenF(), c2.blueF(), c2.alphaF()));
+    m_program->setUniformValue("u_id", id);
+
+    const GLfloat verts[] = { -1.f, -1.f, 1.f, -1.f, -1.f, 1.f, 1.f, 1.f };
+    m_program->enableAttributeArray(0);
+    m_program->setAttributeArray(0, GL_FLOAT, verts, 2);
+    gl->glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    m_program->disableAttributeArray(0);
+    m_program->release();
+    fbo.release();
+
+    QImage out = fbo.toImage().convertToFormat(QImage::Format_RGBA8888_Premultiplied);
+    QPixmap result = QPixmap::fromImage(out);
+    m_context->doneCurrent();
+    return result;
+}
+
+static FlameRenderer &flameRenderer()
+{
+    static FlameRenderer r;
+    return r;
+}
+
 } // namespace
 
 QPixmap renderShaderPixmapGpu(const QPixmap &base, const QString &shaderName, double intensity, bool overlayOnBase, bool *ok)
@@ -520,6 +881,27 @@ QPixmap renderEditionPixmapGpu(const QPixmap &base, Edition edition, double inte
     default: return base;
     }
     return renderShaderPixmapGpu(base, shader, intensity, overlay, ok);
+}
+
+QPixmap renderSplashBackgroundGpu(const QSize &size, float timeSeconds,
+                                  const QColor &colour1, const QColor &colour2,
+                                  float vortSpeed, bool *ok)
+{
+    if (ok) *ok = false;
+    QPixmap result = splashRenderer().render(size, timeSeconds, colour1, colour2, vortSpeed);
+    const bool good = !result.isNull();
+    if (ok) *ok = good;
+    return result;
+}
+
+QPixmap renderFlamePixmapGpu(const QSize &size, float timeSeconds, float amount,
+                             const QColor &colour1, const QColor &colour2, float id, bool *ok)
+{
+    if (ok) *ok = false;
+    QPixmap result = flameRenderer().render(size, timeSeconds, amount, colour1, colour2, id);
+    const bool good = !result.isNull();
+    if (ok) *ok = good;
+    return result;
 }
 
 void clearGpuEffectCache()

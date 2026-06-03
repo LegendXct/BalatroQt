@@ -71,6 +71,12 @@ private:
     double mHoverTiltY = 0.0;
     // 拖拽水平速度倾斜，与 CardItem 用同一套折算公式，让小丑/塔罗/星球 也具备甩动手感。
     double mDragTilt = 0.0;
+    // 重排移动倾斜：被其它牌挤动而 moveTo 滑向新位置时，朝运动方向倾斜（对齐原版 move_r）。
+    double mMoveTilt = 0.0;
+    // 上次喂给阴影的剪影 key（type|edition|debuff），变了才重算阴影剪影。
+    QString mShadowSilKey;
+    // 异形小丑按实际内容垂直居中的下移量（场景像素），随 key 变化时重算。
+    qreal mContentDyScreen = 0.0;
     QPointF mLastDragScenePos;
     qint64  mLastDragTimeMs = 0;
     qreal mShadowLift = 0.0;

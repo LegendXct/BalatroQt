@@ -16,6 +16,7 @@
 #include <QSet>
 #include <QList>
 #include <QTimer>
+#include <QElapsedTimer>
 #include <QAbstractAnimation>
 #include <QPointer>
 #include <QPixmap>
@@ -45,9 +46,10 @@ QT_END_NAMESPACE
 
 class QProgressBar;
 class QGraphicsDropShadowEffect;
+class QGraphicsPixmapItem;
 class QPropertyAnimation;
 class QGraphicsObject;
-class FlameShaderWidget;
+class FlameTile;
 class BalatroInfoCluster;
 
 class MainWindow : public QMainWindow
@@ -391,8 +393,8 @@ private:
     // 原版每次累加分数都重算火焰强度:earned >= required 才点燃,log5 公式控制大小。
     // 不再用单次触发布尔,真正按"当前 displayed chips × mult"实时驱动。
     // 火焰从原本的 CPU paintFlame() 改成 GPU FlameShaderWidget（直接跑原版 flame.fs）。
-    FlameShaderWidget *mChipFlame = nullptr;       // 蓝色筹码方块上的火焰
-    FlameShaderWidget *mMultFlame = nullptr;       // 红色倍率方块上的火焰
+    FlameTile *mChipFlame = nullptr;       // 蓝色筹码方块（底框+火焰，数字浮于其上）
+    FlameTile *mMultFlame = nullptr;       // 红色倍率方块（底框+火焰）
     QWidget *mChipScorePlate = nullptr;
     QWidget *mMultScorePlate = nullptr;
     double   mChipFlameTarget = 0.0;
@@ -413,6 +415,7 @@ private:
     QWidget *mChipsRowWidget = nullptr;      // 引用 chipsRow 用于定位火焰
     void triggerSplashShader();              // 原版 splash.fs 全屏 GPU 溅射(占位)
     void updateFlameIntensity();
+    void layoutFlameTiles();      // 摆放 chips/mult 底框+火焰瓦片到数字标签后方
     void resetScoreFlame();
 
     // 拖拽时记录上一次目标位置，避免每次 dragMoved 都触发 moveTo()
@@ -461,6 +464,19 @@ private:
     void showMainMenuOverlay();
     void hideMainMenuOverlay();
     QPointer<QWidget> mMainMenuOverlay;
+    // 主菜单红蓝漩涡背景：用离屏 FBO 渲成 QPixmap 贴到普通 QLabel 上，再用定时器逐帧刷新。
+    // 不用嵌套 QOpenGLWidget——后者在部分驱动上无法盖住底层 GL 场景，漩涡根本不显示。
+    QPointer<QLabel> mMenuBgLabel;
+    QTimer          *mMenuBgTimer = nullptr;
+    QElapsedTimer    mMenuBgClock;
+    // 主菜单 logo + 中间可交互的黑桃 A（复刻原版 title card）。logo(pixmap)与 A 牌(CardItem)
+    // 同处一个 mini QGraphicsScene，A 牌可拖动/悬停抖动/缩放，松手弹回 mMenuTitleCardHome。
+    QPointer<QGraphicsView> mMenuLogoView;
+    QGraphicsPixmapItem    *mMenuLogoItem = nullptr;
+    QPointer<CardItem>      mMenuTitleCard;
+    QPointer<QWidget>       mMenuButtonPanel;
+    QPointF                 mMenuTitleCardHome;
+    void layoutMainMenuContent();   // 按 overlay 尺寸定全屏视图缩放、logo/卡牌位置、按钮容器位置
     bool mHasOngoingRun = false;   // 启动直进主菜单时 "继续当前局" 灰掉,开过新局后亮起
     void showStatsOverlay();
     void showCollectionOverlay();

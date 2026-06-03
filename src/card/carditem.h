@@ -105,6 +105,9 @@ private:
     //   des_r = T.r + 0.015 * vel.x / dt
     // 拖动方向越快、卡片倾斜越大；释放时用 QVariantAnimation 平滑回 0。
     double mDragTilt = 0.0;
+    // 重排移动倾斜：被其它牌挤动而 moveTo 滑向新位置时朝运动方向倾斜（对齐原版 move_r），
+    // 到位回正。让没被拖动、只是被挤走的手牌也有倾斜动感，而不止被拖那张。
+    double mMoveTilt = 0.0;
     QPointF mLastDragScenePos;
     qint64  mLastDragTimeMs = 0;
     qreal  mFlipXScale = 1.0;         // 翻牌时的 X 方向缩放(1→0→1)，对齐原版 pinch.x

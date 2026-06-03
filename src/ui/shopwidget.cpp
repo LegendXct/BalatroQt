@@ -297,9 +297,6 @@ protected:
                                         : (mLifted ? 0.55
                                                    : ((mHovered && !mDisableHoverLift) ? 0.30 : 0.0));
             const qreal shadowHeight = 0.1 + 0.45 * lift;
-            const qreal kPx = 32.0;
-            const qreal offX = -nx * 1.5 * shadowHeight * kPx;
-            const qreal offY =  1.5 * shadowHeight * kPx;
 
             // 卡图实际落点：button 中心 + hover 时 -4 px。剪影按 pixSize 绘制——
             // 与下面 drawPixmap 用同一套几何，shadow 就完全跟随可见图像形状。
@@ -312,30 +309,25 @@ protected:
             const qreal cy = height() / 2.0 + ((mHovered && !mDisableHoverLift) ? -8.0 : 0.0);
             const qreal w = pixSize.width();
             const qreal h = pixSize.height();
+            // 偏移按原版 card 单位换算到可见卡牌像素（1 单位 = h/CARD_H(2.75) ≈ w/CARD_W(2.05)），
+            // 不再用固定 32 px——否则阴影离本体太近几乎看不见。原版 shadow_parrallax.y=-1.5。
+            const qreal offX = -nx * 1.5 * shadowHeight * (w / 2.0488);
+            const qreal offY =  1.5 * shadowHeight * (h / 2.7512);
             const QRectF shadowRect(cx - w/2.0 + offX, cy - h/2.0 + offY, w, h);
 
             p.save();
             p.setRenderHint(QPainter::Antialiasing, true);
+            p.setRenderHint(QPainter::SmoothPixmapTransform, true);
             p.setPen(Qt::NoPen);
-            if (mUseSilhouetteShadow) {
-                // booster (异形) → 用 alpha 剪影 pixmap 描出包形。
-                const qreal opacity = 0.35 + 0.25 * lift;
-                p.setOpacity(opacity);
-                p.setRenderHint(QPainter::SmoothPixmapTransform, true);
-                p.drawPixmap(shadowRect, mShadowPixmap,
-                             QRectF(0, 0, mShadowPixmap.width(), mShadowPixmap.height()));
-            } else {
-                // 普通商品 (joker/tarot/voucher/playing card) → 双层圆角矩形，
-                // 与 cardshadow.cpp 的 CardShadowItem 同一套配色与抹平比例。
-                const qreal expand = 0.5 + 2.0 * lift;
-                const QRectF rectOuter(shadowRect.adjusted(-expand, -expand, expand, expand));
-                const int alphaOuter = int(20 + 25 * lift);
-                p.setBrush(QColor(0, 0, 0, alphaOuter));
-                p.drawRoundedRect(rectOuter, 10, 10);
-                const int alphaInner = int(45 + 40 * lift);
-                p.setBrush(QColor(0, 0, 0, alphaInner));
-                p.drawRoundedRect(shadowRect, 9, 9);
-            }
+            // 所有商品都按真实轮廓投影：用 alpha 剪影 pixmap 画两层（外圈放大低透明=软边、
+            // 内圈实尺寸），与 cardshadow.cpp 的 CardShadowItem 同一套配色/比例。优惠券、
+            // 烧焦、异形小丑、卡包等非矩形外形都能贴合，不再溢出成圆角矩形。
+            const QRectF srcR(0, 0, mShadowPixmap.width(), mShadowPixmap.height());
+            const qreal expand = 0.5 + 2.0 * lift;
+            p.setOpacity((20 + 25 * lift) / 255.0);
+            p.drawPixmap(shadowRect.adjusted(-expand, -expand, expand, expand), mShadowPixmap, srcR);
+            p.setOpacity((45 + 40 * lift) / 255.0);
+            p.drawPixmap(shadowRect, mShadowPixmap, srcR);
             p.restore();
         }
 

@@ -6,6 +6,7 @@
 #include <QFontDatabase>
 #include <QGraphicsProxyWidget>
 #include <QGraphicsPixmapItem>
+#include <QResizeEvent>
 #include <algorithm>
 #include <QTimer>
 #include <QGuiApplication>
@@ -19,7 +20,7 @@
 #include <QCursor>
 #include <QStringList>
 #include "shopsignwidget.h"
-#include "scoreeffectsoverlays.h"   // FlameShaderWidget（GPU 火焰）
+#include "scoreeffectsoverlays.h"   // FlameTile（底框+离屏火焰）
 #include <QParallelAnimationGroup>
 #include <QGraphicsOpacityEffect>
 #include <QPointer>
@@ -48,6 +49,7 @@
 #include <cmath>
 #include <limits>
 #include "../utils/shadereffects.h"
+#include "../utils/gpueffectsrenderer.h"
 #include "../audio/audiomanager.h"
 #include "../game/demoscript.h"
 #include "balatroinfopanel.h"
@@ -1272,31 +1274,27 @@ void MainWindow::setupLeftPanel() {
     mLblChips = new QLabel("0", chipsRow);
     // 数字靠右贴近中间的 ×，让筹码值视觉上"挤"向倍率方向；原版同款。
     mLblChips->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    // 之前 42px：长数字撑出框；改到 34px 配合 padding 2-6，6 位 "999,999" 1× 字号能放下。
     QFont cf = mPixelFont; cf.setPixelSize(uiPx(34));
     mLblChips->setFont(cf);
-    // 不强加 minWidth——layout 用 stretch 1 自动均分横向空间，否则会顶出左面板。
-    mLblChips->setStyleSheet(
-        "background: #009dff; color: white;"
-        "border-radius: 8px; padding: 2px 6px;"
-        );
+    // 蓝/红底框现在由背后的 FlameTile 画（火焰之下），数字标签自身透明、只显示白字。
+    mLblChips->setStyleSheet("background:transparent; color:white; padding:2px 6px;");
+    // 固定左右对称：横向用 Ignored 让 layout 按 stretch 均分，与数字位数无关；
+    // 位数变多时由 setLabelScaledText 缩字号塞进固定宽度，不再撑宽方块导致左右不对称。
+    mLblChips->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
 
     QLabel *lblX = new QLabel("×", chipsRow);
     lblX->setAlignment(Qt::AlignCenter);
     QFont xf = mCNFont; xf.setPixelSize(uiPx(28));
     lblX->setFont(xf);
-    lblX->setStyleSheet("color: white;");
+    lblX->setStyleSheet("color: white; background:transparent;");
     lblX->setFixedWidth(dp(32));
 
     mLblMult = new QLabel("0", chipsRow);
     // 倍率数字靠左贴近中间的 ×。
     mLblMult->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     mLblMult->setFont(cf);
-    // 同 chips：不加 minWidth；padding 收紧。
-    mLblMult->setStyleSheet(
-        "background:#fe5f55; color:white;"
-        "border-radius:8px; padding:2px 6px;"
-        );
+    mLblMult->setStyleSheet("background:transparent; color:white; padding:2px 6px;");
+    mLblMult->setSizePolicy(QSizePolicy::Ignored, QSizePolicy::Preferred);
 
     chipsLayout->addWidget(mLblChips, 1);
     chipsLayout->addWidget(lblX);
@@ -1305,24 +1303,30 @@ void MainWindow::setupLeftPanel() {
 
     mChipsRowWidget = chipsRow;
 
-    // 两个独立火焰 overlay
-    // 改用 GPU 着色器（FlameShaderWidget，直接跑原版 flame.fs）：CPU 占用从
-    // per-frame per-pixel fractal noise（CPU 上 ~30000 浮点运算/帧）降到 0。
-    auto makeFlame = [this](float idSeed, const QColor &c1, const QColor &c2) {
-        auto *w = new FlameShaderWidget(mLeftPanel);
-        w->setProperty("flameId", double(idSeed));
+    // 蓝/红方块 + 火焰：FlameTile（普通控件，paintEvent 画圆角底框 + 离屏渲染的 flame.fs
+    // 火焰位图）。挂在 mLeftPanel 上、压到 chipsRow 之下，数字标签透明浮于其上 → 数字在火焰之上，
+    // 且不会像之前的半透明 QOpenGLWidget 那样与方块间留缝、出现边框。
+    auto makeFlame = [this](float idSeed, const QColor &base, const QColor &c1, const QColor &c2) {
+        auto *w = new FlameTile(mLeftPanel);
+        w->setBaseColour(base);
         w->setColours(c1, c2);
-        // FlameShaderWidget 默认 mId = 13.37；不同火焰用不同 id 让 phase 错开。
-        w->setProperty("idSeed", double(idSeed));
+        w->setFlameId(idSeed);
+        w->show();
         return w;
     };
 
+    // 配色严格取自原版 flame_handler：colour_1 = UI_CHIPS/UI_MULT，
+    // colour_2 = UI_CHIPLICK/UI_MULTLICK = clamp(((colour*0.5+YELLOW*0.5)+0.1)^2,0.1,1)。
+    //   chips: 蓝 #009dff + 绿色高光 (92,210,92)
+    //   mult : 红 #FE5F55 + 橙色高光 (255,158,26)
     mChipFlame = makeFlame(1.0f,
-                           QColor(0, 157, 255),
-                           QColor(180, 200, 80));
+                           QColor(0, 157, 255),               // 底框：蓝 (UI_CHIPS)
+                           QColor(0, 157, 255),               // 火焰主色 colour_1
+                           QColor(92, 210, 92));              // 高光 colour_2 (UI_CHIPLICK)
     mMultFlame = makeFlame(2.0f,
-                           QColor(254, 95, 85),
-                           QColor(255, 180, 80));
+                           QColor(254, 95, 85),               // 底框：红 (UI_MULT)
+                           QColor(254, 95, 85),               // 火焰主色 colour_1
+                           QColor(255, 158, 26));             // 高光 colour_2 (UI_MULTLICK)
 
     // 30Hz tick: 弹簧 ease real → target
     mFlameTick = new QTimer(this);
@@ -1365,14 +1369,11 @@ void MainWindow::setupLeftPanel() {
                                                   mAudioChipFlameChange,
                                                   mAudioMultFlameChange);
 
-        // FlameShaderWidget 内部已自带平滑 + 自动 hide：直接转交 target 数值。
-        auto applyVis = [](FlameShaderWidget *w, double real) {
-            if (!w) return;
-            if (real > 0.05) w->setAmount(float(real));
-            else if (w->isVisible()) w->stop();
-        };
-        applyVis(mChipFlame, mChipFlameReal);
-        applyVis(mMultFlame, mMultFlameReal);
+        // FlameTile 直接吃 real：>=0.1 渲染火焰位图，掉到 0 自动熄火（底框始终保留）。
+        if (mChipFlame) mChipFlame->setAmount(float(mChipFlameReal));
+        if (mMultFlame) mMultFlame->setAmount(float(mMultFlameReal));
+        // 每拍顺手校准底框/火焰位置，保证窗口缩放或 layout 变化后方块始终贴合数字。
+        layoutFlameTiles();
     });
     // 火焰可见时每 tick 都跑 paintFlame（CPU per-pixel 分形 noise）。
     // 33ms (30FPS) → 60ms → 100ms：在 6 张小丑 + Boss 红底场景下 CPU 已经吃满，
@@ -2641,105 +2642,207 @@ void MainWindow::showMainMenuOverlay()
 
     auto *overlay = new QWidget(host);
     overlay->setAttribute(Qt::WA_StyledBackground, true);
-    // 不透明背景:整体覆盖游戏 UI,玩家感觉是切到另一页面而不是浮层。
+    // 兜底底色：万一 GL 初始化失败、漩涡 shader 不出图，仍有一层不透明深色把游戏 UI 盖住，
+    // 玩家感觉是切到另一页面而不是浮层。正常情况下被上面的 splash 漩涡完全遮住。
     overlay->setStyleSheet("background:qlineargradient(x1:0,y1:0,x2:0,y2:1,"
-                           " stop:0 #30384d, stop:1 #202839);");
+                           " stop:0 #2a1518, stop:1 #161018);");
     mMainMenuOverlay = overlay;
 
-    auto *root = new QVBoxLayout(overlay);
-    root->setContentsMargins(0, 0, 0, 0);
-    root->setAlignment(Qt::AlignCenter);
-    root->addStretch(1);
+    // —— 底层：红蓝漩涡 splash 背景（参考原版 main_menu：colour_1=RED, colour_2=BLUE, vort_speed=0.4）。
+    // 用 QLabel 显示离屏 FBO 渲出的漩涡 QPixmap，定时器逐帧推进时间做动画——QLabel 是普通控件，
+    // 在 overlay 内部合成可靠，不会像嵌套 QOpenGLWidget 那样在部分驱动上整块不显示。
+    auto *bgLabel = new QLabel(overlay);
+    bgLabel->setScaledContents(true);   // 低分辨率漩涡放大铺满（shader 本身就是像素化的）
+    bgLabel->setGeometry(overlay->rect());
+    bgLabel->lower();
+    mMenuBgLabel = bgLabel;
+    mMenuBgClock.restart();
+    if (!mMenuBgTimer) {
+        mMenuBgTimer = new QTimer(this);
+        mMenuBgTimer->setTimerType(Qt::PreciseTimer);
+        connect(mMenuBgTimer, &QTimer::timeout, this, [this]() {
+            if (!mMenuBgLabel || !mMainMenuOverlay || !mMainMenuOverlay->isVisible()) return;
+            const QSize full = mMenuBgLabel->size();
+            if (full.isEmpty()) return;
+            // 漩涡放大后仍然顺滑，按比例缩到最宽 ~640 渲染，省 GPU/读回开销。
+            const int rw = qMin(full.width(), 640);
+            const QSize rsz(rw, qMax(1, full.height() * rw / qMax(1, full.width())));
+            // 时间基准要够大：shader 里有个开场"烟雾散开"项 -0.17*min(10,t*1.2-4)，
+            // t≥11.67 时吃满到 -1.7，红蓝才铺满；否则中间过渡区发黑、蓝色出不来。
+            // 原版主菜单的 REAL_SHADER 就是个大值（≈12+），这里 +14 起步并持续推进。
+            const float t = float(mMenuBgClock.elapsed()) / 1000.0f + 14.0f;
+            QPixmap px = BalatroShaders::renderSplashBackgroundGpu(
+                rsz, t, QColor(0xFE, 0x5F, 0x55), QColor(0x00, 0x9D, 0xFF), 0.4f);
+            if (!px.isNull()) mMenuBgLabel->setPixmap(px);
+        });
+    }
+    mMenuBgTimer->start(33);   // ~30fps
 
-    // 大标题 BALATRO，复用 balatro.png 中的 logo。
-    QPixmap logoPix(":/textures/images/balatro.png");
-    if (!logoPix.isNull()) {
-        auto *logoLbl = new QLabel(overlay);
-        // 原图较大，按场景宽度缩到 ~520 dp。
-        QPixmap scaled = logoPix.scaled(dp(520), dp(180),
-                                        Qt::KeepAspectRatio, Qt::SmoothTransformation);
-        logoLbl->setPixmap(scaled);
-        logoLbl->setAlignment(Qt::AlignCenter);
-        logoLbl->setStyleSheet("background:transparent;");
-        auto *logoRow = new QHBoxLayout;
-        logoRow->setAlignment(Qt::AlignCenter);
-        logoRow->addWidget(logoLbl);
-        root->addLayout(logoRow);
-        root->addSpacing(dp(18));
-    } else {
-        QFont tf = mCNFont; tf.setPixelSize(uiPx(54)); tf.setBold(true);
-        auto *title = new QLabel("BALATRO", overlay);
-        title->setFont(tf); title->setAlignment(Qt::AlignCenter);
-        title->setStyleSheet("color:#fda200; background:transparent;");
-        root->addWidget(title);
+    // ───────── Logo + 中间可交互的黑桃 A（复刻原版 title card）─────────
+    // balatro.png 是 "BAL▮TRO"，中间留了权杖缺口给 A 牌。logo(pixmap)与黑桃 A(CardItem)
+    // 同处一个 QGraphicsScene；视图铺满整个 overlay、场景坐标覆盖全屏，所以 A 牌可拖到
+    // 屏幕任意位置都不被裁掉。完整复用局内手牌的 CardItem 交互（拖动/悬停抖动/倾斜/缩放），
+    // 松手弹回缺口原位。logo / 卡牌的实际大小与位置在 layoutMainMenuContent() 里按 overlay 尺寸算。
+    {
+        auto *scene = new QGraphicsScene(overlay);
+
+        QPixmap logoPix(":/textures/images/balatro.png");
+        mMenuLogoItem = nullptr;
+        if (!logoPix.isNull()) {
+            mMenuLogoItem = scene->addPixmap(logoPix);
+            mMenuLogoItem->setTransformationMode(Qt::SmoothTransformation);
+            mMenuLogoItem->setZValue(0);
+        }
+
+        CardData ace; ace.suit = Suit::Spades; ace.rank = Rank::Ace;
+        auto *card = new CardItem(ace);
+        card->setZValue(2);
+        scene->addItem(card);
+        mMenuTitleCard = card;
+        // 拖动时把卡牌视图提到按钮容器之上，避免 A 牌拖到按钮区被遮挡；松手弹回缺口后再
+        // 把按钮容器放回最上层（保证可点击，且卡牌视图全屏透明不挡按钮）。
+        connect(card, &CardItem::dragMoved, this, [this](CardItem *, QPointF) {
+            if (mMenuLogoView) mMenuLogoView->raise();
+        });
+        connect(card, &CardItem::dragReleased, this, [this](CardItem *c, QPointF) {
+            if (c) c->moveTo(mMenuTitleCardHome, 220);
+            if (mMenuButtonPanel) mMenuButtonPanel->raise();
+        });
+        connect(card, &CardItem::clicked, this, [](CardItem *c) {
+            if (c) c->juiceUp(1.18, 260);
+        });
+
+        auto *view = new QGraphicsView(scene, overlay);
+        view->setFrameShape(QFrame::NoFrame);
+        view->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        view->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+        view->setRenderHints(QPainter::Antialiasing | QPainter::SmoothPixmapTransform);
+        view->setAttribute(Qt::WA_TranslucentBackground, true);
+        view->setStyleSheet("QGraphicsView{background:transparent;border:none;}");
+        view->viewport()->setAutoFillBackground(false);
+        mMenuLogoView = view;
     }
 
-    auto *centerRow = new QHBoxLayout;
-    centerRow->setAlignment(Qt::AlignCenter);
-    centerRow->addStretch(1);
+    // ───────── 按钮容器（复刻原版 L_BLACK 圆角容器 + UIBox_button 配色/尺寸）─────────
+    const int U = dp(74);                                   // 1 "card unit" ≈ dp(74)（按钮整体缩小）
+    const int bigW = 365 * U / 100, bigH = 155 * U / 100;   // Play/Collection: minw3.65 minh1.55
+    const int smW  = 265 * U / 100, smH  = 135 * U / 100;   // Options/Quit:    minw2.65 minh1.35
 
     auto *panel = new QWidget(overlay);
     panel->setAttribute(Qt::WA_StyledBackground, true);
-    panel->setStyleSheet(
-        "background:#374244; border:3px solid #4f6367; border-radius:18px;"
-    );
-    panel->setFixedWidth(dp(420));
-    auto *v = new QVBoxLayout(panel);
-    v->setContentsMargins(dp(22), dp(20), dp(22), dp(20));
-    v->setSpacing(dp(10));
+    // L_BLACK #4f6367 容器：顶部高光 + 底部加深，模拟原版 emboss 立体感。
+    panel->setStyleSheet(QString(
+        "background:#4f6367; border-radius:%1px;"
+        " border-top:2px solid rgba(255,255,255,40);"
+        " border-bottom:%2px solid #3a4a4d;").arg(dp(16)).arg(dp(6)));
+    auto *prow = new QHBoxLayout(panel);
+    prow->setContentsMargins(dp(18), dp(16), dp(18), dp(16));
+    prow->setSpacing(dp(14));
 
-    QFont btnFont = mCNFont; btnFont.setPixelSize(uiPx(24)); btnFont.setBold(true);
-
-    auto makeMenuButton = [&](const QString &text, const QString &bg, const QString &hover,
-                              bool enabled) {
+    auto makeBtn = [&](const QString &text, const QString &bg, const QString &dark,
+                       const QString &hover, int w, int h, int fontPx, bool enabled) {
         auto *b = new QPushButton(text, panel);
-        b->setFont(btnFont);
-        b->setMinimumHeight(dp(64));
+        QFont f = mCNFont; f.setPixelSize(fontPx); f.setBold(true);
+        b->setFont(f);
+        b->setFixedSize(w, h);
         b->setEnabled(enabled);
+        b->setCursor(enabled ? Qt::PointingHandCursor : Qt::ArrowCursor);
+        // 圆角 + 底部加深边 = 原版 UIBox_button 的浮雕按钮；按下时底边收窄并下沉。
         b->setStyleSheet(QString(
-            "QPushButton { background:%1; color:white;"
-            " border:2px solid rgba(255,255,255,90); border-radius:14px;"
-            " font-weight:bold; padding:6px 10px; }"
-            "QPushButton:hover { background:%2; border:2px solid rgba(255,255,255,170); }"
-            "QPushButton:disabled { background:#3b4347; color:#7c8488;"
-            " border:2px solid #3b4347; }"
-        ).arg(bg, hover));
-        v->addWidget(b);
+            "QPushButton { background:%1; color:white; border:none;"
+            " border-radius:%4px; border-bottom:%5px solid %2;"
+            " font-weight:bold; padding:2px 8px; }"
+            "QPushButton:hover { background:%3; }"
+            "QPushButton:pressed { border-bottom:2px solid %2; margin-top:%6px; }"
+            "QPushButton:disabled { background:#46555a; color:#88969b;"
+            " border-bottom:%5px solid #3a4a4d; }"
+        ).arg(bg, dark, hover).arg(dp(12)).arg(dp(6)).arg(dp(4)));
+        prow->addWidget(b, 0, Qt::AlignVCenter);
         return b;
     };
 
-    // 继续当前局：仅当已开过至少一局后可用,启动直进主菜单时禁用。
-    auto *btnContinue = makeMenuButton("继续当前局", "#4ca893", "#5fbfa8", mHasOngoingRun);
-    connect(btnContinue, &QPushButton::clicked, this, &MainWindow::hideMainMenuOverlay);
-
-    // 开始新一局:橙色,主操作。
-    auto *btnPlay = makeMenuButton("开始新的一局", "#fda200", "#ffb730", true);
+    // 顺序对齐原版截图：蓝(开始) 橙(选项) 红(退出) 绿(继续)。配色取自原版 G.C。
+    auto *btnPlay = makeBtn("开始游戏", "#009dff", "#0077c2", "#2bb0ff",
+                            bigW, bigH, uiPx(22), true);
     connect(btnPlay, &QPushButton::clicked, this, [this]() {
         hideMainMenuOverlay();
         startNewRunFromOptions();
     });
 
-    auto *btnSettings = makeMenuButton("设置", "#646eb7", "#7681d0", true);
+    auto *btnSettings = makeBtn("选项", "#fda200", "#c47d00", "#ffb730",
+                                smW, smH, uiPx(16), true);
     connect(btnSettings, &QPushButton::clicked, this, [this]() {
         hideMainMenuOverlay();
         showSettingsOverlay();
     });
 
-    auto *btnQuit = makeMenuButton("退出游戏", "#fe5f55", "#ff7066", true);
+    auto *btnQuit = makeBtn("退出", "#fe5f55", "#c44840", "#ff7066",
+                            smW, smH, uiPx(16), true);
     connect(btnQuit, &QPushButton::clicked, this, []() { QCoreApplication::quit(); });
 
-    centerRow->addWidget(panel);
-    centerRow->addStretch(1);
-    root->addLayout(centerRow);
-    root->addStretch(1);
+    // 继续当前局：仅当已开过至少一局后可用，启动直进主菜单时禁用（灰掉）。
+    auto *btnContinue = makeBtn("继续", "#56a887", "#3f7e64", "#67c39e",
+                                bigW, bigH, uiPx(20), mHasOngoingRun);
+    connect(btnContinue, &QPushButton::clicked, this, &MainWindow::hideMainMenuOverlay);
+
+    panel->adjustSize();
+    mMenuButtonPanel = panel;
 
     overlay->setGeometry(host->rect());
+    bgLabel->setGeometry(overlay->rect());
+    bgLabel->lower();              // 漩涡压到最底
+    if (mMenuLogoView) mMenuLogoView->raise();   // logo / A 牌视图在漩涡之上
+    panel->raise();                // 按钮容器在最上，保证可点击
+    layoutMainMenuContent();
     overlay->raise();
     overlay->show();
 }
 
+void MainWindow::layoutMainMenuContent()
+{
+    if (!mMenuLogoView || !mMainMenuOverlay) return;
+    const QSize ov = mMainMenuOverlay->size();
+    if (ov.isEmpty()) return;
+    const double W = ov.width(), H = ov.height();
+
+    // 视图铺满整个 overlay；用统一缩放 S 把 logo / A 牌放大，同时 sceneRect 覆盖全屏，
+    // 这样 A 牌可拖到屏幕任意位置都不被裁掉。S 由 A 牌目标高度决定（对齐原版 ~36% 屏高）。
+    const double cardTargetH = 0.27 * H;
+    const double S = cardTargetH / double(CardItem::HEIGHT);
+    mMenuLogoView->setGeometry(0, 0, int(W), int(H));
+    mMenuLogoView->resetTransform();
+    mMenuLogoView->scale(S, S);
+    const double sceneW = W / S, sceneH = H / S;
+    if (mMenuLogoView->scene()) mMenuLogoView->scene()->setSceneRect(0, 0, sceneW, sceneH);
+
+    // logo 像素宽 ≈ 72% 屏宽（对齐原版 ~71.5%），居中、偏上。A 牌居中盖在 logo 缺口（=logo 中心）。
+    const double cx = sceneW / 2.0;
+    const double cy = sceneH * 0.40;
+    if (mMenuLogoItem) {
+        const double logoPixW = 0.56 * W;
+        const double logoScale = (logoPixW / S) / 666.0;
+        mMenuLogoItem->setScale(logoScale);
+        const double logoSceneW = 666.0 * logoScale;
+        const double logoSceneH = 432.0 * logoScale;
+        mMenuLogoItem->setPos(cx - logoSceneW / 2.0, cy - logoSceneH / 2.0);
+    }
+    mMenuTitleCardHome = QPointF(cx - CardItem::WIDTH / 2.0, cy - CardItem::HEIGHT / 2.0);
+    if (mMenuTitleCard) mMenuTitleCard->setPos(mMenuTitleCardHome);
+
+    // 按钮容器：水平居中、靠下（比之前更低，约 86% 高度处）。
+    if (mMenuButtonPanel) {
+        mMenuButtonPanel->adjustSize();
+        const int pw = mMenuButtonPanel->width();
+        const int ph = mMenuButtonPanel->height();
+        mMenuButtonPanel->move(int((W - pw) / 2.0), int(H * 0.86 - ph / 2.0));
+        mMenuButtonPanel->raise();
+    }
+}
+
 void MainWindow::hideMainMenuOverlay()
 {
+    // 停掉漩涡背景的渲染定时器，离开主菜单时不再空跑 GPU。
+    if (mMenuBgTimer) mMenuBgTimer->stop();
     if (mMainMenuOverlay) mMainMenuOverlay->hide();
 }
 
@@ -4242,6 +4345,7 @@ void MainWindow::hideHoverTooltip()
 
 void MainWindow::onHandCardDragMoved(CardItem *card, QPointF scenePos)
 {
+    hideHoverTooltip();   // 拖动/点击时不显示悬停描述
     int from = mHandCards.indexOf(card);
     if (from < 0) return;
     int n = mHandCards.size();
@@ -4785,6 +4889,13 @@ void MainWindow::resizeEvent(QResizeEvent *event)
     // 这里在第一次真实 resize 时把它撑满。
     if (mMainMenuOverlay && centralWidget()) {
         mMainMenuOverlay->setGeometry(centralWidget()->rect());
+        // logo / 按钮由 overlay 上的布局自动重排；漩涡背景 QLabel 是手动定位的子控件（没进布局），
+        // 需跟随 overlay 撑满并保持在最底层。
+        if (mMenuBgLabel) {
+            mMenuBgLabel->setGeometry(mMainMenuOverlay->rect());
+            mMenuBgLabel->lower();
+        }
+        layoutMainMenuContent();
         if (mMainMenuOverlay->isVisible()) mMainMenuOverlay->raise();
     }
 }
@@ -4906,6 +5017,12 @@ void MainWindow::refreshJokerSlots()
             const QPointF startPos = (oldIdx >= 0 && oldIdx < oldPositions.size())
                                           ? oldPositions[oldIdx] : targetPos;
             ji->setPos(startPos);
+            ji->setZValue(20 + i);
+            ji->moveTo(targetPos, 220);
+        } else if (oldPositions.size() == js.size() && i < oldPositions.size()) {
+            // 普通刷新（含拖拽释放原地归位）：数量不变时，从各自旧位置 moveTo 目标，
+            // 让释放的小丑沿动画飞回槽位而非瞬移（对齐原版 spring 归位，约 220ms）。
+            ji->setPos(oldPositions[i]);
             ji->setZValue(20 + i);
             ji->moveTo(targetPos, 220);
         } else {
@@ -5197,6 +5314,7 @@ void MainWindow::applyJokerSelectionLift()
 
 void MainWindow::onJokerDragMoved(JokerItem *item, QPointF scenePos)
 {
+    hideHoverTooltip();   // 拖动/点击时不显示悬停描述（描述只在静止悬停时出现）
     int from = mJokerItems.indexOf(item);
     if (from < 0) return;
     int n = mJokerItems.size();
@@ -5625,13 +5743,16 @@ void MainWindow::refreshConsumableSlots()
             ci->setPos(oldPositions[i]);
             ci->setZValue(30 + i);
         } else if (mPendingConsumableReorder.from >= 0 && mPendingConsumableReorder.to >= 0) {
-            // 拖动复位：从旧 index 的位置出发 moveTo 目标。
+            // 拖动复位：从旧 index 的位置出发，下面 layoutConsumableItems(true) moveTo 到目标。
             const int oldIdx = mapConsNewIdxToOld(i);
             const QPointF startPos = (oldIdx >= 0 && oldIdx < oldPositions.size())
                                           ? oldPositions[oldIdx] : targetPos;
             ci->setPos(startPos);
             ci->setZValue(30 + i);
-            ci->moveTo(targetPos, 220);
+        } else if (oldPositions.size() == cs.size() && i < oldPositions.size()) {
+            // 普通刷新（含拖拽释放原地归位）：数量不变时从旧位置出发，动画飞回槽位而非瞬移。
+            ci->setPos(oldPositions[i]);
+            ci->setZValue(30 + i);
         } else {
             ci->setPos(targetPos);
             ci->setZValue(30 + i);
@@ -5670,7 +5791,8 @@ void MainWindow::refreshConsumableSlots()
     if (flyInNewConsumable) {
         mPendingSlotFlyIn = PendingSlotFlyIn();
     } else {
-        layoutConsumableItems(false);
+        // 用动画版收尾：上面已把各牌摆到"旧位置"，这里 moveTo 到目标槽，让释放/重排归位走动画。
+        layoutConsumableItems(true);
         if (mPendingSlotFlyIn.active && mPendingSlotFlyIn.targetArea == 2)
             mPendingSlotFlyIn = PendingSlotFlyIn();
     }
@@ -6051,6 +6173,7 @@ void MainWindow::onConsumablePressed(ConsumableItem *item, Qt::MouseButton btn)
 
 void MainWindow::onConsumableDragMoved(ConsumableItem *item, QPointF scenePos)
 {
+    hideHoverTooltip();   // 拖动/点击时不显示悬停描述
     int from = mConsumableItems.indexOf(item);
     if (from < 0) return;
     if (mConsumableActionPanel) mConsumableActionPanel->hide();
@@ -7124,50 +7247,42 @@ void MainWindow::updateFlameIntensity()
     }
     mChipFlameTarget = target;
     mMultFlameTarget = target;
+    // 不再加橙色边框（原版没有；之前火焰出现时套一圈边框很突兀）。底框/火焰由 FlameTile 画。
+    layoutFlameTiles();
+}
 
-    // 边框颜色:达标后橙色
-    const QString chipBase = "background:#009dff; color:white; border-radius:8px; padding:4px 8px;";
-    const QString multBase = "background:#fe5f55; color:white; border-radius:8px; padding:4px 8px;";
-    if (target > 0.01) {
-        if (mLblChips) mLblChips->setStyleSheet(chipBase + " border:3px solid #ffb000;");
-        if (mLblMult)  mLblMult ->setStyleSheet(multBase + " border:3px solid #ffb000;");
-    } else {
-        if (mLblChips) mLblChips->setStyleSheet(chipBase);
-        if (mLblMult)  mLblMult ->setStyleSheet(multBase);
-    }
-
-    // 几何:把两个 flame widget 分别贴到 chipsRow 内对应方块顶部上方。
-    // 第一次显示时 label geometry 可能还没由 layout 算好,加 fallback。
+// 把两个 FlameTile 摆到 chipsRow 内对应数字标签的位置：底框对齐标签矩形，控件再向上延伸
+// 一截给火焰上窜空间。压在 chipsRow 之下，使透明的数字标签浮在火焰之上。
+void MainWindow::layoutFlameTiles()
+{
     if (!mChipsRowWidget || !mLeftPanel || !mLblChips || !mLblMult) return;
+    if (!mChipFlame && !mMultFlame) return;
     const QPoint chipsRowTL = mChipsRowWidget->mapTo(mLeftPanel, QPoint(0, 0));
     const QRect lblChipsR = mLblChips->geometry();
     const QRect lblMultR  = mLblMult ->geometry();
-    int chipsRowH = mChipsRowWidget->height();
-    int chipsRowW = mChipsRowWidget->width();
+    const int chipsRowH = mChipsRowWidget->height();
+    const int chipsRowW = mChipsRowWidget->width();
+    if (chipsRowH <= 0 || lblChipsR.width() <= 4) return;   // layout 还没算好，跳过
 
-    int lblW1 = lblChipsR.width()  > 4 ? lblChipsR.width()  : qMax(80, chipsRowW / 2 - 20);
-    int lblW2 = lblMultR .width()  > 4 ? lblMultR .width()  : qMax(80, chipsRowW / 2 - 20);
-    int lblX1 = lblChipsR.x()      > 0 ? lblChipsR.x()      : 0;
-    int lblX2 = lblMultR .x()      > 0 ? lblMultR .x()      : (chipsRowW / 2 + 20);
+    const int lblW1 = lblChipsR.width();
+    const int lblW2 = lblMultR.width();
+    const int lblX1 = lblChipsR.x();
+    const int lblX2 = lblMultR.x();
+    const int boxH  = chipsRowH;
+    // 火焰向上延伸约 1.05× 底框高度，给火苗上窜的空间（对齐原版火焰高出方块不少）。
+    const int ext   = int(boxH * 1.05);
+    const int tileH = boxH + ext;
+    const int radius = dp(8);
+    Q_UNUSED(chipsRowW);
 
-    // 火焰高度 ≈ label 高度的 0.85，只在 label 上方稍微往上窜，避免遮住头顶 hand-name。
-    // 紧贴 label 顶（offset = -fh，flame 的底正好对上 label 顶）。
-    const int fh = qMax(48, int(chipsRowH * 0.85));
-
-    if (mChipFlame) {
-        mChipFlame->setGeometry(chipsRowTL.x() + lblX1,
-                                chipsRowTL.y() - fh + 4,    // +4 让 flame 底沿和 label 顶轻微重叠
-                                lblW1,
-                                fh);
-        mChipFlame->raise();
-    }
-    if (mMultFlame) {
-        mMultFlame->setGeometry(chipsRowTL.x() + lblX2,
-                                chipsRowTL.y() - fh + 4,
-                                lblW2,
-                                fh);
-        mMultFlame->raise();
-    }
+    auto place = [&](FlameTile *t, int x, int w) {
+        if (!t) return;
+        t->setGeometry(chipsRowTL.x() + x, chipsRowTL.y() - ext, w, tileH);
+        t->setBoxGeometry(boxH, radius);
+        t->stackUnder(mChipsRowWidget);   // 火焰在数字之下、在头顶手牌名之上
+    };
+    place(mChipFlame, lblX1, lblW1);
+    place(mMultFlame, lblX2, lblW2);
 }
 
 void MainWindow::resetScoreFlame()
@@ -7183,12 +7298,9 @@ void MainWindow::resetScoreFlame()
     mAudioChipFlameChange = 0.0;
     mAudioMultFlameChange = 0.0;
     AudioManager::instance()->setScoreAmbient(0.0, 0.0, 0.0, 0.0, 0.0);
-    if (mChipFlame) { mChipFlame->hide(); mChipFlame->update(); }
-    if (mMultFlame) { mMultFlame->hide(); mMultFlame->update(); }
-    const QString chipBase = "background:#009dff; color:white; border-radius:8px; padding:4px 8px;";
-    const QString multBase = "background:#fe5f55; color:white; border-radius:8px; padding:4px 8px;";
-    if (mLblChips) mLblChips->setStyleSheet(chipBase);
-    if (mLblMult)  mLblMult ->setStyleSheet(multBase);
+    // 只熄火焰，保留蓝/红底框（FlameTile 始终显示底框）。
+    if (mChipFlame) mChipFlame->stop();
+    if (mMultFlame) mMultFlame->stop();
 }
 
 void MainWindow::triggerSplashShader()

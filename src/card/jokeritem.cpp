@@ -393,6 +393,22 @@ QRectF JokerItem::boundingRect() const {
     return QRectF(0, 0, WIDTH, HEIGHT);
 }
 
+// 计算 sprite 不透明区域的垂直中心相对 cell 中心的偏移（SRC px，正=内容偏上需下移）。
+// 异形小丑（半张/微缩等）art 常画在 cell 上半部，据此把可见内容整体居中。
+static qreal jokerContentDySrc(const QPixmap &pix)
+{
+    const QImage img = pix.toImage().convertToFormat(QImage::Format_ARGB32);
+    int minY = img.height(), maxY = -1;
+    for (int y = 0; y < img.height(); ++y) {
+        const QRgb *row = reinterpret_cast<const QRgb *>(img.constScanLine(y));
+        for (int x = 0; x < img.width(); ++x) {
+            if (qAlpha(row[x]) > 8) { if (y < minY) minY = y; maxY = y; break; }
+        }
+    }
+    if (maxY < minY) return 0.0;
+    return img.height() / 2.0 - (minY + maxY) / 2.0;
+}
+
 void JokerItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) {
     p->setRenderHint(QPainter::SmoothPixmapTransform, false);
 
@@ -429,16 +445,33 @@ void JokerItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) 
         order.append(key);
         while (order.size() > 160) cache.remove(order.takeFirst());
     }
-    p->setRenderHint(QPainter::SmoothPixmapTransform, true);
-    // 异形小丑：直接画完整 sprite，不再裁切——原版美术里 j_half / j_wee 等
-    // 本身就把"撕碎/微缩"画在了卡面图上，我们裁掉反而丢了原形状。
-    p->drawPixmap(QRectF(0, 0, WIDTH, HEIGHT), pix, QRectF(0, 0, SRC_W, SRC_H));
-
-    if (mHovered) {
-        p->setPen(QPen(QColor(255, 240, 96, 200), 4));
-        p->setBrush(Qt::NoBrush);
-        p->drawRoundedRect(0, 0, WIDTH, HEIGHT, 8, 8);
+    // 外形变了（type/edition/debuff）才重算：垂直居中偏移 + 阴影黑色剪影。
+    const QString silKey = QString::number(int(mJoker.type)) + QLatin1Char('|')
+                         + QString::number(int(mJoker.edition)) + QLatin1Char('|')
+                         + QString::number(mJoker.isDebuffed ? 1 : 0);
+    if (silKey != mShadowSilKey) {
+        const qreal dySrc = jokerContentDySrc(pix);
+        mContentDyScreen = dySrc * qreal(HEIGHT) / qreal(SRC_H);
+        if (mShadow) {
+            // 剪影也按同样的下移量平移，保证阴影与居中后的 sprite 对齐。
+            QPixmap silSrc = pix;
+            if (qAbs(dySrc) >= 1.0) {
+                silSrc = QPixmap(pix.size());
+                silSrc.fill(Qt::transparent);
+                QPainter sp(&silSrc);
+                sp.drawPixmap(QPointF(0, dySrc), pix);
+            }
+            mShadow->setSilhouette(CardShadowItem::makeSilhouette(silSrc));
+        }
+        mShadowSilKey = silKey;
     }
+
+    p->setRenderHint(QPainter::SmoothPixmapTransform, true);
+    // 异形小丑：直接画完整 sprite（原版美术里 j_half / j_wee 等本身就把"撕碎/微缩"画进卡面），
+    // 并按实际内容垂直居中（下移 mContentDyScreen），不再贴在槽位最上方。
+    p->drawPixmap(QRectF(0, mContentDyScreen, WIDTH, HEIGHT), pix, QRectF(0, 0, SRC_W, SRC_H));
+
+    // 不再画 hover 选中轮廓——它是固定的 WIDTH×HEIGHT 圆角矩形，与异形小丑大小对不上。
 }
 
 void JokerItem::mousePressEvent(QGraphicsSceneMouseEvent *e)
@@ -493,7 +526,7 @@ void JokerItem::mouseMoveEvent(QGraphicsSceneMouseEvent *e)
         setPos(e->scenePos() - QPointF(WIDTH / 2.0, HEIGHT / 2.0));
         // 旋转使用 setRotation，围绕 transformOriginPoint（中心）。
         setTransformOriginPoint(WIDTH / 2.0, HEIGHT / 2.0);
-        setRotation(mDragTilt);
+        setRotation(mDragTilt + mMoveTilt);
         emit dragMoved(this, e->scenePos());
         e->accept();
         return;
@@ -520,7 +553,7 @@ void JokerItem::mouseReleaseEvent(QGraphicsSceneMouseEvent *e)
                 connect(decay, &QVariantAnimation::valueChanged, this,
                         [this](const QVariant &v) {
                     mDragTilt = v.toDouble();
-                    setRotation(mDragTilt);
+                    setRotation(mDragTilt + mMoveTilt);
                 });
                 decay->start(QAbstractAnimation::DeleteWhenStopped);
             }
@@ -644,12 +677,39 @@ void JokerItem::animateScale(qreal target, int durationMs)
 
 void JokerItem::moveTo(const QPointF &target, int durationMs)
 {
+    const QPointF from = pos();
     auto *anim = new QPropertyAnimation(this, "pos", this);
     anim->setDuration(durationMs);
-    anim->setStartValue(pos());
+    anim->setStartValue(from);
     anim->setEndValue(target);
     anim->setEasingCurve(QEasingCurve::OutCubic);
     anim->start(QAbstractAnimation::DeleteWhenStopped);
+
+    // 重排倾斜（对齐原版 Moveable:move_r：des_r ∝ 水平速度）：被挤动而横向滑动时朝运动方向
+    // 倾斜，随到位而回正。不被拖动的牌也因此有"甩"的动感，不再只有被拖那张倾斜。
+    if (mDragging) return;   // 正在被拖动的牌用 mDragTilt，别叠加
+    const double dx = target.x() - from.x();
+    double tiltMax = dx * 0.09;
+    if (tiltMax > 16.0) tiltMax = 16.0;
+    if (tiltMax < -16.0) tiltMax = -16.0;
+    if (qAbs(tiltMax) < 0.2) return;
+    setTransformOriginPoint(WIDTH / 2.0, HEIGHT / 2.0);
+    auto *tilt = new QVariantAnimation(this);
+    // 倾斜衰减时长与移动时长解耦：重排 moveTo 常用 60ms 小步移动，倾斜也只 60ms 就一闪而过；
+    // 固定 ~300ms 让"被挤走→倾斜→回正"清晰可见。
+    tilt->setDuration(qMax(durationMs, 300));
+    tilt->setStartValue(tiltMax);
+    tilt->setEndValue(0.0);
+    tilt->setEasingCurve(QEasingCurve::OutCubic);
+    connect(tilt, &QVariantAnimation::valueChanged, this, [this](const QVariant &v) {
+        mMoveTilt = v.toDouble();
+        setRotation(mDragTilt + mMoveTilt);
+    });
+    connect(tilt, &QVariantAnimation::finished, this, [this]() {
+        mMoveTilt = 0.0;
+        setRotation(mDragTilt + mMoveTilt);
+    });
+    tilt->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
 void JokerItem::juiceUp(double scaleAmount, int durationMs)

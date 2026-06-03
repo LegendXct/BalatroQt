@@ -64,6 +64,10 @@ private:
     double mHoverTiltY = 0.0;
     // 拖拽水平速度倾斜——参数与 CardItem 一致，让消耗品也有甩动手感（用户反馈9）。
     double mDragTilt = 0.0;
+    // 重排移动倾斜：被挤动 moveTo 滑向新位置时朝运动方向倾斜（对齐原版 move_r）。
+    double mMoveTilt = 0.0;
+    // 上次喂给阴影的剪影 key（type|negative），变了才重算阴影剪影。
+    QString mShadowSilKey;
     QPointF mLastDragScenePos;
     qint64  mLastDragTimeMs = 0;
     qreal mShadowLift = 0.0;

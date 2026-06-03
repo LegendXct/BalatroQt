@@ -228,9 +228,18 @@ void ConsumableItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidge
     // 阴影由 mShadow（sibling CardShadowItem）单独绘制——z=-1000 落到所有牌之下。
 
     // 缓存渲染在 SRC_W×SRC_H，在场景里平滑放大到 WIDTH×HEIGHT。
+    const QPixmap pix = renderPixmap(mC.type, mC.negative);
+
+    // 阴影按真实轮廓投影：外形变了才重算黑色剪影喂给阴影。
+    const QString silKey = QString::number(int(mC.type)) + QLatin1Char('|')
+                         + QString::number(mC.negative ? 1 : 0);
+    if (mShadow && silKey != mShadowSilKey) {
+        mShadow->setSilhouette(CardShadowItem::makeSilhouette(pix));
+        mShadowSilKey = silKey;
+    }
+
     p->setRenderHint(QPainter::SmoothPixmapTransform, true);
-    p->drawPixmap(QRectF(0, 0, WIDTH, HEIGHT), renderPixmap(mC.type, mC.negative),
-                  QRectF(0, 0, SRC_W, SRC_H));
+    p->drawPixmap(QRectF(0, 0, WIDTH, HEIGHT), pix, QRectF(0, 0, SRC_W, SRC_H));
 }
 
 void ConsumableItem::mousePressEvent(QGraphicsSceneMouseEvent *e)
@@ -285,7 +294,7 @@ void ConsumableItem::mouseMoveEvent(QGraphicsSceneMouseEvent *e)
         mLastDragTimeMs = nowMs;
         setPos(e->scenePos() - QPointF(WIDTH / 2.0, HEIGHT / 2.0));
         setTransformOriginPoint(WIDTH / 2.0, HEIGHT / 2.0);
-        setRotation(mDragTilt);
+        setRotation(mDragTilt + mMoveTilt);
         emit dragMoved(this, e->scenePos());
         e->accept();
         return;
@@ -312,7 +321,7 @@ void ConsumableItem::mouseReleaseEvent(QGraphicsSceneMouseEvent *e)
                 connect(decay, &QVariantAnimation::valueChanged, this,
                         [this](const QVariant &v) {
                     mDragTilt = v.toDouble();
-                    setRotation(mDragTilt);
+                    setRotation(mDragTilt + mMoveTilt);
                 });
                 decay->start(QAbstractAnimation::DeleteWhenStopped);
             }
@@ -435,12 +444,37 @@ void ConsumableItem::animateScale(qreal target, int durationMs)
 
 void ConsumableItem::moveTo(const QPointF &target, int durationMs)
 {
+    const QPointF from = pos();
     auto *anim = new QPropertyAnimation(this, "pos", this);
     anim->setDuration(durationMs);
-    anim->setStartValue(pos());
+    anim->setStartValue(from);
     anim->setEndValue(target);
     anim->setEasingCurve(QEasingCurve::OutCubic);
     anim->start(QAbstractAnimation::DeleteWhenStopped);
+
+    // 重排倾斜（对齐原版 Moveable:move_r）：横向滑动时朝运动方向倾斜，到位回正。
+    if (mDragging) return;
+    const double dx = target.x() - from.x();
+    double tiltMax = dx * 0.09;
+    if (tiltMax > 16.0) tiltMax = 16.0;
+    if (tiltMax < -16.0) tiltMax = -16.0;
+    if (qAbs(tiltMax) < 0.2) return;
+    setTransformOriginPoint(WIDTH / 2.0, HEIGHT / 2.0);
+    auto *tilt = new QVariantAnimation(this);
+    // 倾斜衰减时长与移动时长解耦（重排 moveTo 常用 60ms 小步移动），固定 ~300ms 才看得见。
+    tilt->setDuration(qMax(durationMs, 300));
+    tilt->setStartValue(tiltMax);
+    tilt->setEndValue(0.0);
+    tilt->setEasingCurve(QEasingCurve::OutCubic);
+    connect(tilt, &QVariantAnimation::valueChanged, this, [this](const QVariant &v) {
+        mMoveTilt = v.toDouble();
+        setRotation(mDragTilt + mMoveTilt);
+    });
+    connect(tilt, &QVariantAnimation::finished, this, [this]() {
+        mMoveTilt = 0.0;
+        setRotation(mDragTilt + mMoveTilt);
+    });
+    tilt->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
 void ConsumableItem::juiceUp(double scaleAmount, int durationMs)
