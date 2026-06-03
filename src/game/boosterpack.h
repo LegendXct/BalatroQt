@@ -31,6 +31,7 @@ struct PackContent {
 
     QVector<CardData>       standardCards;   // Standard 用
     QVector<JokerType>      jokers;          // Buffoon 用
+    QVector<Edition>        jokerEditions;   // 与 jokers 平行；空表示全 None。演示模式给公牛挂多彩用。
     QVector<ConsumableType> consumables;     // Arcana / Celestial / Spectral 用
 };
 

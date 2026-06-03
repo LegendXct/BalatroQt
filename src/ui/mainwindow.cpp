@@ -1,5 +1,6 @@
 #include "mainwindow.h"
 #include "ui_mainwindow.h"
+#include <QBitmap>
 #include <QPainter>
 #include <QPainterPath>
 #include <QFontDatabase>
@@ -916,12 +917,12 @@ MainWindow::MainWindow(QWidget *parent)
     AudioManager::instance()->setDesiredMusic(QStringLiteral("music1"));
     mPlayPage->installEventFilter(this);
 
-    QTimer::singleShot(0, this, [this]() {
-        if (mBlindSelectWidget) mBlindSelectWidget->hide();
-        // 启动直接进入主菜单——"继续当前局" 此时灰掉,
-        // 必须先点 "开始新的一局" 才会真正初始化游戏状态进入对局界面。
-        showMainMenuOverlay();
-    });
+    if (mBlindSelectWidget) mBlindSelectWidget->hide();
+    // 启动直接进入主菜单——"继续当前局" 此时灰掉,
+    // 必须先点 "开始新的一局" 才会真正初始化游戏状态进入对局界面。
+    // 注意：必须在构造体内同步调用 showMainMenuOverlay(),不再放进 singleShot(0)——
+    // 否则窗口 showFullScreen 后会有一帧露出 BlindSelectWidget 的盲注卡片动画(闪屏)。
+    showMainMenuOverlay();
 }
 
 MainWindow::~MainWindow()
@@ -1153,12 +1154,18 @@ void MainWindow::setupLeftPanel() {
     mScoreProgressBar->setGraphicsEffect(mScoreProgressGlow);
     scoreVBox->addWidget(mScoreProgressBar);
 
+    // Qt 的 QProgressBar::chunk 即使写了 border-radius，在部分驱动/缩放下仍会按矩形渲染，
+    // 让"药丸"框架的圆角处露出彩色矩形的四角。给整个 widget 装一个 antialias 的 QBitmap
+    // mask 解决——eventFilter 里在 resize 时同步重建。
+    mScoreProgressBar->installEventFilter(this);
+
     // 进度条发光脉动：原本走 QVariantAnimation 默认 60 FPS valueChanged，
     // 每一帧都改 QGraphicsDropShadowEffect 的 blur/color，触发整条进度条 +
     // 软阴影的重绘——单这一条就持续占用 ~3% CPU 且让其他动画卡顿。
-    // 改成 QTimer 50 ms 步进，视觉差异极小（脉动从 60Hz → 20Hz）。
+    // 大盲注满 6 张小丑时 GPU 已经在跑多个 edition shader，再叠 20Hz 阴影脉动会
+    // 进一步拉垮帧率——降到 10Hz (100ms) 视觉上几乎看不出来。
     auto *scorePulse = new QTimer(this);
-    scorePulse->setInterval(50);
+    scorePulse->setInterval(100);
     scorePulse->setTimerType(Qt::CoarseTimer);
     const double pulsePeriodMs = 1800.0;
     connect(scorePulse, &QTimer::timeout, this, [this, pulsePeriodMs]() {
@@ -2257,10 +2264,13 @@ void MainWindow::showSettingsOverlay()
         bh->setContentsMargins(0, 0, 0, 0);
         bh->setSpacing(dp(8));
 
-        const QVector<double> speeds = { 1.0, 2.0, 4.0, 8.0 };
+        const QVector<double> speeds = { 0.5, 1.0, 2.0, 4.0 };
         QVector<QPushButton*> btns;
         for (double s : speeds) {
-            auto *b = new QPushButton(QString("%1x").arg(int(s)), btnRow);
+            // 0.5 倍要显示 "0.5x"，整数倍显示 "Nx"——不强转成 int 否则 0.5 会显示成 0x。
+            const QString label = (s < 1.0) ? QString::number(s, 'g', 2) + "x"
+                                            : QString::number(int(s)) + "x";
+            auto *b = new QPushButton(label, btnRow);
             b->setFont(labelFont);
             b->setMinimumHeight(dp(34));
             b->setCheckable(true);
@@ -2341,13 +2351,6 @@ void MainWindow::showSettingsOverlay()
 
         h->addWidget(toggle, 1);
         v->addWidget(row);
-
-        auto *hint = new QLabel("勾选后每次开始新的一局都进入固定剧本（小盲对子+顺子 / 大盲人头同花 / Boss 支柱同花顺）。", row);
-        QFont hintFont = mCNFont; hintFont.setPixelSize(uiPx(12));
-        hint->setFont(hintFont);
-        hint->setStyleSheet("color:#9aa8a9; background:transparent; border:none;");
-        hint->setWordWrap(true);
-        v->addWidget(hint);
     }
 
     auto *back = new QPushButton("返回", panel);
@@ -3895,6 +3898,19 @@ void MainWindow::showCardHoverTooltip(CardItem *card)
     ensureHoverTooltip();
     const CardData &c = card->cardData();
 
+    // 翻面牌（House/Wheel/Fish/Mark 等 Boss 把牌发成背面）：信息不能直接暴露——
+    // 否则 The Mark 的"人头牌背面发出"就完全没意义了。这里只显示问号占位。
+    if (!c.faceUp) {
+        mHoverTooltip->clear();
+        mHoverTooltip->setMainContent(QStringLiteral("<b>? ? ?</b>"),
+                                      QStringLiteral("<span style='color:#aaa'>这张牌当前背面朝下，无法查看</span>"),
+                                      {}, 160, /*nameHasWhiteBox=*/true);
+        mHoverTooltip->relayout();
+        showHoverTooltipNearScene(card, CardItem::WIDTH);
+        mHoveredCard = card;
+        return;
+    }
+
     // 手牌 info：所有效果（基础筹码 + 增强 + edition + 蜡封）在同一只面板的中间文字栏内联，
     // 不并排副面板——副面板只用于 "塔罗/幻灵 等会授予增强" 这种引用场景。
     mHoverTooltip->clear();
@@ -4710,6 +4726,12 @@ void MainWindow::resizeEvent(QResizeEvent *event)
     if (mOptionsOverlay && centralWidget()) {
         mOptionsOverlay->setGeometry(centralWidget()->rect());
         if (mOptionsOverlay->isVisible()) mOptionsOverlay->raise();
+    }
+    // 主菜单 overlay 在构造体里同步创建（防启动闪屏），那时 centralWidget 尺寸还是 0；
+    // 这里在第一次真实 resize 时把它撑满。
+    if (mMainMenuOverlay && centralWidget()) {
+        mMainMenuOverlay->setGeometry(centralWidget()->rect());
+        if (mMainMenuOverlay->isVisible()) mMainMenuOverlay->raise();
     }
 }
 
@@ -6368,6 +6390,24 @@ void MainWindow::resumeGameProcesses()
 
 bool MainWindow::eventFilter(QObject *obj, QEvent *ev)
 {
+    // 进度条药丸 mask：QProgressBar::chunk 的 border-radius 在部分平台失灵，
+    // 改用 QBitmap mask 把整个 widget clip 成药丸形——chunk 怎么画都不会出框。
+    if (obj == mScoreProgressBar
+        && (ev->type() == QEvent::Resize || ev->type() == QEvent::Show)) {
+        const QSize sz = mScoreProgressBar->size();
+        if (sz.width() > 0 && sz.height() > 0) {
+            QBitmap bm(sz);
+            bm.fill(Qt::color0);   // 透明
+            QPainter p(&bm);
+            p.setRenderHint(QPainter::Antialiasing);
+            p.setBrush(Qt::color1); // 不透明
+            p.setPen(Qt::NoPen);
+            const int r = sz.height() / 2;
+            p.drawRoundedRect(bm.rect(), r, r);
+            p.end();
+            mScoreProgressBar->setMask(bm);
+        }
+    }
     // 火焰已改用 GPU 渲染 FlameShaderWidget；之前在这里拦截 mChipFlame/mMultFlame
     // 的 Paint 事件用 BalatroShaders::paintFlame 走 CPU 渲染，现在不再需要。
     if (obj == mPlayPage && ev->type() == QEvent::Resize) {

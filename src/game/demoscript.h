@@ -47,9 +47,16 @@ public:
     // 包内容覆盖：返回 true 表示已写入 out，调用方跳过默认随机生成。
     static bool scriptedPackContent(PackKind kind, PackSize size, PackContent &out);
 
-    // 第一 Ante Boss 固定为支柱；其它 Ante 不干预（路演 4 分钟内打不到）。
+    // 第一 Ante Boss 固定为符号(TheMark)；其它 Ante 不干预（路演 4 分钟内打不到）。
     // 返回 BossEffect::None 表示不干预，由原 RNG 决定。
     static BossEffect scriptedBoss(int ante);
+
+    // 买 Overstock 后 shop 槽位 +1，ensureShopOfferCount 会调这个补一张；演示固定塞木星。
+    // 返回 true = 已写入 out；false = 不接管。
+    static bool scriptedExtraShopOffer(ShopOffer &out);
+
+    // Soul 塔罗 → 生成传奇小丑；演示模式固定特里布莱。返回 None 时由原 RNG 决定。
+    static JokerType scriptedLegendaryJoker();
 
 private:
     static bool sActive;

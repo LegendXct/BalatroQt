@@ -956,6 +956,11 @@ QPixmap PackOpenWidget::renderOption(int i) const
         // (170×228 显示尺寸) 会按错误的步长切图，导致每张小丑里粘上隔壁单元的边缘。
         QPixmap raw = sheet.copy(xy.x() * JokerItem::SRC_W, xy.y() * JokerItem::SRC_H,
                                  JokerItem::SRC_W, JokerItem::SRC_H);
+        // 演示模式可以通过 pack.jokerEditions 给单张小丑挂版本（多彩/闪箔/镭射/负片）——
+        // 包内 hover 时就应该看到 shader 效果，不能等买入后才显示。
+        Edition ed = Edition::None;
+        if (i < mContent.jokerEditions.size()) ed = mContent.jokerEditions[i];
+        if (ed != Edition::None) raw = BalatroShaders::renderEditionPixmap(raw, ed);
         return raw.scaled(size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     }
     if (mContent.kind == PackKind::Arcana || mContent.kind == PackKind::Celestial

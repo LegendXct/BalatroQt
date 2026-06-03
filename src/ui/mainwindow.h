@@ -141,9 +141,12 @@ private:
     void pauseGameProcesses();
     void resumeGameProcesses();
     // 设置里的倍速:scheduleGame / animateScoreTotalThenFinalize 等待时间会除以这个倍数。
+    // 限制条件：只在计分进行中（mScoringInProgress）才缩短延时；其它阶段（出消耗品、
+    // 商店滑入滑出、UI 过渡）保持 1× 速度，否则会让消耗品 juice 动画快得看不清。
     double mGameSpeedFactor = 1.0;
     void setGameSpeedFactor(double f) { mGameSpeedFactor = qMax(0.25, f); }
     int scaledDelay(int delayMs) const {
+        if (!mScoringInProgress) return qMax(0, delayMs);
         return qMax(0, qRound(delayMs / qMax(0.25, mGameSpeedFactor)));
     }
 

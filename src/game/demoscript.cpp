@@ -53,11 +53,11 @@ static QVector<QPair<Rank, Suit>> scriptedHandForBlind(int blindNo)
                  {R::Ace,   S::Hearts},  {R::Four,  S::Clubs},
                  {R::Four,  S::Diamonds},{R::Seven, S::Spades} };
     case 3:
-        // 黑桃同花顺 ♠6 ♠7(玻璃) ♠8 ♠9 ♠10 + 3 张陪衬
+        // 黑桃同花顺 ♠6 ♠7 ♠8 ♠9 ♠10 + 3 张人头牌（被 The Mark 翻成背面，纯演示用，不打出）
         return { {R::Six,   S::Spades},  {R::Seven, S::Spades},
                  {R::Eight, S::Spades},  {R::Nine,  S::Spades},
-                 {R::Ten,   S::Spades},  {R::Two,   S::Clubs},
-                 {R::Three, S::Hearts},  {R::Four,  S::Hearts} };
+                 {R::Ten,   S::Spades},  {R::Jack,  S::Spades},
+                 {R::Queen, S::Diamonds},{R::King,  S::Clubs} };
     default: return {};
     }
 }
@@ -85,11 +85,12 @@ void DemoScript::reorderDeckForNextBlind(QVector<CardData> &pile)
     }
 }
 
-static ShopOffer makeJokerOffer(JokerType t)
+static ShopOffer makeJokerOffer(JokerType t, Edition e = Edition::None)
 {
     ShopOffer o;
     o.kind = OfferKind::Joker;
     o.joker = t;
+    o.jokerEdition = e;
     o.cost = jokerBaseCost(t);
     return o;
 }
@@ -98,25 +99,55 @@ void DemoScript::scriptedShopOffers(QVector<ShopOffer> &out, int slotCount)
 {
     out.clear();
     if (sShopVisit == 1 && sShopRerolls == 0) {
-        // 第一商店初始：蓝图 + 头脑风暴
-        out.append(makeJokerOffer(JokerType::Blueprint));
-        out.append(makeJokerOffer(JokerType::Brainstorm));
+        // 第一商店初始：蓝图(闪箔) + 头脑风暴(镭射)
+        out.append(makeJokerOffer(JokerType::Blueprint,  Edition::Foil));
+        out.append(makeJokerOffer(JokerType::Brainstorm, Edition::Holographic));
     } else if (sShopVisit == 1 && sShopRerolls >= 1) {
-        // 第一商店重摇后：DNA + 特里布莱
-        out.append(makeJokerOffer(JokerType::DNA));
-        out.append(makeJokerOffer(JokerType::Triboulet));
+        // 第一商店重摇后：负片的 悬挂乍得(未断选票) + 普通的 纸牌占卜师(塔罗术士)
+        // 负片 = +1 小丑槽位，让最终 6 张小丑（蓝图/头脑风暴/乍得/占卜师/公牛/特里布莱）能塞下默认 5 槽。
+        out.append(makeJokerOffer(JokerType::HangingChad, Edition::Negative));
+        out.append(makeJokerOffer(JokerType::Cartomancer, Edition::None));
     } else if (sShopVisit == 2) {
-        // 第二商店：什么都不想卖（用户脚本里"展示设置不买东西"），随便放两张白板
-        out.append(makeJokerOffer(JokerType::Joker));
+        // 第二商店（大盲后）：脚本只展示设置不买，3 槽用 3 张不同小丑避免视觉重复。
         out.append(makeJokerOffer(JokerType::HalfJoker));
+        out.append(makeJokerOffer(JokerType::JollyJoker));
+        out.append(makeJokerOffer(JokerType::Misprint));
+    } else if (sShopVisit == 3) {
+        // 第三商店（Boss 后，Ante 2 小盲前）：和第二商店换一组小丑，否则两次商店看着假。
+        out.append(makeJokerOffer(JokerType::Banner));
+        out.append(makeJokerOffer(JokerType::AbstractJoker));
+        out.append(makeJokerOffer(JokerType::EvenSteven));
     } else {
-        // 第 3 商店之后：路演到不了，给个普通小丑兜底，不再保证脚本
-        out.append(makeJokerOffer(JokerType::Joker));
-        out.append(makeJokerOffer(JokerType::HalfJoker));
+        out.append(makeJokerOffer(JokerType::GreedyJoker));
+        out.append(makeJokerOffer(JokerType::LustyJoker));
+        out.append(makeJokerOffer(JokerType::WrathfulJoker));
     }
-    // 多余槽位填普通小丑
-    while (out.size() < slotCount) out.append(makeJokerOffer(JokerType::Joker));
+    // Overstock 买完会扩槽到 3，第一商店的新槽用 scriptedExtraShopOffer 填（木星）；
+    // 第二商店及之后已经按 3 槽给齐了，这里只是兜底。
+    while (out.size() < slotCount) {
+        ShopOffer extra;
+        if (scriptedExtraShopOffer(extra)) out.append(extra);
+        else out.append(makeJokerOffer(JokerType::Joker));
+    }
 }
+
+bool DemoScript::scriptedExtraShopOffer(ShopOffer &out)
+{
+    // 第一商店买 Overstock 之后扩槽：补一张木星行星牌。其它访问/重摇都返回 false。
+    if (sShopVisit != 1) return false;
+    out = ShopOffer{};
+    out.kind = OfferKind::Planet;
+    out.consumable = ConsumableType::Planet_Jupiter;
+    out.cost = 3;   // 原版行星价 $3
+    return true;
+}
+
+JokerType DemoScript::scriptedLegendaryJoker()
+{
+    // Soul 塔罗在演示模式下固定开出特里布莱（人头牌 ×2 倍率）。
+    return JokerType::Triboulet;
+}
+
 
 void DemoScript::scriptedVoucherOffers(QVector<ShopOffer> &out)
 {
@@ -124,62 +155,70 @@ void DemoScript::scriptedVoucherOffers(QVector<ShopOffer> &out)
     if (sShopVisit == 1) {
         ShopOffer o;
         o.kind = OfferKind::Voucher;
-        o.voucher = VoucherType::Grabber;
-        o.cost = voucherData(VoucherType::Grabber).cost;
+        o.voucher = VoucherType::Overstock;
+        o.cost = voucherData(VoucherType::Overstock).cost;
         out.append(o);
     }
-    // 第二商店：不出 voucher（保持简洁）
 }
 
 void DemoScript::scriptedBoosterOffers(QVector<ShopOffer> &out)
 {
     out.clear();
-    auto makePack = [](PackKind k) {
+    auto makePack = [](PackKind k, PackSize sz, int cost) {
         ShopOffer o;
         o.kind = OfferKind::Pack;
         o.pack = k;
-        o.packSize = PackSize::Normal;
+        o.packSize = sz;
         o.packVariant = 0;
-        o.cost = 4;   // 原版小包统一 $4
+        o.cost = cost;
         return o;
     };
     if (sShopVisit == 1) {
-        out.append(makePack(PackKind::Celestial));   // 含 Jupiter
-        out.append(makePack(PackKind::Arcana));      // 含 Justice
+        // 超级小丑包($6) + 普通塔罗包($4)
+        out.append(makePack(PackKind::Buffoon, PackSize::Mega,   6));
+        out.append(makePack(PackKind::Arcana,  PackSize::Normal, 4));
     } else {
-        // 第二商店：什么都不放，路演里只展示设置，不用包
-        out.append(makePack(PackKind::Standard));
-        out.append(makePack(PackKind::Standard));
+        // 第二商店：路演里只展示设置，不开包
+        out.append(makePack(PackKind::Standard, PackSize::Normal, 4));
+        out.append(makePack(PackKind::Standard, PackSize::Normal, 4));
     }
 }
 
-bool DemoScript::scriptedPackContent(PackKind kind, PackSize /*size*/, PackContent &out)
+bool DemoScript::scriptedPackContent(PackKind kind, PackSize size, PackContent &out)
 {
     auto fillBase = [&](int options, int choose) {
         out = PackContent{};
         out.kind = kind;
-        out.size = PackSize::Normal;
+        out.size = size;
         out.optionsToShow = options;
         out.choicesAllowed = choose;
     };
 
-    if (kind == PackKind::Celestial) {
-        fillBase(3, 1);
-        // Jupiter（升级同花）放首位；后两位陪衬。
-        out.consumables = {
-            ConsumableType::Planet_Jupiter,
-            ConsumableType::Planet_Mars,
-            ConsumableType::Planet_Saturn,
+    if (kind == PackKind::Buffoon && size == PackSize::Mega) {
+        // 超级小丑包：4 选 1。多彩公牛 + 3 张陪衬小丑。
+        fillBase(4, 1);
+        out.jokers = {
+            JokerType::Bull,           // 演示重点：多彩
+            JokerType::JollyJoker,
+            JokerType::Banner,
+            JokerType::EvenSteven,
+        };
+        out.jokerEditions = {
+            Edition::Polychrome,       // 公牛挂多彩——包内 hover 和拿走后都带 shader
+            Edition::None,
+            Edition::None,
+            Edition::None,
         };
         return true;
     }
     if (kind == PackKind::Arcana) {
+        // 普通塔罗包：3 选 1。第一张固定灵魂(Spectral_Soul)——使用后强制开特里布莱。
+        // 注意：原版灵魂是从塔罗包里以 5% 概率混入，我们这里直接塞首位。
         fillBase(3, 1);
-        // Justice（玻璃增强）放首位；后两位陪衬。
         out.consumables = {
-            ConsumableType::Tarot_Justice,
-            ConsumableType::Tarot_Empress,
+            ConsumableType::Spectral_Soul,
             ConsumableType::Tarot_Magician,
+            ConsumableType::Tarot_Empress,
         };
         return true;
     }
@@ -188,6 +227,7 @@ bool DemoScript::scriptedPackContent(PackKind kind, PackSize /*size*/, PackConte
 
 BossEffect DemoScript::scriptedBoss(int ante)
 {
-    if (ante == 1) return BossEffect::ThePillar;
-    return BossEffect::None;   // 路演到不了，让原 RNG 兜底
+    // 第一 Ante 固定为符号(TheMark)：所有人头牌背面朝下发出——视觉冲击 + 可讲解。
+    if (ante == 1) return BossEffect::TheMark;
+    return BossEffect::None;
 }

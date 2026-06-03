@@ -49,12 +49,16 @@ void ensureJokerShaderTimer()
         const auto items = sAnimatedJokers.values();
         for (JokerItem *item : items) if (item) item->update();
     });
-    sJokerShaderTimer->start(67);
+    // 100ms (10FPS)：原本 67ms 在装满 6 张小丑 + 多张带版本 shader 的演示局里
+    // 触发肉眼可见的卡顿；降到 10FPS 几乎看不出动画差，但 CPU/GPU 负载减半。
+    sJokerShaderTimer->start(100);
 }
 
 int shaderCacheFrame()
 {
-    return int(BalatroShaders::shaderTime() * 15.0);
+    // 与上面 100ms timer 对齐——shaderCacheFrame() 用于 paint() 的缓存 key，
+    // 频率必须和 timer tick 一致，否则要么持续 cache miss、要么过度持有旧帧。
+    return int(BalatroShaders::shaderTime() * 10.0);
 }
 }
 

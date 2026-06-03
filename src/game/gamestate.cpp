@@ -1048,7 +1048,9 @@ void GameState::finishWinningRound()
     mShop.roll();
     if (refreshAnteVoucher) mVoucherRolledAnte = mAnte;
     for (int i = 0; i < extraVouchersFromTag; ++i) mShop.appendVoucherOffer();
-    if (mFirstShop) {
+    if (mFirstShop && !DemoScript::active()) {
+        // 演示模式下不能进这个分支：脚本已在 scriptedBoosterOffers 里放了 Mega Buffoon + Arcana，
+        // 一旦走这里会被 setBoosterOfferPack 覆盖回 Buffoon Normal。
         auto &b = mShop.boosterOffersMutable();
         if (b.size() >= 1) {
             mShop.setBoosterOfferPack(0, PackKind::Buffoon, PackSize::Normal);
@@ -1067,8 +1069,8 @@ void GameState::finishWinningRound()
             const bool keepFree = (o2.cost == 0);
             o2.cost = keepFree ? 0 : 4;
         }
-        mFirstShop = false;
     }
+    if (mFirstShop) mFirstShop = false;
     applyTagEffectsToShop();
     emit goldChanged();
     emit roundWon(blindReward, handBonus, interest);
@@ -2516,15 +2518,22 @@ bool GameState::applyPackChoice(const PackContent &pack, int chosenIdx,
         return ok;
     }
 
-    case PackKind::Buffoon:
+    case PackKind::Buffoon: {
         if (chosenIdx >= pack.jokers.size()) return false;
         if (!canAddJoker()) return false;
-        mJokers.append(createJoker(pack.jokers[chosenIdx]));
+        Joker bj = createJoker(pack.jokers[chosenIdx]);
+        // 包里有 jokerEditions 时（演示模式给公牛挂多彩用），把 edition 一并搬到买下的小丑上。
+        if (chosenIdx < pack.jokerEditions.size()
+            && pack.jokerEditions[chosenIdx] != Edition::None) {
+            bj.edition = pack.jokerEditions[chosenIdx];
+        }
+        mJokers.append(bj);
         updateOwnedSellValues();
         syncShopJokerRules();
         emit jokersChanged();
         emit shopChanged();
         return true;
+    }
     }
     return false;
 }
@@ -3380,6 +3389,15 @@ void GameState::immolateRandomHandCards(int destroyCount, int goldGain)
 bool GameState::addRandomLegendaryJoker()
 {
     if (!canAddJoker()) return false;
+    // 演示模式：固定开出 demoscript 指定的传奇（路演里是特里布莱）。
+    if (DemoScript::active()) {
+        Joker dj = createJoker(DemoScript::scriptedLegendaryJoker());
+        mJokers.append(dj);
+        updateOwnedSellValues();
+        syncShopJokerRules();
+        emit jokersChanged();
+        return true;
+    }
     QVector<JokerType> legends = {
         JokerType::Caino, JokerType::Triboulet, JokerType::Yorick,
         JokerType::Chicot, JokerType::Perkeo
