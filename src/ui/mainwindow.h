@@ -141,13 +141,19 @@ private:
     void pauseGameProcesses();
     void resumeGameProcesses();
     // 设置里的倍速:scheduleGame / animateScoreTotalThenFinalize 等待时间会除以这个倍数。
-    // 限制条件：只在计分进行中（mScoringInProgress）才缩短延时；其它阶段（出消耗品、
-    // 商店滑入滑出、UI 过渡）保持 1× 速度，否则会让消耗品 juice 动画快得看不清。
+    // 限制条件：
+    //   1) 只在计分进行中（mScoringInProgress）才缩短延时；其它阶段保持 1×。
+    //   2) 计分阶段的前 300ms 是"卡片从手牌飞到计分区"的过渡时间——这段也保持 1×
+    //      原速，倍速只作用于到位后 chips/mult 数字增减的过程，否则用户感觉卡片飞得过快。
     double mGameSpeedFactor = 1.0;
     void setGameSpeedFactor(double f) { mGameSpeedFactor = qMax(0.25, f); }
     int scaledDelay(int delayMs) const {
         if (!mScoringInProgress) return qMax(0, delayMs);
-        return qMax(0, qRound(delayMs / qMax(0.25, mGameSpeedFactor)));
+        constexpr int unscaledFloor = 300;
+        if (delayMs <= unscaledFloor) return qMax(0, delayMs);
+        const int beyond = delayMs - unscaledFloor;
+        const int scaled = qRound(beyond / qMax(0.25, mGameSpeedFactor));
+        return qMax(0, unscaledFloor + scaled);
     }
 
     QVector<ConsumableItem*> mConsumableItems;

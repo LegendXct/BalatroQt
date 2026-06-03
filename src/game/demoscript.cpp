@@ -120,10 +120,13 @@ void DemoScript::scriptedShopOffers(QVector<ShopOffer> &out, int slotCount)
         out.append(makeJokerOffer(JokerType::JollyJoker));
         out.append(makeJokerOffer(JokerType::Misprint));
     } else if (sShopVisit == 3) {
-        // 第三商店（Boss 后，Ante 2 小盲前）：和第二商店换一组小丑，否则两次商店看着假。
-        out.append(makeJokerOffer(JokerType::Banner));
-        out.append(makeJokerOffer(JokerType::AbstractJoker));
-        out.append(makeJokerOffer(JokerType::EvenSteven));
+        // 最后一次商店（Boss 后，Ante 2 小盲前）：
+        //   - 不出已经在玩家小丑栏的 6 张（蓝图/头脑风暴/乍得/占卜师/抽象小丑/特里布莱）
+        //   - 不出比例特殊的小丑（半张/方形/小小/照片/特技演员等异形 sprite）
+        // 选 3 张标准比例 + 视觉差异化的小丑。
+        out.append(makeJokerOffer(JokerType::Joker));        // 经典 +4 倍率
+        out.append(makeJokerOffer(JokerType::Bull));         // 每金币 +2 筹码
+        out.append(makeJokerOffer(JokerType::Fibonacci));    // A/2/3/5/8 +8 倍率
     } else {
         out.append(makeJokerOffer(JokerType::GreedyJoker));
         out.append(makeJokerOffer(JokerType::LustyJoker));
@@ -189,6 +192,10 @@ void DemoScript::scriptedBoosterOffers(QVector<ShopOffer> &out)
         // 展示 5 种蜡封/增强组合（红/蓝/金/紫蜡封 + 幸运/钢铁/万能增强）。
         out.append(makePack(PackKind::Arcana,   PackSize::Mega,   6));
         out.append(makePack(PackKind::Standard, PackSize::Mega,   6));
+    } else if (sShopVisit == 3) {
+        // 最后一次商店：一个标准包 + 一个小丑包做收尾，演示牌堆扩充和最后捡漏的可能性。
+        out.append(makePack(PackKind::Standard, PackSize::Normal, 4));
+        out.append(makePack(PackKind::Buffoon,  PackSize::Normal, 4));
     } else {
         out.append(makePack(PackKind::Standard, PackSize::Normal, 4));
         out.append(makePack(PackKind::Standard, PackSize::Normal, 4));

@@ -258,8 +258,12 @@ void CardItem::paintFront(QPainter *painter)
                     sp.setRenderHint(QPainter::SmoothPixmapTransform, false);
                     sp.drawPixmap(cacheRect, *sEnhSheet, seal);
                 }
-                if (mData.seal == Seal::Gold)
-                    sealPix = BalatroShaders::renderGoldSealPixmap(sealPix, 0.95);
+                if (mData.seal == Seal::Gold) {
+                    // 原版 card.lua:4476: G.shared_seals['Gold']:draw_shader('voucher',...)
+                    // —— 金色蜡封实际走的是 voucher shader 的金色 sparkle，不是 gold_seal
+                    // shader（那是商店招牌 / 火焰用的）。
+                    sealPix = BalatroShaders::renderVoucherPixmap(sealPix, 1.0);
+                }
                 fp.drawPixmap(cacheRect, sealPix);
             }
         }

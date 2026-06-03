@@ -1029,7 +1029,11 @@ QPixmap PackOpenWidget::renderPlayingCard(const CardData &c, const QSize &size) 
     }
     if (sCol >= 0 && !enhSheet.isNull()) {
         QPixmap seal = enhSheet.copy(sCol*W, sRow*H, W, H);
-        if (c.seal == Seal::Gold) seal = BalatroShaders::renderGoldSealPixmap(seal, 0.95);
+        if (c.seal == Seal::Gold) {
+            // 原版 card.lua:4476：金色蜡封实际走 voucher shader 的金色 sparkle，
+            // 不是 gold_seal shader（那是商店招牌 / 火焰用的）。
+            seal = BalatroShaders::renderVoucherPixmap(seal, 1.0);
+        }
         QPainter sealPainter(&pix);
         sealPainter.setRenderHint(QPainter::SmoothPixmapTransform, true);
         sealPainter.drawPixmap(QRect(0, 0, W, H), seal);

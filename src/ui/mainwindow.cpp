@@ -610,14 +610,21 @@ static void setLabelScaledText(QLabel *lbl, const QString &text, int nomPx)
 {
     QFont f = lbl->font();
     f.setPixelSize(nomPx);
-    // 之前只在 w > 20 时缩字号；若 layout 还没算完 width 可能是 0，
-    // 这种情况下用 minimumWidth / parent 宽度做兜底，避免把 "1.23e15" 这种长串
-    // 当成"能装下" 直接按 42px 输出导致溢出截断。
     int w = lbl->width();
     if (w <= 20) w = qMax(lbl->minimumWidth(), 120);
-    const int minPx = qMax(10, nomPx / 3);
+    // 下限放到 nomPx/4 但不低于 8px——5/6 位带逗号在窄槽位里要求更激进的缩字号；
+    // 之前 nomPx/3=14 在 170px 槽位 + 1.22× juice 时最右一位会被截断。
+    const int minPx = qMax(8, nomPx / 4);
+    // 算 budget：
+    //   - 标签 CSS padding 2px 6px 实际占 ~12px 横向，再减 4px 边框/圆角余量 = 16px 常数
+    //   - 计分阶段还会 juiceLabelPulse 拉到 1.22× 字号——预留 25% 安全系数，
+    //     保证 pulse 高峰时整串数字仍在框内。
+    const int budget = qMax(20, w - 16);
     QFontMetrics fm(f);
-    while (f.pixelSize() > minPx && fm.horizontalAdvance(text) > w - 16) {
+    auto fits = [&]() {
+        return fm.horizontalAdvance(text) * 5 / 4 <= budget;   // *1.25 安全系数
+    };
+    while (f.pixelSize() > minPx && !fits()) {
         f.setPixelSize(f.pixelSize() - 1);
         fm = QFontMetrics(f);
     }
@@ -631,9 +638,9 @@ static QString formatScoreNumber(double num)
     if (std::isinf(num)) return QStringLiteral("Inf");
     const bool neg = num < 0.0;
     num = std::abs(num);
-    // 原版 number_with_commas + scientific：到 10^11 量级切到科学计数法。
-    // 2 位小数尾数（原本 3 位）让 "1.23e15" 这种 7 字符表达式在 170px 槽位里 1× 字号就放得下。
-    if (num >= 1e11) {
+    // setLabelScaledText 已经能自适应缩字号 + 1.25× pulse 安全系数，10 位以内的十进制
+    // 都能完整放下；阈值挪到 1e10，11 位起才切到科学计数法。
+    if (num >= 1e10) {
         int exp = int(std::floor(std::log10(std::max(num, 1.0))));
         double mantissa = num / std::pow(10.0, exp);
         return QString("%1%2e%3").arg(neg ? "-" : "")
@@ -1255,7 +1262,9 @@ void MainWindow::setupLeftPanel() {
     QWidget *chipsRow = new QWidget(mLeftPanel);
     chipsRow->setAttribute(Qt::WA_StyledBackground, true);
     chipsRow->setStyleSheet("background:transparent; border:none;");
-    chipsRow->setFixedHeight(dp(96));
+    // 之前 dp(96)：用户反馈 6 位数字会撑出框；横向不能放宽（会顶出左面板），
+    // 改成缩高 dp(76) + 配合下面的字号 34 / padding 2-6，让 "999,999" 在原宽度内放得下。
+    chipsRow->setFixedHeight(dp(76));
     QHBoxLayout *chipsLayout = new QHBoxLayout(chipsRow);
     chipsLayout->setContentsMargins(0, 0, 0, 0);
     chipsLayout->setSpacing(dp(4));
@@ -1263,14 +1272,13 @@ void MainWindow::setupLeftPanel() {
     mLblChips = new QLabel("0", chipsRow);
     // 数字靠右贴近中间的 ×，让筹码值视觉上"挤"向倍率方向；原版同款。
     mLblChips->setAlignment(Qt::AlignRight | Qt::AlignVCenter);
-    QFont cf = mPixelFont; cf.setPixelSize(uiPx(42));
+    // 之前 42px：长数字撑出框；改到 34px 配合 padding 2-6，6 位 "999,999" 1× 字号能放下。
+    QFont cf = mPixelFont; cf.setPixelSize(uiPx(34));
     mLblChips->setFont(cf);
-    // 显式给一个最小宽度，保证 setLabelScaledText 在 layout 没算完时
-    // 也有合理的 width 估算，长数字 / 科学计数法不会按 42px 输出超框。
-    mLblChips->setMinimumWidth(dp(150));
+    // 不强加 minWidth——layout 用 stretch 1 自动均分横向空间，否则会顶出左面板。
     mLblChips->setStyleSheet(
         "background: #009dff; color: white;"
-        "border-radius: 8px; padding: 4px 12px;"
+        "border-radius: 8px; padding: 2px 6px;"
         );
 
     QLabel *lblX = new QLabel("×", chipsRow);
@@ -1284,10 +1292,10 @@ void MainWindow::setupLeftPanel() {
     // 倍率数字靠左贴近中间的 ×。
     mLblMult->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
     mLblMult->setFont(cf);
-    mLblMult->setMinimumWidth(dp(150));
+    // 同 chips：不加 minWidth；padding 收紧。
     mLblMult->setStyleSheet(
         "background:#fe5f55; color:white;"
-        "border-radius:8px; padding:4px 12px;"
+        "border-radius:8px; padding:2px 6px;"
         );
 
     chipsLayout->addWidget(mLblChips, 1);
@@ -2174,7 +2182,11 @@ void MainWindow::startNewRunFromOptions()
     // 保持覆盖层可见直到所有状态和界面刷新完成，避免玩家看到半帧清空场景。
     // 不再 setUpdatesEnabled(false)，因为整窗禁用/恢复更新也会在部分机器上触发黑底中间帧。
     resetTransientOverlaysForNewRun();
+    // 上一局可能升过 Flush 到 Lv.5；新局 startGame 清空 mHandLevels，但 mPrevHandLevels 还留着旧值。
+    // 不重置的话，新局第一次买木星升 Flush=Lv.2 对比"旧 Lv.5"算成 0 个升级，侧栏演出被吞。
+    mPrevHandLevels.clear();
     mGameState->startGame();
+    mPrevHandLevels = mGameState->handLevels();
     mHasOngoingRun = true;   // 一旦开过新局,主菜单里 "继续当前局" 就该亮起
     refreshHand();
     refreshJokerSlots();
