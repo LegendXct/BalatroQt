@@ -220,8 +220,8 @@ QVariant ConsumableItem::itemChange(GraphicsItemChange change, const QVariant &v
 void ConsumableItem::updateShadowZ()
 {
     if (!mShadow) return;
-    const bool active = mPressed || mDragging || mScoringLifted;
-    mShadow->setZValue(active ? zValue() - 0.5 : -1000.0);
+    // 阴影永远 z=-1000，保证不与邻牌本体重叠（详见 CardItem::updateShadowZ 注释）。
+    mShadow->setZValue(-1000.0);
 }
 
 void ConsumableItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) {

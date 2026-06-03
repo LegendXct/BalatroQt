@@ -131,9 +131,12 @@ QVariant CardItem::itemChange(GraphicsItemChange change, const QVariant &value)
 void CardItem::updateShadowZ()
 {
     if (!mShadow) return;
-    // 按下 / 拖动 / 计分时阴影升到本牌之下、其他牌之上；否则深沉到 -1000 全场最底。
-    const bool active = mPressed || mDragging || mScoringLifted;
-    mShadow->setZValue(active ? zValue() - 0.5 : -1000.0);
+    // 用户要求：手牌 / 计分 / 拖动场景下阴影永远不与邻牌本体重叠。
+    // 阴影固定 z=-1000（场景最底层）→ 任何其他卡牌（z≥20）都画在它上面 → 阴影即使
+    // 因投影方向（左下）延伸到隔壁卡牌区域，也被隔壁牌本体盖住，视觉上没有重叠。
+    // 之前 active 时升到 zValue()-0.5 是为了让本牌"看起来浮起来"，但代价是本牌阴影
+    // 盖过左侧邻牌本体——用户指出这就是重叠，所以放弃这个分支。
+    mShadow->setZValue(-1000.0);
 }
 
 QRectF CardItem::boundingRect() const {

@@ -296,7 +296,6 @@ protected:
             const qreal lift = mPressed ? 0.85
                                         : (mLifted ? 0.55
                                                    : ((mHovered && !mDisableHoverLift) ? 0.30 : 0.0));
-            const qreal shadowHeight = 0.1 + 0.45 * lift;
 
             // 卡图实际落点：button 中心 + hover 时 -4 px。剪影按 pixSize 绘制——
             // 与下面 drawPixmap 用同一套几何，shadow 就完全跟随可见图像形状。
@@ -309,25 +308,32 @@ protected:
             const qreal cy = height() / 2.0 + ((mHovered && !mDisableHoverLift) ? -8.0 : 0.0);
             const qreal w = pixSize.width();
             const qreal h = pixSize.height();
-            // 偏移按原版 card 单位换算到可见卡牌像素（1 单位 = h/CARD_H(2.75) ≈ w/CARD_W(2.05)），
-            // 不再用固定 32 px——否则阴影离本体太近几乎看不见。原版 shadow_parrallax.y=-1.5。
-            const qreal offX = -nx * 1.5 * shadowHeight * (w / 2.0488);
-            const qreal offY =  1.5 * shadowHeight * (h / 2.7512);
-            const QRectF shadowRect(cx - w/2.0 + offX, cy - h/2.0 + offY, w, h);
+            // 与 cardshadow.cpp 完全一致：所有商品阴影方向 + 大小同一组像素常量。
+            // 光从右上方 → 阴影到左下角 → (offX<0, offY>0)。不依赖 nx、不依赖卡牌尺寸。
+            // 用户反馈"再缩 25%"：rest offY=13.5，最大 lift offY=27（之前 18/36）。
+            (void)nx;
+            const qreal offY = 13.5 + 13.5 * lift;
+            const qreal offX = -0.5 * offY;
 
             p.save();
             p.setRenderHint(QPainter::Antialiasing, true);
-            p.setRenderHint(QPainter::SmoothPixmapTransform, true);
             p.setPen(Qt::NoPen);
-            // 所有商品都按真实轮廓投影：用 alpha 剪影 pixmap 画两层（外圈放大低透明=软边、
-            // 内圈实尺寸），与 cardshadow.cpp 的 CardShadowItem 同一套配色/比例。优惠券、
-            // 烧焦、异形小丑、卡包等非矩形外形都能贴合，不再溢出成圆角矩形。
-            const QRectF srcR(0, 0, mShadowPixmap.width(), mShadowPixmap.height());
-            const qreal expand = 0.5 + 2.0 * lift;
-            p.setOpacity((20 + 25 * lift) / 255.0);
-            p.drawPixmap(shadowRect.adjusted(-expand, -expand, expand, expand), mShadowPixmap, srcR);
-            p.setOpacity((45 + 40 * lift) / 255.0);
-            p.drawPixmap(shadowRect, mShadowPixmap, srcR);
+            // 旋转中心与 sprite 完全一致：卡牌中心 (cx, cy)。之前是 translate 到
+            // (cx+offX, cy+offY) 再 rotate，pivot 错位 → voucher 扇形 ±5.5° / booster
+            // hover jitter ±2.4° 一动，阴影就绕"错的轴"甩，远看像阴影没跟住卡牌。
+            // 现在和 sprite 用同一个 pivot，再在旋转后的坐标系里把 rect 中心放到 (offX, offY)
+            // —— 与场景里 CardShadowItem.paint 的几何完全一致（手牌/小丑/消耗也是这样画）。
+            p.translate(cx, cy);
+            if (!qFuzzyIsNull(mStaticRotDeg + mJitterRotDeg))
+                p.rotate(mStaticRotDeg + mJitterRotDeg);
+            const qreal expand = 0.5 + 1.5 * lift;
+            // 商店里所有阴影（含异形 booster / voucher / joker）统一画圆角矩形：
+            //   外圈放大低透明 = 软边光晕；内圈实尺寸 ~30% alpha（对齐原版 dissolve.fs:19）。
+            p.setBrush(QColor(0, 0, 0, int(30 + 30 * lift)));
+            p.drawRoundedRect(QRectF(offX - w/2.0 - expand, offY - h/2.0 - expand,
+                                     w + 2 * expand, h + 2 * expand), 10, 10);
+            p.setBrush(QColor(0, 0, 0, int(78 + 45 * lift)));
+            p.drawRoundedRect(QRectF(offX - w/2.0, offY - h/2.0, w, h), 9, 9);
             p.restore();
         }
 
