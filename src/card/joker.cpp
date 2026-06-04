@@ -851,7 +851,7 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::HangingChad:
-        j.name = "悬挂乍得"; j.description = "重新触发第一张计分牌 2 次";
+        j.name = "未断选票"; j.description = "重新触发第一张计分牌 2 次";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};
         break;
@@ -1232,7 +1232,7 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::Cartomancer:
-        j.name = "纸牌占卜师"; j.description = "选择盲注时，创建 1 张塔罗牌";
+        j.name = "塔罗术士"; j.description = "选择盲注时，创建 1 张塔罗牌";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};
         break;

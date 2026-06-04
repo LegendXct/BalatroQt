@@ -566,7 +566,7 @@ void GameState::playCards(const QVector<int> &indices) {
 
     const int sockRetriggers = countResolvedJokersOfType(mJokers, JokerType::SockAndBuskin);
     const int chadRetriggers = 2 * countResolvedJokersOfType(mJokers, JokerType::HangingChad);
-    // 收集所有"解析为悬挂乍得"的小丑下标——真本体 + 蓝图/头脑风暴复制者。
+    // 收集所有"解析为未断选票"的小丑下标——真本体 + 蓝图/头脑风暴复制者。
     // 按这个列表给每个 chad 触发发一个 JokerRetrigger 事件，让对应小丑在 UI 端做 juiceUp 弹跳。
     QVector<int> chadSourceIdx;
     for (int i = 0; i < mJokers.size(); ++i) {
@@ -619,7 +619,7 @@ void GameState::playCards(const QVector<int> &indices) {
                 if (!wj.isDebuffed && wj.type == JokerType::WeeJoker) wj.counter += 8 * triggers;
         }
 
-        // 计算各类重新触发在 t 索引上占的区段，方便给悬挂乍得的每次触发发独立 UI 事件。
+        // 计算各类重新触发在 t 索引上占的区段，方便给未断选票的每次触发发独立 UI 事件。
         // 区段顺序与 triggers 累加顺序一致：base → 红蜡 → sock(若人头) → chad(若首张) → hack/dusk/seltzer。
         const int sockOffset = isFace ? sockRetriggers : 0;
         const int chadZoneStart = 1 + redSealReps + sockOffset;
@@ -629,7 +629,7 @@ void GameState::playCards(const QVector<int> &indices) {
                 // 原版红色蜡封在真正重复计算前先显示"再触发"。
                 result.events.append({ ScoreEventKind::RedSealRetrigger, playedIdx, -1, -1, 0, 1.0 });
             } else if (firstScoringCard && t >= chadZoneStart && t < chadZoneEnd) {
-                // 悬挂乍得 / 复制乍得的小丑：每次重触发派一个事件，UI 收到后给小丑做 juiceUp。
+                // 未断选票 / 复制乍得的小丑：每次重触发派一个事件，UI 收到后给小丑做 juiceUp。
                 int chadRel = t - chadZoneStart;       // 0..chadRetriggers-1
                 int srcArrayIdx = chadRel / 2;         // 每个 chad 贡献 2 次触发
                 if (srcArrayIdx < chadSourceIdx.size()) {
@@ -2874,7 +2874,7 @@ void GameState::triggerBlindSelectJokers(BlindType type)
     bool jokersDirty = false;
 
     // mJokers 会在循环中被修改，先对当前小丑类型做快照。
-    // 关键：要解析 Blueprint / Brainstorm 的复制目标——蓝图复制纸牌占卜师(Cartomancer)
+    // 关键：要解析 Blueprint / Brainstorm 的复制目标——蓝图复制塔罗术士(Cartomancer)
     // 等"选盲注时触发"的小丑，原版 calculate_joker 会带 setting_blind 上下文一并复制，
     // 所以蓝图也应当再生成一张塔罗。之前直接取 j.type 导致复制无效。
     QVector<JokerType> present;

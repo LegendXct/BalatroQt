@@ -103,7 +103,7 @@ void DemoScript::scriptedShopOffers(QVector<ShopOffer> &out, int slotCount)
         out.append(makeJokerOffer(JokerType::Blueprint,  Edition::Foil));
         out.append(makeJokerOffer(JokerType::Brainstorm, Edition::Holographic));
     } else if (sShopVisit == 1 && sShopRerolls >= 1) {
-        // 第一商店重摇后：负片的 悬挂乍得(未断选票) + 普通的 纸牌占卜师(塔罗术士)
+        // 第一商店重摇后：负片的 未断选票 + 普通的 塔罗术士
         // 负片 = +1 小丑槽位，让最终 6 张小丑（蓝图/头脑风暴/乍得/占卜师/公牛/特里布莱）能塞下默认 5 槽。
         out.append(makeJokerOffer(JokerType::HangingChad, Edition::Negative));
         out.append(makeJokerOffer(JokerType::Cartomancer, Edition::None));

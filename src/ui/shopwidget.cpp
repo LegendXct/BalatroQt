@@ -434,6 +434,10 @@ void justifyShopRow(QWidget *box, const QVector<QWidget*> &allCards, int leadCom
     QVector<QWidget*> vis;
     for (QWidget *w : allCards) if (w && w->isVisible()) vis << w;
     if (vis.isEmpty()) return;
+    // 设 spacing=0：QHBoxLayout 默认在相邻 item 之间塞 setSpacing()，导致前导 48dp 与中间
+    // stretch 之间各多 6dp，最终 left/between/right 三段 visible 间距相差 6dp。把固定
+    // spacing 关掉，全部空白只由 stretch + leadCompensate 控制，三段才严格相等。
+    lay->setSpacing(0);
     lay->addStretch(1);
     if (leadCompensate > 0) lay->addSpacing(leadCompensate);
     for (int i = 0; i < vis.size(); ++i) {
@@ -1387,9 +1391,9 @@ void ShopWidget::refresh()
     auto fillSlot = [this](OfferUi &ou, const ShopOffer &o, bool canBuy, bool isBooster) {
         Q_UNUSED(isBooster);
         if (o.sold) {
-            // 卖完后保持外层 ou.card 占位（仍 setVisible(true)），仅隐藏内部 cardBtn / 价格 / 按钮，
-            // 确保当前行的另一槽位高度和宽度不会被 layout 重新瓜分。
-            ou.card->setVisible(true);
+            // 卖完后把外层 ou.card 也隐藏 —— justifyShopRow 只把 visible 的 ou.card 纳入排布，
+            // 剩余商品才能在购买后自动重新等距居中。
+            ou.card->setVisible(false);
             if (ou.cardBtn) {
                 ou.cardBtn->setVisible(false);
                 ou.cardBtn->setToolTip(QString());
@@ -1608,19 +1612,14 @@ void ShopWidget::refresh()
     if (mGS->hasFreeShopReroll() && rcost > 0)
         mBtnReroll->setText(QString("重抽\n免费"));
 
-    // 槽位变化（如 Overstock 优惠券新增槽位）后，外层 ou.card 会被 QHBoxLayout
-    // 重新分配位置，但内部 cardBtn 不会收到 Move 事件，eventFilter 也就不会触发
-    // syncPriceLblForCardBtn——结果价格标签停留在旧位置，直到玩家 hover 才纠正。
-    // 这里在 layout 应用完毕后（singleShot(0)）主动把所有可见价格标签重新贴到位。
+    // 槽位变化（如 Overstock 优惠券新增槽位）/ 购买后槽位 re-justify 后，cardBtn 不会收到
+    // Move 事件，eventFilter 也就不会触发 syncPriceLblForCardBtn——价格标签会停在旧位置直到
+    // 玩家 hover 才纠正。这里在 layout 应用完毕后（singleShot(0)）主动重新贴到位。
     QPointer<ShopWidget> guard(this);
     QTimer::singleShot(0, this, [guard]() {
         if (!guard) return;
-        auto syncAll = [g = guard.data()](const QVector<OfferUi> &vec) {
-            for (const auto &ou : vec) if (ou.cardBtn) g->syncPriceLblForCardBtn(ou.cardBtn);
-        };
-        syncAll(guard->mShopUi);
-        syncAll(guard->mVoucherUi);
-        syncAll(guard->mBoosterUi);
+        if (auto *l = guard->layout()) l->activate();
+        guard->syncAllPriceLbls();
     });
 }
 
@@ -2532,6 +2531,8 @@ void ShopWidget::resizeEvent(QResizeEvent *e)
     // 面板撑到最终宽度后再排一次——首次打开 refresh() 是在 setGeometry 之前跑的，
     // 那时 shopBox 宽度还是旧的，stretch 分不开，商品会挤在左侧直到下一次刷新。
     justifyShopRows();
+    // 价格标签也跟着重排——cardBtn 移动后才能算出新的 px/py。
+    syncAllPriceLbls();
 }
 
 void ShopWidget::showEvent(QShowEvent *e)
@@ -2540,7 +2541,26 @@ void ShopWidget::showEvent(QShowEvent *e)
     // 刚显示时内部 layout 还没把 shopBox 撑到最终宽度（Qt 布局是惰性的），同步排会用到旧宽度
     // 导致 stretch 分不开、商品挤左。延后到事件循环处理完这轮 layout 再排一次。
     QPointer<ShopWidget> guard(this);
-    QTimer::singleShot(0, this, [guard]() { if (guard) guard->justifyShopRows(); });
+    QTimer::singleShot(0, this, [guard]() {
+        if (!guard) return;
+        guard->justifyShopRows();
+        // 强制 layout 立刻 apply，确保下面 syncAllPriceLbls 拿到 cardBtn 的最终位置。
+        if (auto *l = guard->layout()) l->activate();
+        // 首次显示时 cardBtn 的 mapTo(this, ...) 在 layout 应用前会给陈旧坐标，价格标签会停在
+        // 旧位置（甚至窗口左上角的 "$0" 残影），直到玩家 hover/click 才纠正。这里在 layout
+        // 完成后主动 sync 一次。
+        guard->syncAllPriceLbls();
+    });
+}
+
+void ShopWidget::syncAllPriceLbls()
+{
+    auto syncAll = [this](const QVector<OfferUi> &vec) {
+        for (const auto &ou : vec) if (ou.cardBtn) syncPriceLblForCardBtn(ou.cardBtn);
+    };
+    syncAll(mShopUi);
+    syncAll(mVoucherUi);
+    syncAll(mBoosterUi);
 }
 
 void ShopWidget::justifyShopRows()

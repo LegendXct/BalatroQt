@@ -596,6 +596,23 @@ void CardItem::animateBaseRotation(double targetDeg, int durationMs)
     anim->start();
 }
 
+void CardItem::resetAllTilts()
+{
+    // 停掉 moveTo 启动的 CardMoveTilt（按水平位移 ∝ 起始倾斜，~300ms 衰减回 0）；否则
+    // 即便我们把 mMoveTilt 改成 0,下一帧 QVariantAnimation 又会把它写回 tiltMax→0 区间。
+    if (auto *a = findChild<QVariantAnimation*>(QStringLiteral("CardMoveTilt"),
+                                                Qt::FindDirectChildrenOnly))
+        a->stop();
+    mHoverTiltX = 0.0;
+    mHoverTiltY = 0.0;
+    mAmbientTiltX = 0.0;
+    mAmbientTiltY = 0.0;
+    mJitterRot = 0.0;
+    mDragTilt = 0.0;
+    mMoveTilt = 0.0;
+    applyTransform();
+}
+
 void CardItem::flip() {
     // 对齐原版 card.lua Card:flip()：触发 pinch.x，使牌宽收缩到 0（绕 Y 轴翻面效果），
     // 然后在 sprite 翻面后再扩张回 1。仅缩 X，不缩 Y，避免出现垂直方向的塌缩。

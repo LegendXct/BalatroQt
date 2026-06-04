@@ -91,6 +91,13 @@ public:
     // 计分阶段抬升：mainwindow.cpp 在 playScoreEvent / animatePlayedCardsToDiscardThen
     // 期间调用，让正在被计分的牌阴影最大化（off + blur 增大），看上去卡牌悬浮起来。
     void setScoringLifted(bool lifted);
+    // 出牌瞬间清掉所有"暂态"倾斜（hover 3D 倾斜 / ambient 漂浮 / hover jitter / drag / 重排
+    // move tilt），并停掉 CardMoveTilt 衰减动画。否则:
+    //   - 玩家 hover 着某张牌点 Play，那张牌进计分区时还会带 hover 倾斜；
+    //   - moveTo() 默认按位移大小启动 mMoveTilt 动画(~300ms)，5 张牌横向跨度大时计分启动那
+    //     一瞬间(playArrivalMs=300)倾斜还没完全衰减。
+    // 调用方还应该再 setHoverTiltEnabled(false) 以免计分中鼠标飘过又触发新的 3D 倾斜。
+    void resetAllTilts();
 signals:
     void clicked(CardItem *card);
     void dragMoved(CardItem *card, QPointF scenePos);

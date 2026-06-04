@@ -59,6 +59,9 @@ private:
     // 把商品行 / 礼包行的可见卡牌 space-evenly 重排（间距+牌+间距…）。refresh() 和 resizeEvent
     // 都要调：refresh 设好可见性后排一次，resize 把面板撑到最终宽度后再排一次（修首次打开挤左）。
     void justifyShopRows();
+    // 把所有 shop / voucher / booster 槽位的价格标签同步到对应 cardBtn 上方。layout 应用完毕
+    // 后必须调一次——首次进商店 / resize / 购买后槽位平移时,标签会停在旧位置直到玩家 hover。
+    void syncAllPriceLbls();
     void buildInfoPanel();
     void showOfferInfo(QWidget *source);
     void hideOfferInfo();
