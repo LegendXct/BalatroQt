@@ -35,6 +35,7 @@ signals:
 
 protected:
     void resizeEvent(QResizeEvent *e) override;
+    void showEvent(QShowEvent *e) override;
     bool eventFilter(QObject *obj, QEvent *event) override;
 
 private slots:
@@ -55,6 +56,9 @@ private:
 
     void buildUi();
     void layoutPanel();
+    // 把商品行 / 礼包行的可见卡牌 space-evenly 重排（间距+牌+间距…）。refresh() 和 resizeEvent
+    // 都要调：refresh 设好可见性后排一次，resize 把面板撑到最终宽度后再排一次（修首次打开挤左）。
+    void justifyShopRows();
     void buildInfoPanel();
     void showOfferInfo(QWidget *source);
     void hideOfferInfo();

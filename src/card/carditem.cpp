@@ -18,15 +18,70 @@
 #include <QApplication>
 #include <QRandomGenerator>
 #include <QVariantAnimation>
+#include <QPointer>
 #include <cmath>
 #include "../audio/audiomanager.h"
 #include "../utils/shadereffects.h"
 #include "cardshadow.h"
+#include "cardfloat.h"
 #include <QGraphicsScene>
+
+// 环境漂浮的最大倾斜角（度）。原版 ambient_tilt=0.2 * tilt_factor=0.3 折算后很轻；这里取 2.2°。
+static constexpr qreal kAmbientFloatDeg = 2.2;
 
 QPixmap *CardItem::sDeckSheet = nullptr;
 QPixmap *CardItem::sEnhSheet = nullptr;
 QPixmap *CardItem::sJokerSheet = nullptr;
+
+// CPU 版 dissolve 着色器（复刻 resources/shaders/dissolve.fs 的核心）：按一张平滑噪声场
+// 把 sprite 从噪声边缘逐块"烧蚀"消散，阈值随 dissolve(0→1) 升高。临界带染上 dissolve_colours
+// 形成燃烧的彩色碎边。用于卡牌被摧毁(start_dissolve/shatter)与生成(materialize, 反向)的动画。
+static QImage dissolveImage(const QImage &srcIn, double dissolve, const QVector<QColor> &colours)
+{
+    QImage img = srcIn.convertToFormat(QImage::Format_ARGB32);
+    const int W = img.width(), H = img.height();
+    if (W <= 0 || H <= 0) return img;
+    const double d = qBound(0.0, dissolve, 1.0);
+    // dissolve.fs:21 adjusted_dissolve，把 0..1 拉到 -0.01..1.01 让两端不卡住。
+    const double adj = (d * d * (3.0 - 2.0 * d)) * 1.02 - 0.01;
+    const double mx = double(qMax(W, H));
+    const double t = 2003.0;                       // 固定时间种子（一次性动画无需随时间漂移）
+    // 像素化到约 sprite 原生分辨率，形成原版的"块状"消散而非逐像素。
+    const int cells = qMax(8, qMin(W, H) / 4);
+    const double pi = 3.14159265358979323846;
+
+    for (int y = 0; y < H; ++y) {
+        QRgb *row = reinterpret_cast<QRgb *>(img.scanLine(y));
+        for (int x = 0; x < W; ++x) {
+            const int a = qAlpha(row[x]);
+            if (a == 0) continue;
+            const double fx = (std::floor(double(x) / W * cells) + 0.5) / cells;
+            const double fy = (std::floor(double(y) / H * cells) + 0.5) / cells;
+            const double ux = (fx - 0.5) * 2.3 * mx;
+            const double uy = (fy - 0.5) * 2.3 * mx;
+            const double p1x = ux + 50.0 * std::sin(-t / 143.6340), p1y = uy + 50.0 * std::cos(-t / 99.4324);
+            const double p2x = ux + 50.0 * std::cos(t / 53.1532),   p2y = uy + 50.0 * std::cos(t / 61.4532);
+            const double p3x = ux + 50.0 * std::sin(-t / 87.53218), p3y = uy + 50.0 * std::sin(-t / 49.0);
+            const double field = (1.0 + (std::cos(std::hypot(p1x, p1y) / 19.483)
+                                  + std::sin(std::hypot(p2x, p2y) / 33.155) * std::cos(p2y / 15.73)
+                                  + std::cos(std::hypot(p3x, p3y) / 27.193) * std::sin(p3x / 21.92))) / 2.0;
+            const double res = 0.5 + 0.5 * std::cos(adj / 82.612 + (field - 0.5) * pi);
+            if (res <= adj) {
+                row[x] = qRgba(0, 0, 0, 0);        // 已烧蚀
+            } else if (!colours.isEmpty()
+                       && res < adj + 0.8 * (0.5 - std::abs(adj - 0.5))) {
+                // 临界燃烧带：染成 dissolve_colours（按 res 在带内的位置取色），保留原 alpha。
+                const double band = 0.8 * (0.5 - std::abs(adj - 0.5));
+                const double frac = band > 1e-6 ? qBound(0.0, (res - adj) / band, 1.0) : 0.0;
+                const int ci = qBound(0, int(frac * colours.size()), colours.size() - 1);
+                const QColor c = colours[ci];
+                row[x] = qRgba(c.red(), c.green(), c.blue(), a);
+            }
+            // else: 保留原像素
+        }
+    }
+    return img;
+}
 
 namespace {
 QSet<CardItem*> sAnimatedCards;
@@ -93,15 +148,40 @@ CardItem::CardItem(const CardData &data, QGraphicsItem *parent)
         ensureCardShaderTimer();
         sAnimatedCards.insert(this);
     }
+
+    // 环境漂浮：每张牌按各自相位缓慢做立体浮动（复刻 ambient_tilt）。
+    mFloatPhase = QRandomGenerator::global()->generateDouble() * 6.2831853;
+    CardFloat::add(this, [this](double t) { updateAmbientFloat(t); });
 }
 
 CardItem::~CardItem()
 {
+    CardFloat::remove(this);
     if (mShadow) {
         if (auto *s = mShadow->scene()) s->removeItem(mShadow);
         delete mShadow;
         mShadow = nullptr;
     }
+}
+
+void CardItem::updateAmbientFloat(double t)
+{
+    // 交互中（hover/按下/拖动/翻牌/溶解）不叠环境倾斜，交给各自的处理逻辑；离开后回落到 0。
+    const bool idle = !mHovered && !mPressed && !mDragging && !mScoringLifted
+                      && !mDissolveActive && qFuzzyCompare(mFlipXScale + 1.0, 2.0);
+    if (!idle || !isVisible()) {
+        if (mAmbientTiltX != 0.0 || mAmbientTiltY != 0.0) {
+            mAmbientTiltX = 0.0;
+            mAmbientTiltY = 0.0;
+            applyTransform();
+        }
+        return;
+    }
+    // 慢速圆周式微倾斜：两个轴用略不同的频率，浮动更自然不机械。
+    const double a = t * 1.6 + mFloatPhase;
+    mAmbientTiltX = kAmbientFloatDeg * std::sin(a);
+    mAmbientTiltY = kAmbientFloatDeg * std::cos(a * 0.92 + 1.3);
+    applyTransform();
 }
 
 QVariant CardItem::itemChange(GraphicsItemChange change, const QVariant &value)
@@ -160,11 +240,80 @@ void CardItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidge
     painter->setRenderHint(QPainter::SmoothPixmapTransform, false);
     // 阴影由 mShadow（sibling CardShadowItem）单独绘制——z=-1000 保证落在其他牌之下，
     // 按下/拖动/计分时由 updateShadowZ() 升到本牌之下。这里 paint() 只画牌面本体。
+    if (mDissolveActive) {
+        // 溶解/具现化：先把牌面渲到离屏 buffer，再走 CPU dissolve 着色器，最后整体绘出。
+        QPixmap buf(WIDTH, HEIGHT);
+        buf.fill(Qt::transparent);
+        QPainter bp(&buf);
+        bp.setRenderHint(QPainter::SmoothPixmapTransform, false);
+        if (mData.faceUp) paintFront(&bp);
+        else paintBack(&bp);
+        bp.end();
+        const QImage dim = dissolveImage(buf.toImage(), mDissolve, mDissolveColours);
+        painter->drawImage(0, 0, dim);
+        return;
+    }
+
     if (mData.faceUp) paintFront(painter);
     else paintBack(painter);
 
     // hover / selected 不再画蓝/黄描边——原版没有这个轮廓线，状态变化由"抬升 + 阴影距离"
     // 表达，info 浮窗负责承载文字信息。
+}
+
+void CardItem::setDissolve(qreal v)
+{
+    v = qBound(0.0, v, 1.0);
+    if (qFuzzyCompare(v + 1.0, mDissolve + 1.0)) return;
+    mDissolve = v;
+    update();
+}
+
+void CardItem::startDissolve(bool glass, std::function<void()> onDone)
+{
+    if (mDissolveActive) return;
+    mShattered = glass;
+    mDissolveActive = true;
+    // 复刻 card.lua：shatter 用白色碎片色；start_dissolve 用黑/橙/红/金/灰。
+    mDissolveColours = glass
+        ? QVector<QColor>{ QColor(255, 255, 255) }
+        : QVector<QColor>{ QColor(0, 0, 0), QColor(255, 140, 30),
+                           QColor(255, 60, 60), QColor(255, 200, 40), QColor(120, 120, 120) };
+    mDissolve = 0.0;
+    juiceUp(glass ? 1.28 : 1.12, glass ? 180 : 150);
+    auto *anim = new QPropertyAnimation(this, "dissolve", this);
+    anim->setDuration(glass ? 360 : 500);   // 原版 dissolve_time 0.7*（玻璃 0.5 段）
+    anim->setStartValue(0.0);
+    anim->setEndValue(1.0);
+    anim->setEasingCurve(QEasingCurve::InQuad);
+    QPointer<CardItem> guard(this);
+    connect(anim, &QPropertyAnimation::finished, this, [guard, onDone]() {
+        if (onDone) onDone();
+        else if (guard) guard->setVisible(false);
+    });
+    anim->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+void CardItem::startMaterialize()
+{
+    if (mDissolveActive) return;
+    mShattered = false;
+    mDissolveActive = true;
+    // 生成牌：原版 start_materialize 反向溶解 + 绿色调碎边。
+    mDissolveColours = { QColor(120, 220, 120), QColor(255, 255, 255) };
+    mDissolve = 1.0;
+    update();
+    juiceUp(1.1, 200);
+    auto *anim = new QPropertyAnimation(this, "dissolve", this);
+    anim->setDuration(420);                  // 原版 0.6*dissolve_time
+    anim->setStartValue(1.0);
+    anim->setEndValue(0.0);
+    anim->setEasingCurve(QEasingCurve::OutQuad);
+    QPointer<CardItem> guard(this);
+    connect(anim, &QPropertyAnimation::finished, this, [guard]() {
+        if (guard) { guard->mDissolveActive = false; guard->update(); }
+    });
+    anim->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
 QRect CardItem::whiteBaseSrcRect() const {
@@ -424,6 +573,29 @@ void CardItem::moveTo(const QPointF &target, int durationMs) {
     tilt->start();
 }
 
+void CardItem::animateBaseRotation(double targetDeg, int durationMs)
+{
+    // 复用一只动画，避免连续 layout 时多只动画在同一属性上互相拽。
+    auto *anim = findChild<QPropertyAnimation*>(QStringLiteral("CardRotAnim"),
+                                                Qt::FindDirectChildrenOnly);
+    if (qFuzzyCompare(mBaseRotation + 1.0, targetDeg + 1.0)) {
+        if (anim && anim->state() == QAbstractAnimation::Running
+            && qFuzzyCompare(anim->endValue().toDouble() + 1.0, targetDeg + 1.0))
+            return;
+    }
+    if (!anim) {
+        anim = new QPropertyAnimation(this, "baseRotation", this);
+        anim->setObjectName(QStringLiteral("CardRotAnim"));
+        anim->setEasingCurve(QEasingCurve::OutCubic);
+    } else if (anim->state() == QAbstractAnimation::Running) {
+        anim->stop();
+    }
+    anim->setDuration(durationMs);
+    anim->setStartValue(mBaseRotation);
+    anim->setEndValue(targetDeg);
+    anim->start();
+}
+
 void CardItem::flip() {
     // 对齐原版 card.lua Card:flip()：触发 pinch.x，使牌宽收缩到 0（绕 Y 轴翻面效果），
     // 然后在 sprite 翻面后再扩张回 1。仅缩 X，不缩 Y，避免出现垂直方向的塌缩。
@@ -451,6 +623,8 @@ void CardItem::mousePressEvent(QGraphicsSceneMouseEvent *event) {
     if (event->button() == Qt::LeftButton) {
         mPressed = true;
         mDragging = false;
+        // 按下立即隐藏悬停描述（原版 grab 时 h_popup 消失），不必等到开始拖动。
+        emit hoverChanged(this, false);
         mPressScenePos = event->scenePos();
         mLastDragScenePos = event->scenePos();
         mLastDragTimeMs = QDateTime::currentMSecsSinceEpoch();
@@ -582,9 +756,9 @@ void CardItem::applyTransform()
     qreal cx = WIDTH  / 2.0;
     qreal cy = HEIGHT / 2.0;
 
-    // 透视参数:鼠标越往边缘,倾斜越大,深度感越明显
-    qreal tiltX = qDegreesToRadians(mHoverTiltX);
-    qreal tiltY = qDegreesToRadians(mHoverTiltY);
+    // 透视参数:鼠标越往边缘,倾斜越大,深度感越明显；叠加环境漂浮的缓慢倾斜。
+    qreal tiltX = qDegreesToRadians(mHoverTiltX + mAmbientTiltX);
+    qreal tiltY = qDegreesToRadians(mHoverTiltY + mAmbientTiltY);
     qreal zRot  = qDegreesToRadians(mBaseRotation);
 
     // 步骤:平移到中心 → 绕 Y 倾斜 → 绕 X 倾斜 → 绕 Z 扇形 → 平移回去

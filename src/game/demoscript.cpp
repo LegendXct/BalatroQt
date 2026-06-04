@@ -2,7 +2,7 @@
 #include "shop.h"
 #include <algorithm>
 
-bool DemoScript::sActive       = false;
+bool DemoScript::sActive       = true;   // 默认开启演示模式（进入游戏即按固定剧本演出）
 int  DemoScript::sShopVisit    = 0;
 int  DemoScript::sShopRerolls  = 0;
 int  DemoScript::sBlindEntered = 0;

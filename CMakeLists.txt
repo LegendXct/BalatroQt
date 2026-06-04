@@ -22,6 +22,7 @@ qt_add_executable(BalatroQt
     src/game/gamestate.h src/game/gamestate.cpp
     src/game/demoscript.h src/game/demoscript.cpp
     src/card/cardshadow.h src/card/cardshadow.cpp
+    src/card/cardfloat.h src/card/cardfloat.cpp
     src/card/carditem.h src/card/carditem.cpp
     src/ui/roundendoverlay.h src/ui/roundendoverlay.cpp
     src/card/jokeritem.h src/card/jokeritem.cpp

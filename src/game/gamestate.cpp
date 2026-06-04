@@ -2873,10 +2873,16 @@ void GameState::triggerBlindSelectJokers(BlindType type)
     };
     bool jokersDirty = false;
 
-    // mJokers 会在循环中被修改，先对当前小丑类型做快照
+    // mJokers 会在循环中被修改，先对当前小丑类型做快照。
+    // 关键：要解析 Blueprint / Brainstorm 的复制目标——蓝图复制纸牌占卜师(Cartomancer)
+    // 等"选盲注时触发"的小丑，原版 calculate_joker 会带 setting_blind 上下文一并复制，
+    // 所以蓝图也应当再生成一张塔罗。之前直接取 j.type 导致复制无效。
     QVector<JokerType> present;
-    for (const Joker &j : mJokers)
-        if (!j.isDebuffed) present.append(j.type);
+    for (int i = 0; i < mJokers.size(); ++i) {
+        if (mJokers[i].isDebuffed) continue;
+        const Joker *eff = resolveCopiedJoker(mJokers, i);
+        if (eff && !eff->isDebuffed) present.append(eff->type);
+    }
 
     for (JokerType jt : present) {
         switch (jt) {

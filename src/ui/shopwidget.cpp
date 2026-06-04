@@ -1,6 +1,7 @@
 #include "shopwidget.h"
 #include "../card/consumableitem.h"
 #include "../card/jokeritem.h"
+#include "../card/cardfloat.h"
 #include "../audio/audiomanager.h"
 #include "cardtooltipformat.h"
 #include "balatroinfopanel.h"
@@ -10,6 +11,7 @@
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QResizeEvent>
+#include <QShowEvent>
 #include <QPainter>
 #include <QEvent>
 #include <QPainterPath>
@@ -116,7 +118,21 @@ public:
         setAttribute(Qt::WA_NoSystemBackground, true);
         setAutoFillBackground(false);
         setProperty("balatroAudio", QStringLiteral("card1"));
+        // 环境漂浮：商店里的卡牌也跟着缓慢做立体浮动（复刻原版 ambient_tilt）。
+        mFloatPhase = QRandomGenerator::global()->generateDouble() * 6.2831853;
+        CardFloat::add(this, [this](double t) {
+            if (mHovered || mPressed) {
+                if (mAmbientTiltX != 0.0 || mAmbientTiltY != 0.0) { mAmbientTiltX = 0; mAmbientTiltY = 0; update(); }
+                return;
+            }
+            if (!isVisible() || mPixmap.isNull()) return;
+            const double a = t * 1.6 + mFloatPhase;
+            mAmbientTiltX = 2.2 * std::sin(a);
+            mAmbientTiltY = 2.2 * std::cos(a * 0.92 + 1.3);
+            update();
+        });
     }
+    ~ShopCardButton() override { CardFloat::remove(this); }
 
     void setDisplayPixmap(const QPixmap &pix)
     {
@@ -292,12 +308,11 @@ protected:
                 nx = qBound(-1.0, nx, 1.0);
             }
             // 与手牌一致的 lift 优先级：press > selected(mLifted) > hover > rest。
-            // 按下时拖到 0.85（手牌拖动也是这个值），阴影距离明显拉远。
             const qreal lift = mPressed ? 0.85
                                         : (mLifted ? 0.55
                                                    : ((mHovered && !mDisableHoverLift) ? 0.30 : 0.0));
 
-            // 卡图实际落点：button 中心 + hover 时 -4 px。剪影按 pixSize 绘制——
+            // 卡图实际落点：button 中心 + hover 时 -8 px。剪影按 pixSize 绘制——
             // 与下面 drawPixmap 用同一套几何，shadow 就完全跟随可见图像形状。
             QSize pixSize = mPixmap.size();
             // 按"可见卡牌"尺寸缩放（button 比这一圈大，预留 hover 放大溢出空间）。
@@ -306,34 +321,40 @@ protected:
             pixSize.scale(target, Qt::KeepAspectRatio);
             const qreal cx = width() / 2.0;
             const qreal cy = height() / 2.0 + ((mHovered && !mDisableHoverLift) ? -8.0 : 0.0);
-            const qreal w = pixSize.width();
-            const qreal h = pixSize.height();
-            // 与 cardshadow.cpp 完全一致：所有商品阴影方向 + 大小同一组像素常量。
-            // 光从右上方 → 阴影到左下角 → (offX<0, offY>0)。不依赖 nx、不依赖卡牌尺寸。
-            // 用户反馈"再缩 25%"：rest offY=13.5，最大 lift offY=27（之前 18/36）。
-            (void)nx;
-            const qreal offY = 13.5 + 13.5 * lift;
-            const qreal offX = -0.5 * offY;
+
+            // —— 与 cardshadow.cpp 完全一致地复刻原版几何 ——
+            // shadow_height：rest 0.1 → 抬升 0.35；偏移 = 1.5*shadow_height(tile)，
+            // 乘 pixHeight/CARD_H_TILES 换算成像素；横向按屏幕视差（中央≈0，越靠边越外扩）。
+            constexpr qreal kCardHTiles = 2.4 * 47.0 / 41.0;   // globals.lua CARD_H ≈ 2.7512
+            const qreal sh = 0.1 + 0.25 * lift;
+            const qreal pxPerTile = pixSize.height() / kCardHTiles;
+            const qreal worldOffY = 1.5 * sh * pxPerTile;
+            const qreal worldOffX = -nx * 1.5 * sh * pxPerTile;
+            const qreal s = 1.0 - 0.2 * sh;                    // 阴影比卡牌略小，贴住牌
+            const qreal w = pixSize.width() * s;
+            const qreal h = pixSize.height() * s;
 
             p.save();
             p.setRenderHint(QPainter::Antialiasing, true);
             p.setPen(Qt::NoPen);
-            // 旋转中心与 sprite 完全一致：卡牌中心 (cx, cy)。之前是 translate 到
-            // (cx+offX, cy+offY) 再 rotate，pivot 错位 → voucher 扇形 ±5.5° / booster
-            // hover jitter ±2.4° 一动，阴影就绕"错的轴"甩，远看像阴影没跟住卡牌。
-            // 现在和 sprite 用同一个 pivot，再在旋转后的坐标系里把 rect 中心放到 (offX, offY)
-            // —— 与场景里 CardShadowItem.paint 的几何完全一致（手牌/小丑/消耗也是这样画）。
+            // 旋转中心与 sprite 完全一致：卡牌中心 (cx, cy)。偏移在世界空间（不随卡牌旋转转动），
+            // 所以这里把世界偏移反旋转回旋转后的坐标系，voucher 扇形 / booster 抖动时阴影
+            // 始终落在卡牌正下方。
             p.translate(cx, cy);
-            if (!qFuzzyIsNull(mStaticRotDeg + mJitterRotDeg))
-                p.rotate(mStaticRotDeg + mJitterRotDeg);
-            const qreal expand = 0.5 + 1.5 * lift;
-            // 商店里所有阴影（含异形 booster / voucher / joker）统一画圆角矩形：
-            //   外圈放大低透明 = 软边光晕；内圈实尺寸 ~30% alpha（对齐原版 dissolve.fs:19）。
-            p.setBrush(QColor(0, 0, 0, int(30 + 30 * lift)));
-            p.drawRoundedRect(QRectF(offX - w/2.0 - expand, offY - h/2.0 - expand,
-                                     w + 2 * expand, h + 2 * expand), 10, 10);
-            p.setBrush(QColor(0, 0, 0, int(78 + 45 * lift)));
-            p.drawRoundedRect(QRectF(offX - w/2.0, offY - h/2.0, w, h), 9, 9);
+            const qreal rot = mStaticRotDeg + mJitterRotDeg;
+            if (!qFuzzyIsNull(rot))
+                p.rotate(rot);
+            const qreal th = -rot * 3.14159265358979323846 / 180.0;
+            const qreal cs = std::cos(th), sn = std::sin(th);
+            const qreal offX = worldOffX * cs - worldOffY * sn;
+            const qreal offY = worldOffX * sn + worldOffY * cs;
+            // 原版阴影只有一层：卡牌剪影染黑、alpha = sprite.a*0.3（dissolve.fs:18，恒定 30%）。
+            // 用 mShadowPixmap(源 sprite 的黑色剪影) 按真实形状投影——优惠券扇形、补充包翻角、
+            // 异形小丑等都自动贴合外形，不再是规则圆角矩形。
+            p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+            p.setOpacity(0.3);
+            p.drawPixmap(QRectF(offX - w / 2.0, offY - h / 2.0, w, h),
+                         mShadowPixmap, QRectF(mShadowPixmap.rect()));
             p.restore();
         }
 
@@ -352,8 +373,8 @@ protected:
         p.setOpacity(isEnabled() ? 1.0 : 0.42);
         p.translate(width() / 2.0, height() / 2.0 + ((mHovered && !mDisableHoverLift) ? -8.0 : 0.0));
 
-        const qreal tiltX = mTiltX * 3.14159265358979323846 / 180.0;
-        const qreal tiltY = mTiltY * 3.14159265358979323846 / 180.0;
+        const qreal tiltX = (mTiltX + mAmbientTiltX) * 3.14159265358979323846 / 180.0;
+        const qreal tiltY = (mTiltY + mAmbientTiltY) * 3.14159265358979323846 / 180.0;
         const qreal cosY = std::cos(tiltY);
         const qreal cosX = std::cos(tiltX);
         const qreal sinY = std::sin(tiltY);
@@ -390,10 +411,37 @@ private:
     bool mUseSilhouetteShadow = false; // true 给 booster 用 (异形)，否则双层圆角矩形 (joker/consumable/voucher)
     qreal mTiltX = 0.0; // degrees, same direction as CardItem/JokerItem
     qreal mTiltY = 0.0;
+    qreal mAmbientTiltX = 0.0;   // 环境漂浮叠加倾斜(度)，CardFloat 每帧驱动
+    qreal mAmbientTiltY = 0.0;
+    double mFloatPhase = 0.0;
     double mStaticRotDeg = 0.0;
     double mJitterRotDeg = 0.0;
     QSequentialAnimationGroup *mJitterAnim = nullptr;
 };
+
+// 槽位未满时把一行可见卡牌 space-evenly 铺开：每张牌前后都塞等权 stretch（含两端），
+// Qt 把空白平均分给 n+1 个 stretch → n+1 个等宽间距，即"间距+牌+间距+牌+间距"。
+// 买掉一张后剩一张就只有"间距+牌+间距"自然居中。allCards 是该行全部槽位（含隐藏的）。
+// leadCompensate：每张卡在容器里是左对齐的（右侧留了 actionReserveW 给"购买&使用"按钮），
+// 导致可见卡整体偏左、左间距偏小。在首个 stretch 之后插一段等于该右侧预留宽度的固定间距，
+// 把整排可见卡右移，三个可见间距就相等了（推导见提交说明）。
+void justifyShopRow(QWidget *box, const QVector<QWidget*> &allCards, int leadCompensate)
+{
+    if (!box) return;
+    auto *lay = qobject_cast<QHBoxLayout*>(box->layout());
+    if (!lay) return;
+    while (lay->count() > 0) delete lay->takeAt(0);   // 删 item（widget 不删）/ spacer
+    QVector<QWidget*> vis;
+    for (QWidget *w : allCards) if (w && w->isVisible()) vis << w;
+    if (vis.isEmpty()) return;
+    lay->addStretch(1);
+    if (leadCompensate > 0) lay->addSpacing(leadCompensate);
+    for (int i = 0; i < vis.size(); ++i) {
+        lay->addWidget(vis[i]);
+        if (i < vis.size() - 1) lay->addStretch(1);
+    }
+    lay->addStretch(1);
+}
 }
 
 ShopWidget::ShopWidget(GameState *gs,
@@ -482,7 +530,8 @@ void ShopWidget::buildUi()
     // 原版 shop 槽位间几乎贴着排，间距比 booster 行更紧；这里把 padding/spacing 压到 8/6 dp。
     shbl->setContentsMargins(dp(8), dp(8), dp(8), dp(8));
     shbl->setSpacing(dp(6));
-    shbl->setAlignment(Qt::AlignCenter);
+    // 不设 AlignCenter：justifyShopRow 用 stretch 控制居中/等距；AlignCenter 会让 stretch
+    // 不撑开（layout 收到最小尺寸并居中），导致卡牌挤在一起。
 
     for (int i = 0; i < 4; ++i) {
         OfferUi ou = createOfferSlot(shopBox, false);
@@ -538,7 +587,7 @@ void ShopWidget::buildUi()
     // booster 行间距比 shop 上方略宽，但比之前 12dp 紧，避免显得稀疏。
     bhbl->setContentsMargins(dp(8), dp(6), dp(8), dp(6));
     bhbl->setSpacing(dp(8));
-    bhbl->setAlignment(Qt::AlignCenter);
+    // 不设 AlignCenter：justifyShopRow 的 stretch 负责居中/等距。
 
     for (int i = 0; i < 2; ++i) {
         OfferUi ou = createOfferSlot(boosterBox, true);
@@ -1547,6 +1596,9 @@ void ShopWidget::refresh()
                  mGS->shop().canBuyBooster(i, mGS->spendableGold()), true);
     }
 
+    // 商品行 / 礼包行 space-evenly 铺开（间距+牌+间距+牌+间距，间距等宽）。
+    justifyShopRows();
+
     int rcost = mGS->shop().rerollCost();
     mBtnReroll->setText(QString("重抽\n$%1").arg(rcost));
     // 混沌小丑：每次进商店首次重摇免费（rcost 在 hasFreeReroll() 时不应阻挡按钮）。
@@ -2477,6 +2529,33 @@ void ShopWidget::resizeEvent(QResizeEvent *e)
     QWidget::resizeEvent(e);
     layoutPanel();
     layoutVoucherFan();
+    // 面板撑到最终宽度后再排一次——首次打开 refresh() 是在 setGeometry 之前跑的，
+    // 那时 shopBox 宽度还是旧的，stretch 分不开，商品会挤在左侧直到下一次刷新。
+    justifyShopRows();
+}
+
+void ShopWidget::showEvent(QShowEvent *e)
+{
+    QWidget::showEvent(e);
+    // 刚显示时内部 layout 还没把 shopBox 撑到最终宽度（Qt 布局是惰性的），同步排会用到旧宽度
+    // 导致 stretch 分不开、商品挤左。延后到事件循环处理完这轮 layout 再排一次。
+    QPointer<ShopWidget> guard(this);
+    QTimer::singleShot(0, this, [guard]() { if (guard) guard->justifyShopRows(); });
+}
+
+void ShopWidget::justifyShopRows()
+{
+    if (!mShopUi.isEmpty() && mShopUi[0].card) {
+        QVector<QWidget*> shopCards;
+        for (const OfferUi &ou : mShopUi) shopCards << ou.card;
+        // 商品槽容器右侧给"购买&使用"按钮留了 48dp（createOfferSlot 的 actionReserveW），需补偿。
+        justifyShopRow(mShopUi[0].card->parentWidget(), shopCards, dp(48));
+    }
+    if (!mBoosterUi.isEmpty() && mBoosterUi[0].card) {
+        QVector<QWidget*> boosterCards;
+        for (const OfferUi &ou : mBoosterUi) boosterCards << ou.card;
+        justifyShopRow(mBoosterUi[0].card->parentWidget(), boosterCards, 0);   // 礼包槽对称
+    }
 }
 
 void ShopWidget::layoutPanel()

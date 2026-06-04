@@ -4,6 +4,9 @@
 #include <QGraphicsObject>
 #include <QPixmap>
 #include <QPropertyAnimation>
+#include <QColor>
+#include <QVector>
+#include <functional>
 #include "carddata.h"
 
 class CardShadowItem;
@@ -15,6 +18,10 @@ class CardItem : public QGraphicsObject
     Q_PROPERTY(qreal opacity READ opacity WRITE setOpacity)
     // 翻牌动画专用：仅 X 方向缩放，对应原版 card.lua 的 pinch.x（绕 Y 轴翻牌效果）。
     Q_PROPERTY(qreal flipXScale READ flipXScale WRITE setFlipXScale)
+    // 溶解动画：0=完好，1=完全消散。复刻原版 dissolve 着色器（card.lua start_dissolve/shatter）。
+    Q_PROPERTY(qreal dissolve READ dissolve WRITE setDissolve)
+    // 扇形旋转角(度)。做成属性以便发牌飞入时让旋转和位置一起缓动（复刻 Moveable 同时 ease T.r）。
+    Q_PROPERTY(double baseRotation READ baseRotation WRITE setBaseRotation)
     // 阴影抬升量(0..1)。原版 G.SHADOW + shadow_parallax：卡片悬停 / 按下 / 计分时
     // Z 高度增加 → 阴影 offset.y 与软化范围同步增大，给出"悬浮起来"的立体感。
     Q_PROPERTY(qreal shadowLift READ shadowLift WRITE setShadowLift)
@@ -53,7 +60,10 @@ public:
     void moveTo(const QPointF &target, int durationMs = 300);
     void flip();
     void juiceUp(double scaleAmount = 1.2, int durationMs = 240);
+    double baseRotation() const { return mBaseRotation; }
     void setBaseRotation(double deg) { mBaseRotation = deg; applyTransform(); }
+    // 把扇形旋转角缓动到目标（发牌飞入时与位置同步，卡牌边飞边转到扇形角度，复刻原版）。
+    void animateBaseRotation(double targetDeg, int durationMs);
     // 平滑改变 scale；hover 进入/离开时用它代替 setScale() 的瞬时跳变。
     void animateScale(qreal target, int durationMs = 110);
     // 控制是否允许拖拽；牌堆右下角的"查看牌组"卡牌需要 false，禁用拖动行为。
@@ -68,6 +78,14 @@ public:
     void triggerHoverJitter();
     qreal flipXScale() const { return mFlipXScale; }
     void setFlipXScale(qreal s) { mFlipXScale = s; applyTransform(); }
+    qreal dissolve() const { return mDissolve; }
+    void setDissolve(qreal v);
+    // 启动溶解/破碎动画（复刻 card.lua:2079 shatter / 2130 start_dissolve）。glass=true 走
+    // 白色破碎色 + 更快节奏；onDone 在动画结束时回调（通常由调用方移除本 item）。
+    void startDissolve(bool glass, std::function<void()> onDone);
+    // 启动具现化动画（复刻 card.lua:2183 start_materialize）：dissolve 1→0，生成牌时用。
+    void startMaterialize();
+    bool isDissolving() const { return mDissolveActive; }
     qreal shadowLift() const { return mShadowLift; }
     void setShadowLift(qreal v);
     // 计分阶段抬升：mainwindow.cpp 在 playScoreEvent / animatePlayedCardsToDiscardThen
@@ -100,6 +118,10 @@ private:
     double mBaseRotation = 0.0;       // Z 轴旋转(扇形)
     double mHoverTiltX  = 0.0;        // 绕 X 轴倾斜(度,-25 ~ +25)
     double mHoverTiltY  = 0.0;        // 绕 Y 轴倾斜
+    double mAmbientTiltX = 0.0;       // 环境漂浮叠加的缓慢倾斜(度)，由 CardFloat 每帧驱动
+    double mAmbientTiltY = 0.0;
+    double mFloatPhase   = 0.0;       // 每张牌独立的漂浮相位
+    void updateAmbientFloat(double t);
     double mJitterRot = 0.0;          // 悬浮抖动当前叠加的 Z 旋转(度)，仅短暂存在
     // 拖拽时基于水平速度的瞬时倾斜（度），对齐原版 moveable.lua move_r()：
     //   des_r = T.r + 0.015 * vel.x / dt
@@ -111,6 +133,10 @@ private:
     QPointF mLastDragScenePos;
     qint64  mLastDragTimeMs = 0;
     qreal  mFlipXScale = 1.0;         // 翻牌时的 X 方向缩放(1→0→1)，对齐原版 pinch.x
+    qreal  mDissolve = 0.0;           // 溶解进度 0..1。
+    bool   mDissolveActive = false;   // 是否处于溶解/具现化动画中（paint 走溶解管线）。
+    bool   mShattered = false;        // true=玻璃破碎(白色)，false=普通溶解(黑橙红金灰)。
+    QVector<QColor> mDissolveColours;
     qreal  mShadowLift = 0.0;         // 阴影抬升量 0..1，由 hover/press/select/scoring 驱动。
     bool   mScoringLifted = false;    // 计分阶段强制保持最高阴影抬升。
     qreal  mPressRestZ = 0.0;         // 按下前 zValue，release 还原；防止覆盖 layout 给的 z。

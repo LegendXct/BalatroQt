@@ -133,6 +133,8 @@ private:
     bool mGameOverHandled = false;
     bool mScoringInProgress = false;
     bool mSuppressHandReveal = false;   // 消耗牌翻面序列期间，抑制 onHandChanged 里的房屋 Boss 翻正
+    // 摧毁类消耗牌使用期间置 true：refreshHand 移除消失的手牌时改播溶解动画(start_dissolve)而非瞬间删除。
+    bool mHandDissolveOnRemove = false;
     int mEndRoundAnimationDelay = 260;
 
     // ── 局内进程暂停（打开比赛信息/选项/牌组时）──

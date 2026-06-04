@@ -110,6 +110,17 @@ static int overlappedCardStep(int totalW, int cardW, int count, int maxStep)
     return qBound(18, tightStep, maxStep);
 }
 
+// 小丑 / 消耗 / 商店槽位未满时把卡牌在整条槽位区域里 **space-evenly** 铺开：
+// n+1 个等宽间距（含两端留白），即"间距+牌+间距+牌+间距"。n==1 时自然居中。
+// areaLeft/areaW 是槽位区域左缘与总宽，cardW 卡宽，取第 i 张（0-based）的左上 x。
+// n 超过槽位数时 gap 变负 → 自然变密/重叠。
+static int justifiedSlotX(int areaLeft, int areaW, int cardW, int n, int i)
+{
+    if (n <= 0) return areaLeft;
+    const double gap = double(areaW - n * cardW) / double(n + 1);
+    return areaLeft + int(std::lround(gap * (i + 1) + double(cardW) * i));
+}
+
 static double audioPitchJitter(double spread = 0.04)
 {
     const double r = QRandomGenerator::global()->generateDouble() * 2.0 - 1.0;
@@ -3293,9 +3304,21 @@ void MainWindow::refreshHand() {
         bool found = false;
         for (const auto &hc : hand) if (matches(hc, d)) { found = true; break; }
         if (!found) {
-            mScene->removeItem(mHandCards[i]);
-            mHandCards[i]->deleteLater();
+            CardItem *gone = mHandCards[i];
             mHandCards.removeAt(i);
+            if (mHandDissolveOnRemove && gone->cardData().faceUp) {
+                // 摧毁类消耗牌：被摧毁的手牌走溶解动画（复刻 card.lua start_dissolve），完成后再删。
+                gone->setZValue(45);
+                QPointer<CardItem> guard(gone);
+                gone->startDissolve(false, [this, guard]() {
+                    if (!guard) return;
+                    if (guard->scene()) mScene->removeItem(guard);
+                    guard->deleteLater();
+                });
+            } else {
+                mScene->removeItem(gone);
+                gone->deleteLater();
+            }
         }
     }
 
@@ -3430,7 +3453,9 @@ void MainWindow::layoutHandCards() {
         int x = startX + i * step;
         // 选中上提量按 CARD_H 比例（≈26%），卡牌放大后这里同步加大才不会"点了感觉没动"。
         int y = mHandY + (sel ? -CARD_H * 26 / 100 : 0);
-        mHandCards[i]->setBaseRotation(angleDeg);
+        // 旋转和位置一起缓动：卡牌边飞边转到扇形角度，不再"先瞬转好再平移飞入"。复刻原版
+        // Moveable 同时 ease 位置与 T.r 的发牌手感。
+        mHandCards[i]->animateBaseRotation(angleDeg, 240);
         mHandCards[i]->setZValue(i);
         // 200ms 选中弹起 / 折回。之前 140ms 显得过于"snap"，恢复到放大卡牌之前 220ms 附近的手感。
         mHandCards[i]->moveTo(QPointF(x, y), 200);
@@ -4970,10 +4995,7 @@ void MainWindow::refreshJokerSlots()
     int available = qMin(mSceneW - 470, 840);
     int rowStartX = 40;
     if (visualW < available) rowStartX = 40 + (available - visualW) / 2;
-    // 用固定步距摆放，n < MAX 时整组小丑在 visualW 范围内水平居中。
-    int step = overlappedCardStep(visualW, TOP_SLOT_W, n, visualStep);
-    int usedW = (n > 0) ? (TOP_SLOT_W + qMax(0, n - 1) * step) : 0;
-    int startX = rowStartX + (visualW - usedW) / 2;
+    // 未满时沿整条槽位区域等距铺开（左中右等距），而不是挤在中间并排。
     // 垂直方向：将卡牌相对 slot 框 (高 TOP_SLOT_H + 18) 居中。
     const int slotFrameTopY = JOKER_Y + 12;
     const int slotFrameH    = TOP_SLOT_H + 18;
@@ -4996,7 +5018,7 @@ void MainWindow::refreshJokerSlots()
     };
 
     for (int i = 0; i < js.size(); ++i) {
-        int x = startX + i * step;
+        int x = justifiedSlotX(rowStartX, visualW, TOP_SLOT_W, n, i);
         // 选中的小丑（如刚点击 sell 后 refresh）抬高 0.2*HEIGHT 保持视觉抬升，与原版
         // highlight_offset 一致。
         int y = jokerY - (i == mSelectedJokerIdx ? selectedLift : 0);
@@ -5486,7 +5508,12 @@ void MainWindow::showConsumableAction(int idx)
                     const QVector<Joker> jokersBefore = mGameState->jokers();
                     const QVector<Consumable> consumablesBefore = mGameState->consumables();
                     const int goldBefore = mGameState->gold();
-                    if (mGameState->useConsumable(idx, sel)) {
+                    // 摧毁类消耗牌：useConsumable 内部 emit handChanged → refreshHand 会移除被摧毁的手牌，
+                    // 置位让 refreshHand 改走溶解动画（复刻 start_dissolve）。flip 类塔罗有自己的翻面演出，不溶解。
+                    mHandDissolveOnRemove = isOriginalDestroyConsumable(type) && !needsHandFlip;
+                    const bool consumableUsed = mGameState->useConsumable(idx, sel);
+                    mHandDissolveOnRemove = false;
+                    if (consumableUsed) {
                         const bool handled = needsHandFlip || playOriginalConsumableAudio(
                             this,
                             type,
@@ -5806,12 +5833,12 @@ void MainWindow::layoutConsumableItems(bool animate)
     int visualSlots = Constants::MAX_CONSUMABLE_SLOTS;
     int totalW = TOP_SLOT_W + qMax(0, visualSlots - 1) * (TOP_SLOT_W + 14);
     int startX = mSceneW - 40 - totalW;
-    int step = overlappedCardStep(totalW, TOP_SLOT_W, n, TOP_SLOT_W + 14);
 
     for (int i = 0; i < n; ++i) {
         ConsumableItem *ci = mConsumableItems[i];
         if (!ci) continue;
-        const int x = startX + i * step;
+        // 未满时沿消耗槽区域等距铺开（左中右等距），与小丑槽一致。
+        const int x = justifiedSlotX(startX, totalW, TOP_SLOT_W, n, i);
         const int y = JOKER_Y + 18 + ((i == mSelectedConsumableIdx) ? -42 : 0);
         ci->setZValue(30 + i);   // 永远按槽位从左到右叠，不因点击而盖住右侧牌
         if (animate) ci->moveTo(QPointF(x, y), 160);
@@ -7432,19 +7459,8 @@ void MainWindow::animatePlayedCardsToDiscardThen(std::function<void()> after)
         c->setZValue(90 + i);
 
         if (mShatteredPlayedIndices.contains(i)) {
-            auto *scale = new QPropertyAnimation(c, "scale", this);
-            scale->setDuration(duration);
-            scale->setStartValue(c->scale());
-            scale->setEndValue(0.65);
-            scale->setEasingCurve(QEasingCurve::InBack);
-            scale->start(QAbstractAnimation::DeleteWhenStopped);
-
-            auto *fade = new QPropertyAnimation(c, "opacity", this);
-            fade->setDuration(duration);
-            fade->setStartValue(c->opacity());
-            fade->setEndValue(0.0);
-            fade->setEasingCurve(QEasingCurve::InQuad);
-            fade->start(QAbstractAnimation::DeleteWhenStopped);
+            // 玻璃牌：走破碎溶解动画（复刻 card.lua:2079 shatter）；clearPlayedCards 兜底删除。
+            c->startDissolve(/*glass=*/true, nullptr);
         } else {
             c->moveTo(deckPos, duration);
             auto *fade = new QPropertyAnimation(c, "opacity", this);
