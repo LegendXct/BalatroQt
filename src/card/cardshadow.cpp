@@ -46,11 +46,25 @@ void CardShadowItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidge
     p->setRenderHint(QPainter::SmoothPixmapTransform, true);
     p->setPen(Qt::NoPen);
 
-    // 用户要求：所有阴影（含异形小丑 / 优惠券 / 卡包）统一画圆角矩形——
-    // 之前的 alpha 剪影虽然按真实轮廓投影但与"矩形阴影"的视觉语言不一致。
-    // mSilhouette 仍由 joker/consumable item 喂入（保留接口），这里忽略它。
+    // 复刻原版 dissolve 阴影（card.lua:4362 → dissolve.fs:18）：阴影就是物品自身 sprite
+    // 的黑色剪影，单层 ~30% alpha，按物品真实轮廓投影——异形小丑（半张 / 微缩 / 方形）、
+    // 优惠券、补充包的圆角与撕裂边都能正确成形，而不是统一的圆角矩形。
+    if (!mSilhouette.isNull()) {
+        // 原版阴影相对本体略微缩小（1-0.2*height）并贴向本体，这里随 lift 做轻微收缩。
+        const qreal shrink = 1.0 - 0.06 * lift;
+        const qreal w = mW * shrink;
+        const qreal h = mH * shrink;
+        const qreal x = (mW - w) / 2.0 + offX;
+        const qreal y = (mH - h) / 2.0 + offY;
+        p->setOpacity(0.32 + 0.16 * lift);
+        p->drawPixmap(QRectF(x, y, w, h), mSilhouette,
+                      QRectF(0, 0, mSilhouette.width(), mSilhouette.height()));
+        p->setOpacity(1.0);
+        return;
+    }
+
+    // 回退：没有喂入剪影的矩形 sprite（如手牌）仍画双层圆角矩形贴合卡面圆角。
     const QRectF vr = mVisibleRect;
-    // 双层：外圈放大、低透明做软边；内圈实尺寸、~30% alpha（对齐原版 dissolve.fs:19）。
     const int alphaOuter = int(30 + 30 * lift);
     const int alphaInner = int(78 + 45 * lift);
 

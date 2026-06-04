@@ -326,14 +326,17 @@ protected:
             p.translate(cx, cy);
             if (!qFuzzyIsNull(mStaticRotDeg + mJitterRotDeg))
                 p.rotate(mStaticRotDeg + mJitterRotDeg);
-            const qreal expand = 0.5 + 1.5 * lift;
-            // 商店里所有阴影（含异形 booster / voucher / joker）统一画圆角矩形：
-            //   外圈放大低透明 = 软边光晕；内圈实尺寸 ~30% alpha（对齐原版 dissolve.fs:19）。
-            p.setBrush(QColor(0, 0, 0, int(30 + 30 * lift)));
-            p.drawRoundedRect(QRectF(offX - w/2.0 - expand, offY - h/2.0 - expand,
-                                     w + 2 * expand, h + 2 * expand), 10, 10);
-            p.setBrush(QColor(0, 0, 0, int(78 + 45 * lift)));
-            p.drawRoundedRect(QRectF(offX - w/2.0, offY - h/2.0, w, h), 9, 9);
+            // 复刻原版 dissolve 阴影：阴影 = 商品 sprite 的黑色剪影（mShadowPixmap），
+            // 单层 ~30% alpha，按真实轮廓投影。异形 booster 的翻角、voucher / joker 的
+            // 圆角与撕裂边都能正确成形，而不是统一的圆角矩形（对齐 cardshadow.cpp）。
+            p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+            const qreal shrink = 1.0 - 0.06 * lift;
+            const qreal sw = w * shrink;
+            const qreal sh = h * shrink;
+            p.setOpacity(0.32 + 0.16 * lift);
+            p.drawPixmap(QRectF(offX - sw / 2.0, offY - sh / 2.0, sw, sh), mShadowPixmap,
+                         QRectF(0, 0, mShadowPixmap.width(), mShadowPixmap.height()));
+            p.setOpacity(1.0);
             p.restore();
         }
 
@@ -624,7 +627,8 @@ ShopWidget::OfferUi ShopWidget::createOfferSlot(QWidget *parent, bool isBooster)
     // 卡图(整张点击)
     auto *scb = new ShopCardButton(ou.card);
     ou.cardBtn = scb;
-    // 礼包用剪影阴影（包形不规则），其它矩形 sprite 走和槽位一致的双层圆角阴影。
+    // 所有商店商品（小丑 / 优惠券 / 礼包 / 卡牌）阴影统一用 sprite 剪影投影，按真实
+    // 轮廓成形，对齐场景里的 CardShadowItem。（保留该 setter 仅为兼容，paint 不再分流。）
     scb->setUseSilhouetteShadow(isBooster);
     scb->setDisableHoverLift(isVoucherSlot);
     // button 留出 hover 缩放 overflow 空间——内部 pixmap 仍按 slotW × slotH 居中绘制，
