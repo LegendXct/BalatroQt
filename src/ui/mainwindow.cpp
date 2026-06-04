@@ -110,6 +110,17 @@ static int overlappedCardStep(int totalW, int cardW, int count, int maxStep)
     return qBound(18, tightStep, maxStep);
 }
 
+// 小丑 / 消耗 / 商店槽位未满时把卡牌在整条槽位区域里 **space-evenly** 铺开：
+// n+1 个等宽间距（含两端留白），即"间距+牌+间距+牌+间距"。n==1 时自然居中。
+// areaLeft/areaW 是槽位区域左缘与总宽，cardW 卡宽，取第 i 张（0-based）的左上 x。
+// n 超过槽位数时 gap 变负 → 自然变密/重叠。
+static int justifiedSlotX(int areaLeft, int areaW, int cardW, int n, int i)
+{
+    if (n <= 0) return areaLeft;
+    const double gap = double(areaW - n * cardW) / double(n + 1);
+    return areaLeft + int(std::lround(gap * (i + 1) + double(cardW) * i));
+}
+
 static double audioPitchJitter(double spread = 0.04)
 {
     const double r = QRandomGenerator::global()->generateDouble() * 2.0 - 1.0;
@@ -3293,9 +3304,21 @@ void MainWindow::refreshHand() {
         bool found = false;
         for (const auto &hc : hand) if (matches(hc, d)) { found = true; break; }
         if (!found) {
-            mScene->removeItem(mHandCards[i]);
-            mHandCards[i]->deleteLater();
+            CardItem *gone = mHandCards[i];
             mHandCards.removeAt(i);
+            if (mHandDissolveOnRemove && gone->cardData().faceUp) {
+                // 摧毁类消耗牌：被摧毁的手牌走溶解动画（复刻 card.lua start_dissolve），完成后再删。
+                gone->setZValue(45);
+                QPointer<CardItem> guard(gone);
+                gone->startDissolve(false, [this, guard]() {
+                    if (!guard) return;
+                    if (guard->scene()) mScene->removeItem(guard);
+                    guard->deleteLater();
+                });
+            } else {
+                mScene->removeItem(gone);
+                gone->deleteLater();
+            }
         }
     }
 
@@ -3430,7 +3453,9 @@ void MainWindow::layoutHandCards() {
         int x = startX + i * step;
         // 选中上提量按 CARD_H 比例（≈26%），卡牌放大后这里同步加大才不会"点了感觉没动"。
         int y = mHandY + (sel ? -CARD_H * 26 / 100 : 0);
-        mHandCards[i]->setBaseRotation(angleDeg);
+        // 旋转和位置一起缓动：卡牌边飞边转到扇形角度，不再"先瞬转好再平移飞入"。复刻原版
+        // Moveable 同时 ease 位置与 T.r 的发牌手感。
+        mHandCards[i]->animateBaseRotation(angleDeg, 240);
         mHandCards[i]->setZValue(i);
         // 200ms 选中弹起 / 折回。之前 140ms 显得过于"snap"，恢复到放大卡牌之前 220ms 附近的手感。
         mHandCards[i]->moveTo(QPointF(x, y), 200);
@@ -4518,6 +4543,10 @@ void MainWindow::onPlayClicked() {
         c->setCardSelected(false);
         c->setZValue(500);
         c->setBaseRotation(0);
+        // 关掉 hover 3D 倾斜并清空所有暂态倾斜——不然玩家正 hover 着一张牌点 Play 时
+        // mHoverTiltX/Y 会带到计分区,计分启动那一瞬间卡片是歪的。
+        c->setHoverTiltEnabled(false);
+        c->resetAllTilts();
         if (!c->cardData().faceUp) c->flip();   // 背面朝下的牌被打出时翻开
         playedCards.prepend(c);
     }
@@ -4533,6 +4562,9 @@ void MainWindow::onPlayClicked() {
     for (int i = 0; i < n; ++i) {
         QPointF target(startX + i * (CARD_W + 10), y);
         mPlayedCards[i]->moveTo(target, 280);
+        // moveTo 内部按横向位移启动 CardMoveTilt 动画——计分区 5 张牌跨度大时, 计分启动
+        // (playArrivalMs=300) 那一瞬间倾斜还没完全衰减。出牌动作没必要伴随这个 tilt,直接停掉。
+        mPlayedCards[i]->resetAllTilts();
     }
 
     mGameState->playCards(sortedIdx);
@@ -4970,10 +5002,7 @@ void MainWindow::refreshJokerSlots()
     int available = qMin(mSceneW - 470, 840);
     int rowStartX = 40;
     if (visualW < available) rowStartX = 40 + (available - visualW) / 2;
-    // 用固定步距摆放，n < MAX 时整组小丑在 visualW 范围内水平居中。
-    int step = overlappedCardStep(visualW, TOP_SLOT_W, n, visualStep);
-    int usedW = (n > 0) ? (TOP_SLOT_W + qMax(0, n - 1) * step) : 0;
-    int startX = rowStartX + (visualW - usedW) / 2;
+    // 未满时沿整条槽位区域等距铺开（左中右等距），而不是挤在中间并排。
     // 垂直方向：将卡牌相对 slot 框 (高 TOP_SLOT_H + 18) 居中。
     const int slotFrameTopY = JOKER_Y + 12;
     const int slotFrameH    = TOP_SLOT_H + 18;
@@ -4996,7 +5025,7 @@ void MainWindow::refreshJokerSlots()
     };
 
     for (int i = 0; i < js.size(); ++i) {
-        int x = startX + i * step;
+        int x = justifiedSlotX(rowStartX, visualW, TOP_SLOT_W, n, i);
         // 选中的小丑（如刚点击 sell 后 refresh）抬高 0.2*HEIGHT 保持视觉抬升，与原版
         // highlight_offset 一致。
         int y = jokerY - (i == mSelectedJokerIdx ? selectedLift : 0);
@@ -5486,7 +5515,12 @@ void MainWindow::showConsumableAction(int idx)
                     const QVector<Joker> jokersBefore = mGameState->jokers();
                     const QVector<Consumable> consumablesBefore = mGameState->consumables();
                     const int goldBefore = mGameState->gold();
-                    if (mGameState->useConsumable(idx, sel)) {
+                    // 摧毁类消耗牌：useConsumable 内部 emit handChanged → refreshHand 会移除被摧毁的手牌，
+                    // 置位让 refreshHand 改走溶解动画（复刻 start_dissolve）。flip 类塔罗有自己的翻面演出，不溶解。
+                    mHandDissolveOnRemove = isOriginalDestroyConsumable(type) && !needsHandFlip;
+                    const bool consumableUsed = mGameState->useConsumable(idx, sel);
+                    mHandDissolveOnRemove = false;
+                    if (consumableUsed) {
                         const bool handled = needsHandFlip || playOriginalConsumableAudio(
                             this,
                             type,
@@ -5714,7 +5748,6 @@ void MainWindow::refreshConsumableSlots()
     int visualSlots = Constants::MAX_CONSUMABLE_SLOTS;
     int totalW = TOP_SLOT_W + qMax(0, visualSlots - 1) * (TOP_SLOT_W + 14);
     int startX = mSceneW - 40 - totalW;
-    int step = overlappedCardStep(totalW, TOP_SLOT_W, cs.size(), TOP_SLOT_W + 14);
     auto mapConsNewIdxToOld = [this, &oldPositions](int newIdx) -> int {
         const int f = mPendingConsumableReorder.from;
         const int t = mPendingConsumableReorder.to;
@@ -5730,7 +5763,10 @@ void MainWindow::refreshConsumableSlots()
     };
 
     for (int i = 0; i < cs.size(); ++i) {
-        int x = startX + i * step;
+        // 与 layoutConsumableItems(true) 等距槽位计算一致——之前用 startX+i*step 是"靠左
+        // 紧凑"分布，第一张刚买进来会落到最左格,需要再 click/refresh 才被 layoutConsumableItems
+        // 拉回中间。改用 justifiedSlotX 让飞入终点就是最终居中位置。
+        int x = justifiedSlotX(startX, totalW, TOP_SLOT_W, cs.size(), i);
         int y = JOKER_Y + 18 + ((i == mSelectedConsumableIdx) ? -42 : 0);
         const QPointF targetPos(x, y);
         auto *ci = new ConsumableItem(cs[i]);
@@ -5806,12 +5842,12 @@ void MainWindow::layoutConsumableItems(bool animate)
     int visualSlots = Constants::MAX_CONSUMABLE_SLOTS;
     int totalW = TOP_SLOT_W + qMax(0, visualSlots - 1) * (TOP_SLOT_W + 14);
     int startX = mSceneW - 40 - totalW;
-    int step = overlappedCardStep(totalW, TOP_SLOT_W, n, TOP_SLOT_W + 14);
 
     for (int i = 0; i < n; ++i) {
         ConsumableItem *ci = mConsumableItems[i];
         if (!ci) continue;
-        const int x = startX + i * step;
+        // 未满时沿消耗槽区域等距铺开（左中右等距），与小丑槽一致。
+        const int x = justifiedSlotX(startX, totalW, TOP_SLOT_W, n, i);
         const int y = JOKER_Y + 18 + ((i == mSelectedConsumableIdx) ? -42 : 0);
         ci->setZValue(30 + i);   // 永远按槽位从左到右叠，不因点击而盖住右侧牌
         if (animate) ci->moveTo(QPointF(x, y), 160);
@@ -6001,29 +6037,43 @@ void MainWindow::spawnShopPlanetUseFloater(int consumableType, const QPoint &glo
     mShopConsumableUseAnimating = true;
     mDelayHandLevelForConsumableUse = true;
     auto type = static_cast<ConsumableType>(consumableType);
-    Consumable c = createConsumable(type);
-
-    auto *floater = new ConsumableItem(c);
-    const QPoint viewPt = mView->mapFromGlobal(globalCenter);
-    const QPointF scenePt = mView->mapToScene(viewPt);
-    floater->setPos(scenePt - QPointF(TOP_SLOT_W / 2.0, TOP_SLOT_H / 2.0));
-    floater->setZValue(800);
-    floater->setEnabled(false);
-    floater->setAcceptedMouseButtons(Qt::NoButton);
-    floater->setAcceptHoverEvents(false);
-    floater->setTransformOriginPoint(TOP_SLOT_W / 2.0, TOP_SLOT_H / 2.0);
-    mScene->addItem(floater);
 
     const bool shopShouldSlide = mShopWidget && mShopWidget->isVisible();
     const QPoint shopHome = shopShouldSlide ? mShopWidget->pos() : QPoint();
+    const int shopSlideMs = scaledDelay(260);
     if (shopShouldSlide) {
         auto *shopDown = new QPropertyAnimation(mShopWidget, "pos", this);
-        shopDown->setDuration(scaledDelay(260));
+        shopDown->setDuration(shopSlideMs);
         shopDown->setStartValue(mShopWidget->pos());
         shopDown->setEndValue(QPoint(mShopWidget->x(), mPlayPage ? mPlayPage->height() + 20 : mShopWidget->y() + 500));
         shopDown->setEasingCurve(QEasingCurve::InCubic);
         shopDown->start(QAbstractAnimation::DeleteWhenStopped);
     }
+
+    // 等商店完整滑出屏幕后再起飞（在此之前 floater 即使 zValue 高也会被覆盖在商店 QWidget 之下，
+    // 因为 widget overlay 不归 QGraphicsScene 的 z 管。延时确保画面层级:屏幕只剩 scene → 顶层）。
+    // 中心位置改成"整个窗口的几何中心"而非"playPage 中心"——playPage 右侧那一坨左面板会让
+    // scene 中心偏右，目视上行星牌停在右半边；这里把目标 x 往左平移半个左面板宽度（换算成场景坐标）。
+    const qreal playW = qreal(mPlayPage ? mPlayPage->width() : qMax(1, mWinW - mLeftW));
+    const qreal halfLeftInScene = (mLeftW * 0.5) * mSceneW / playW;
+    const qreal centerSceneX = mSceneW * 0.5 - halfLeftInScene;
+    const QPointF floaterEndPos(centerSceneX - TOP_SLOT_W / 2.0, (mSceneH - TOP_SLOT_H) / 2.0);
+
+    const int floaterDelayMs = shopShouldSlide ? shopSlideMs : 0;
+    QPointer<MainWindow> mwGuard(this);
+    QTimer::singleShot(floaterDelayMs, this, [this, mwGuard, type, globalCenter, floaterEndPos, shopShouldSlide, shopHome]() {
+        if (!mwGuard) return;
+        Consumable c = createConsumable(type);
+        auto *floater = new ConsumableItem(c);
+        const QPoint viewPt = mView->mapFromGlobal(globalCenter);
+        const QPointF scenePt = mView->mapToScene(viewPt);
+        floater->setPos(scenePt - QPointF(TOP_SLOT_W / 2.0, TOP_SLOT_H / 2.0));
+        floater->setZValue(800);
+        floater->setEnabled(false);
+        floater->setAcceptedMouseButtons(Qt::NoButton);
+        floater->setAcceptHoverEvents(false);
+        floater->setTransformOriginPoint(TOP_SLOT_W / 2.0, TOP_SLOT_H / 2.0);
+        mScene->addItem(floater);
 
     // 抬升:与消耗牌槽内 animateConsumableUseThen 同样 170ms / 上移 42px / scale 1.13。
     QPointer<ConsumableItem> guard(floater);
@@ -6031,7 +6081,7 @@ void MainWindow::spawnShopPlanetUseFloater(int consumableType, const QPoint &glo
     auto *posAnim = new QPropertyAnimation(floater, "pos", group);
     posAnim->setDuration(scaledDelay(260));
     posAnim->setStartValue(floater->pos());
-    posAnim->setEndValue(QPointF((mSceneW - TOP_SLOT_W) / 2.0, (mSceneH - TOP_SLOT_H) / 2.0));
+    posAnim->setEndValue(floaterEndPos);
     posAnim->setEasingCurve(QEasingCurve::OutCubic);
     auto *scaleAnim = new QPropertyAnimation(floater, "scale", group);
     scaleAnim->setDuration(scaledDelay(170));
@@ -6041,6 +6091,7 @@ void MainWindow::spawnShopPlanetUseFloater(int consumableType, const QPoint &glo
     group->addAnimation(posAnim);
     group->addAnimation(scaleAnim);
     connect(group, &QParallelAnimationGroup::finished, this, [this]() {
+        // 等 floater 真正落到屏幕中央再放行侧栏升级动画，节奏与原版商店购买&使用一致。
         mDelayHandLevelForConsumableUse = false;
         if (mPendingHandLevelAnimation) {
             mPendingHandLevelAnimation = false;
@@ -6097,6 +6148,7 @@ void MainWindow::spawnShopPlanetUseFloater(int consumableType, const QPoint &glo
         });
         fade->start(QAbstractAnimation::DeleteWhenStopped);
     });
+    });  // close outer singleShot lambda (floaterDelayMs delay)
 }
 
 void MainWindow::onConsumableClicked(ConsumableItem *item, Qt::MouseButton btn)
@@ -7432,19 +7484,8 @@ void MainWindow::animatePlayedCardsToDiscardThen(std::function<void()> after)
         c->setZValue(90 + i);
 
         if (mShatteredPlayedIndices.contains(i)) {
-            auto *scale = new QPropertyAnimation(c, "scale", this);
-            scale->setDuration(duration);
-            scale->setStartValue(c->scale());
-            scale->setEndValue(0.65);
-            scale->setEasingCurve(QEasingCurve::InBack);
-            scale->start(QAbstractAnimation::DeleteWhenStopped);
-
-            auto *fade = new QPropertyAnimation(c, "opacity", this);
-            fade->setDuration(duration);
-            fade->setStartValue(c->opacity());
-            fade->setEndValue(0.0);
-            fade->setEasingCurve(QEasingCurve::InQuad);
-            fade->start(QAbstractAnimation::DeleteWhenStopped);
+            // 玻璃牌：走破碎溶解动画（复刻 card.lua:2079 shatter）；clearPlayedCards 兜底删除。
+            c->startDissolve(/*glass=*/true, nullptr);
         } else {
             c->moveTo(deckPos, duration);
             auto *fade = new QPropertyAnimation(c, "opacity", this);

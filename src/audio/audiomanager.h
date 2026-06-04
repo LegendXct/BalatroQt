@@ -97,8 +97,10 @@ private:
     qint64 mLastFadeMs = 0;
     bool mInitialized = false;
     bool mButtonFilterInstalled = false;
-    double mMasterVolume = 0.5;
-    double mMusicVolume = 1.0;
+    // 主音量从原版默认 0.5 提到 0.8：用户反馈点击/计分等音效偏小。音乐侧用 0.65 把
+    // 有效音乐音量拉回 ≈0.52（≈原版 0.5），所以只有音效整体变响（0.5→0.8，约 +60%）。
+    double mMasterVolume = 0.8;
+    double mMusicVolume = 0.65;
     double mSfxVolume = 1.0;
     double mPitchMod = 1.0;
     double mAmbientEarnedScore = 0.0;

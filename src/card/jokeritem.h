@@ -69,6 +69,10 @@ private:
     qreal mRestZ = 0;
     double mHoverTiltX = 0.0;
     double mHoverTiltY = 0.0;
+    double mAmbientTiltX = 0.0;       // 环境漂浮叠加倾斜(度)，CardFloat 每帧驱动
+    double mAmbientTiltY = 0.0;
+    double mFloatPhase   = 0.0;
+    void updateAmbientFloat(double t);
     // 拖拽水平速度倾斜，与 CardItem 用同一套折算公式，让小丑/塔罗/星球 也具备甩动手感。
     double mDragTilt = 0.0;
     // 重排移动倾斜：被其它牌挤动而 moveTo 滑向新位置时，朝运动方向倾斜（对齐原版 move_r）。

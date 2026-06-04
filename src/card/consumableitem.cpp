@@ -10,6 +10,7 @@
 #include <QGraphicsSceneHoverEvent>
 #include "../utils/shadereffects.h"
 #include "cardshadow.h"
+#include "cardfloat.h"
 #include <QGraphicsScene>
 #include <QCursor>
 #include <QTimer>
@@ -184,10 +185,31 @@ ConsumableItem::ConsumableItem(const Consumable &c, QGraphicsItem *parent)
         sAnimatedConsumables.insert(this);
         QObject::connect(this, &QObject::destroyed, [ptr = this]() { sAnimatedConsumables.remove(ptr); });
     }
+
+    mFloatPhase = QRandomGenerator::global()->generateDouble() * 6.2831853;
+    CardFloat::add(this, [this](double t) { updateAmbientFloat(t); });
+}
+
+void ConsumableItem::updateAmbientFloat(double t)
+{
+    const bool idle = !mHovered && !mPressed && !mDragging;
+    if (!idle || !isVisible()) {
+        if (mAmbientTiltX != 0.0 || mAmbientTiltY != 0.0) {
+            mAmbientTiltX = 0.0;
+            mAmbientTiltY = 0.0;
+            applyHoverTransform();
+        }
+        return;
+    }
+    const double a = t * 1.6 + mFloatPhase;
+    mAmbientTiltX = 2.2 * std::sin(a);
+    mAmbientTiltY = 2.2 * std::cos(a * 0.92 + 1.3);
+    applyHoverTransform();
 }
 
 ConsumableItem::~ConsumableItem()
 {
+    CardFloat::remove(this);
     if (mShadow) {
         if (auto *s = mShadow->scene()) s->removeItem(mShadow);
         delete mShadow;
@@ -247,6 +269,8 @@ void ConsumableItem::mousePressEvent(QGraphicsSceneMouseEvent *e)
     if (e->button() == Qt::LeftButton || e->button() == Qt::RightButton) {
         mPressed = true;
         mDragging = false;
+        // 按下立即隐藏悬停描述（原版 grab 时 h_popup 消失），不必等到开始拖动。
+        emit hoverChanged(this, false);
         mHoverTiltX = 0.0;
         mHoverTiltY = 0.0;
         mDragTilt = 0.0;
@@ -342,8 +366,8 @@ void ConsumableItem::applyHoverTransform()
 {
     const qreal cx = WIDTH / 2.0;
     const qreal cy = HEIGHT / 2.0;
-    const qreal tiltX = qDegreesToRadians(mHoverTiltX);
-    const qreal tiltY = qDegreesToRadians(mHoverTiltY);
+    const qreal tiltX = qDegreesToRadians(mHoverTiltX + mAmbientTiltX);
+    const qreal tiltY = qDegreesToRadians(mHoverTiltY + mAmbientTiltY);
 
     const qreal cosY = std::cos(tiltY);
     const qreal cosX = std::cos(tiltX);
