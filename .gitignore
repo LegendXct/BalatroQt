@@ -80,3 +80,20 @@ CMakeLists.txt.user*
 .rcc/
 .uic/
 /build*/
+
+# Qt Creator clangd 索引缓存 & 生成的工程文件
+/.qtc_clangd/
+/.qtcreator/
+*.creator.user*
+BalatroQt.cflags
+BalatroQt.config
+BalatroQt.creator
+BalatroQt.cxxflags
+BalatroQt.files
+BalatroQt.includes
+
+# Claude 本地机器设置
+.claude/settings.local.json
+
+# 仅供参考的原版 Lua 源码（本地保留，不入库）
+/balatro_original_code/
