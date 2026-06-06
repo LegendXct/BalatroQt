@@ -167,6 +167,7 @@ private:
     PackContent     mPendingPack;        // 当前正在打开的包
     QVector<CardData> mPendingPackHand;  // 开包界面临时翻出的一手牌
     bool mPackFromTag = false;
+    bool mPendingPackChoiceMade = false;
     QVector<PackKind> mQueuedTagPacks;
 
     struct PendingSlotFlyIn {
@@ -480,6 +481,16 @@ private:
     bool mHasOngoingRun = false;   // 启动直进主菜单时 "继续当前局" 灰掉,开过新局后亮起
     void showStatsOverlay();
     void showCollectionOverlay();
+    void showCollectionJokersOverlay();
+    void showCollectionConsumablesOverlay(ConsumableKind kind);
+    void showCollectionVouchersOverlay();
+    void showCollectionTagsOverlay();
+    void showCollectionPacksOverlay();
+    void showCollectionBlindsOverlay();
+    void showCollectionEnhancementsOverlay();
+    void showCollectionSealsOverlay();
+    void showCollectionEditionsOverlay();
+    void showCollectionDecksOverlay();
     void showDeckCustomizeOverlay();
     QPointer<QWidget> mStatsOverlay;
     QPointer<QWidget> mCollectionOverlay;

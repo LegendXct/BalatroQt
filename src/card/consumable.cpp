@@ -205,7 +205,7 @@ static void temperanceGain(UseContext &ctx)
 
 static void wheelOfFortune(UseContext &ctx)
 {
-    if (QRandomGenerator::global()->bounded(4) != 0) return;
+    if (!ctx.state.chanceIn(4)) return;
     constexpr Edition editions[] = { Edition::Foil, Edition::Holographic, Edition::Polychrome };
     Edition e = editions[QRandomGenerator::global()->bounded(3)];
     ctx.state.setRandomEditionlessJoker(e, false, false);

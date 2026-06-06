@@ -64,6 +64,7 @@ enum class JokerType {
     Pareidolia, Hallucination, Luchador, InvisibleJoker,
     // Batch 9：收尾小丑
     CreditCard, MrBones, DietCola, FourFingers, OopsAllSixes,
+    SixthSense, RedCard, BaseballCard, TradingCard, Matador, Astronomer,
 };
 
 class Joker; // 前置声明，供 TriggerContext::self 使用
@@ -101,5 +102,6 @@ public:
 Joker createJoker(JokerType type);
 JokerRarity jokerRarity(JokerType t);
 int jokerBaseCost(JokerType t);
+bool jokerBlueprintCompatible(JokerType t);
 
 #endif // JOKER_HH

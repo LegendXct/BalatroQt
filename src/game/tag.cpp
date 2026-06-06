@@ -41,7 +41,7 @@ TagData tagData(TagType type)
     case TagType::Coupon:
         t.key = "tag_coupon"; t.name = "优惠标签"; t.description = "下个商店初始商品和补充包免费，不影响优惠券"; t.spritePos = {4, 0}; break;
     case TagType::Double:
-        t.key = "tag_double"; t.name = "双倍标签"; t.description = "额外获得一个随机标签"; t.spritePos = {5, 0}; break;
+        t.key = "tag_double"; t.name = "双倍标签"; t.description = "下一次选定的标签会额外获得一个复制品，双倍标签除外"; t.spritePos = {5, 0}; break;
     case TagType::Juggle:
         t.key = "tag_juggle"; t.name = "杂耍标签"; t.description = "下个盲注手牌上限 +3"; t.spritePos = {5, 1}; break;
     case TagType::D6:
@@ -61,7 +61,7 @@ TagData tagData(TagType type)
 QVector<TagType> baseTagPoolForAnte(int ante)
 {
     QVector<TagType> all = {
-        TagType::Uncommon, TagType::Rare, TagType::Foil, TagType::Holographic,
+        TagType::Uncommon, TagType::Rare, TagType::Negative, TagType::Foil, TagType::Holographic,
         TagType::Polychrome, TagType::Investment, TagType::Voucher, TagType::Boss,
         TagType::Standard, TagType::Charm, TagType::Meteor, TagType::Buffoon,
         TagType::Handy, TagType::Garbage, TagType::Ethereal, TagType::Coupon,

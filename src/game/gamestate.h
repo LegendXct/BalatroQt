@@ -98,7 +98,9 @@ public:
     bool hasFreeShopReroll() const {
         return !mChaosFreeRerollUsed && hasJokerType(JokerType::ChaosTheClown);
     }
-    int probDenom(int n) const { return hasJokerType(JokerType::OopsAllSixes) ? qMax(1, n / 2) : n; }
+    int probabilityNumerator() const;
+    bool chanceIn(int odds) const;
+    int probDenom(int n) const;
     int pendingRoundPayout() const { return mPendingRoundPayout; }
     bool claimRoundPayout();
     int handsLeft() const {return mHandsLeft;}
@@ -143,7 +145,7 @@ public:
     const QHash<HandType, HandLevel> &handLevels() const { return mHandLevels; }
     void levelUpHand(HandType t, int times = 1);   // 行星牌用
     bool handTypePlayedThisRound(HandType t) const { return mHandTypesPlayedThisRound.contains(static_cast<int>(t)); }
-    // 幻想性错觉：持有时所有牌（石头牌除外）都算人头牌
+    // 幻视：持有时所有牌（石头牌除外）都算人头牌
     bool isFaceCard(const CardData &c) const {
         if (c.enhancement == Enhancement::Stone) return false;
         return hasJokerType(JokerType::Pareidolia)
@@ -194,6 +196,7 @@ public:
     bool applyPackChoice(const PackContent &pack, int chosenIdx,
                          const QVector<int> &selectedPackHandIdx,
                          QVector<CardData> &packHand);
+    void notifyBoosterSkipped();
     bool useConsumableOnPackHand(int consumableIdx,
                                  const QVector<int> &selectedPackHandIdx,
                                  QVector<CardData> &packHand);
@@ -209,11 +212,13 @@ public:
     void addPermanentHandSizeBonus(int delta);
     void immolateRandomHandCards(int destroyCount, int goldGain);
     void notifyPlayingCardDestroyed(const CardData &card);
+    void notifyPlayingCardsAdded(int count);
     bool dnaCanTriggerThisPlay() const;
     void createDNACopy(const CardData &card);
     double cainoXMult() const { return mCainoXMult; }
     double yorickXMult() const { return mYorickXMult; }
     int yorickDiscardsRemaining() const { return mYorickDiscardsRemaining; }
+    int planetsUsedThisRunCount() const { return mPlanetsUsedThisRun.size(); }
     int jokerDynamicCounter(JokerType t) const;
     void levelUpAllHands(int times = 1);
     void selectCurrentBlind();                       // 玩家从 BlindSelect 点"选择"
@@ -274,6 +279,7 @@ private:
     int  mBlindStartingDiscards = Constants::INITIAL_DISCARDS;  // 延迟满足
     Rank mMailRank = Rank::Two;            // 邮件回扣：本回合返钱的点数
     Suit mAncientSuit = Suit::Spades;      // 远古小丑：本回合 ×1.5 的花色
+    bool mAncientSuitInitialized = false;  // 原版首回合可抽任意花色，之后不重复上一回合
     Rank mIdolRank = Rank::Ace;            // 偶像：本回合 ×2 的点数
     Suit mIdolSuit = Suit::Spades;         // 偶像：本回合 ×2 的花色
     QSet<int> mPlanetsUsedThisRun;         // 卫星：本局用过的行星牌种类
@@ -294,6 +300,7 @@ private:
     double mPendingHandScore = 0.0;
     QVector<int> mPendingPlayedIndices;
     QVector<bool> mPendingShattered;
+    bool mPendingBossTriggeredForMatador = false;
     int mPendingRoundPayout = 0; // 胜利结算先暂存，点击“提现”后再真正加到金币
     bool mSuppressGoldSignal = false; // 回合末临时计算提现金额时，避免提前刷新左侧金币
     void finishWinningRound();
