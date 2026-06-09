@@ -43,6 +43,7 @@
 #include <QDialogButtonBox>
 #include <QScrollArea>
 #include <QGridLayout>
+#include <QRegularExpression>
 #include <QFrame>
 #include <QAbstractItemView>
 #include <QRandomGenerator>
@@ -2111,7 +2112,7 @@ void MainWindow::showOptionsOverlay()
     v->addWidget(title);
 
     const int kBtnH = dp(78);     // 进一步抬高，按钮厚实些与原版主菜单观感对齐
-    const QStringList items = {"设置", "开始新的一局", "主菜单", "统计数据", "定制牌组"};
+    const QStringList items = {"设置", "开始新的一局", "主菜单", "收藏", "统计数据", "定制牌组"};
     for (const QString &txt : items) {
         auto *b = new QPushButton(txt, panel);
         b->setFont(titleFont);
@@ -2127,6 +2128,11 @@ void MainWindow::showOptionsOverlay()
             connect(b, &QPushButton::clicked, this, [this]() {
                 hideOptionsOverlay();
                 showMainMenuOverlay();
+            });
+        } else if (txt == "收藏") {
+            connect(b, &QPushButton::clicked, this, [this]() {
+                hideOptionsOverlay();
+                showCollectionOverlay();
             });
         } else if (txt == "统计数据") {
             connect(b, &QPushButton::clicked, this, [this]() {
@@ -2477,6 +2483,385 @@ QPair<QWidget*, QVBoxLayout*> makeOverlayPanel(QWidget *parent, int widthDp, con
     v->setSpacing(10);
     return { overlay, v };
 }
+
+QVector<JokerType> collectionJokerOrder()
+{
+    return {
+        JokerType::Joker, JokerType::GreedyJoker, JokerType::LustyJoker, JokerType::WrathfulJoker,
+        JokerType::GluttonousJoker, JokerType::JollyJoker, JokerType::ZanyJoker, JokerType::MadJoker,
+        JokerType::CrazyJoker, JokerType::DrollJoker, JokerType::SlyJoker, JokerType::WilyJoker,
+        JokerType::CleverJoker, JokerType::DeviousJoker, JokerType::CraftyJoker, JokerType::HalfJoker,
+        JokerType::JokerStencil, JokerType::FourFingers, JokerType::Mime, JokerType::CreditCard,
+        JokerType::CeremonialDagger, JokerType::Banner, JokerType::MysticSummit, JokerType::MarbleJoker,
+        JokerType::LoyaltyCard, JokerType::EightBall, JokerType::Misprint, JokerType::Dusk,
+        JokerType::RaisedFist, JokerType::ChaosTheClown, JokerType::Fibonacci, JokerType::SteelJoker,
+        JokerType::ScaryFace, JokerType::AbstractJoker, JokerType::DelayedGratification, JokerType::Hack,
+        JokerType::Pareidolia, JokerType::GrosMichel, JokerType::EvenSteven, JokerType::OddTodd,
+        JokerType::Scholar, JokerType::BusinessCard, JokerType::Supernova, JokerType::RideTheBus,
+        JokerType::SpaceJoker, JokerType::Egg, JokerType::Burglar, JokerType::Blackboard,
+        JokerType::Runner, JokerType::IceCream, JokerType::DNA, JokerType::Splash,
+        JokerType::BlueJoker, JokerType::SixthSense, JokerType::Constellation, JokerType::Hiker,
+        JokerType::FacelessJoker, JokerType::GreenJoker, JokerType::Superposition, JokerType::ToDoList,
+        JokerType::Cavendish, JokerType::CardSharp, JokerType::RedCard, JokerType::Madness,
+        JokerType::SquareJoker, JokerType::Seance, JokerType::RiffRaff, JokerType::Vampire,
+        JokerType::Shortcut, JokerType::Hologram, JokerType::Vagabond, JokerType::Baron,
+        JokerType::Cloud9, JokerType::Rocket, JokerType::Obelisk, JokerType::MidasMask,
+        JokerType::Luchador, JokerType::Photograph, JokerType::GiftCard, JokerType::TurtleBean,
+        JokerType::Erosion, JokerType::ReservedParking, JokerType::MailInRebate, JokerType::ToTheMoon,
+        JokerType::Hallucination, JokerType::FortuneTeller, JokerType::Juggler, JokerType::Drunkard,
+        JokerType::StoneJoker, JokerType::GoldenJoker, JokerType::LuckyCat, JokerType::BaseballCard,
+        JokerType::Bull, JokerType::DietCola, JokerType::TradingCard, JokerType::FlashCard,
+        JokerType::Popcorn, JokerType::SpareTrousers, JokerType::AncientJoker, JokerType::Ramen,
+        JokerType::WalkieTalkie, JokerType::Seltzer, JokerType::Castle, JokerType::SmileyFace,
+        JokerType::Campfire, JokerType::GoldenTicket, JokerType::MrBones, JokerType::Acrobat,
+        JokerType::SockAndBuskin, JokerType::Swashbuckler, JokerType::Troubadour, JokerType::Certificate,
+        JokerType::SmearedJoker, JokerType::Throwback, JokerType::HangingChad, JokerType::RoughGem,
+        JokerType::Bloodstone, JokerType::Arrowhead, JokerType::OnyxAgate, JokerType::GlassJoker,
+        JokerType::Showman, JokerType::FlowerPot, JokerType::Blueprint, JokerType::WeeJoker,
+        JokerType::MerryAndy, JokerType::OopsAllSixes, JokerType::TheIdol, JokerType::SeeingDouble,
+        JokerType::Matador, JokerType::HitTheRoad, JokerType::TheDuo, JokerType::TheTrio,
+        JokerType::TheFamily, JokerType::TheOrder, JokerType::TheTribe, JokerType::Stuntman,
+        JokerType::InvisibleJoker, JokerType::Brainstorm, JokerType::Satellite, JokerType::ShootTheMoon,
+        JokerType::DriversLicense, JokerType::Cartomancer, JokerType::Astronomer, JokerType::BurntJoker,
+        JokerType::Bootstraps, JokerType::Caino, JokerType::Triboulet, JokerType::Yorick,
+        JokerType::Chicot, JokerType::Perkeo,
+    };
+}
+
+QString collectionRarityName(JokerRarity rarity)
+{
+    switch (rarity) {
+    case JokerRarity::Common: return QStringLiteral("普通");
+    case JokerRarity::Uncommon: return QStringLiteral("罕见");
+    case JokerRarity::Rare: return QStringLiteral("稀有");
+    case JokerRarity::Legendary: return QStringLiteral("传奇");
+    }
+    return QStringLiteral("普通");
+}
+
+QString collectionPlainText(QString text)
+{
+    text.remove(QRegularExpression(QStringLiteral("\\{[^}]*\\}")));
+    return text.trimmed();
+}
+
+QPixmap collectionJokerPixmap(JokerType type, const QSize &target)
+{
+    QPixmap sheet(QStringLiteral(":/textures/images/Jokers.png"));
+    if (sheet.isNull()) return QPixmap();
+
+    const QPoint c = JokerItem::spritePos(type);
+    const QRect src(c.x() * JokerItem::SRC_W, c.y() * JokerItem::SRC_H,
+                    JokerItem::SRC_W, JokerItem::SRC_H);
+    QPixmap body = sheet.copy(src);
+    QPixmap pix(JokerItem::SRC_W, JokerItem::SRC_H);
+    pix.fill(Qt::transparent);
+    {
+        QPainter p(&pix);
+        p.setRenderHint(QPainter::SmoothPixmapTransform, type == JokerType::WeeJoker);
+        if (type == JokerType::WeeJoker) {
+            p.drawPixmap(QRectF(JokerItem::SRC_W * 0.15, JokerItem::SRC_H * 0.15,
+                                JokerItem::SRC_W * 0.70, JokerItem::SRC_H * 0.70),
+                         body, QRectF(0, 0, JokerItem::SRC_W, JokerItem::SRC_H));
+        } else {
+            p.drawPixmap(QRect(0, 0, JokerItem::SRC_W, JokerItem::SRC_H), body);
+        }
+        JokerItem::drawFloatingSprite(&p, QRectF(0, 0, JokerItem::SRC_W, JokerItem::SRC_H),
+                                      type, false);
+    }
+    return pix.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+}
+
+QVector<ConsumableType> collectionConsumableOrder(ConsumableKind kind)
+{
+    if (kind == ConsumableKind::Tarot) {
+        return {
+            ConsumableType::Tarot_Fool, ConsumableType::Tarot_Magician,
+            ConsumableType::Tarot_HighPriestess, ConsumableType::Tarot_Empress,
+            ConsumableType::Tarot_Emperor, ConsumableType::Tarot_Hierophant,
+            ConsumableType::Tarot_Lovers, ConsumableType::Tarot_Chariot,
+            ConsumableType::Tarot_Justice, ConsumableType::Tarot_Hermit,
+            ConsumableType::Tarot_Wheel, ConsumableType::Tarot_Strength,
+            ConsumableType::Tarot_HangedMan, ConsumableType::Tarot_Death,
+            ConsumableType::Tarot_Temperance, ConsumableType::Tarot_Devil,
+            ConsumableType::Tarot_Tower, ConsumableType::Tarot_Star,
+            ConsumableType::Tarot_Moon, ConsumableType::Tarot_Sun,
+            ConsumableType::Tarot_Judgement, ConsumableType::Tarot_World,
+        };
+    }
+    if (kind == ConsumableKind::Planet) {
+        return {
+            ConsumableType::Planet_Mercury, ConsumableType::Planet_Venus,
+            ConsumableType::Planet_Earth, ConsumableType::Planet_Mars,
+            ConsumableType::Planet_Jupiter, ConsumableType::Planet_Saturn,
+            ConsumableType::Planet_Uranus, ConsumableType::Planet_Neptune,
+            ConsumableType::Planet_Pluto, ConsumableType::Planet_PlanetX,
+            ConsumableType::Planet_Ceres, ConsumableType::Planet_Eris,
+        };
+    }
+    return {
+        ConsumableType::Spectral_Familiar, ConsumableType::Spectral_Grim,
+        ConsumableType::Spectral_Incantation, ConsumableType::Spectral_Talisman,
+        ConsumableType::Spectral_Aura, ConsumableType::Spectral_Wraith,
+        ConsumableType::Spectral_Sigil, ConsumableType::Spectral_Ouija,
+        ConsumableType::Spectral_Ectoplasm, ConsumableType::Spectral_Immolate,
+        ConsumableType::Spectral_Ankh, ConsumableType::Spectral_DejaVu,
+        ConsumableType::Spectral_Hex, ConsumableType::Spectral_Trance,
+        ConsumableType::Spectral_Medium, ConsumableType::Spectral_Cryptid,
+        ConsumableType::Spectral_Soul, ConsumableType::Spectral_BlackHole,
+    };
+}
+
+QString collectionConsumableTitle(ConsumableKind kind)
+{
+    switch (kind) {
+    case ConsumableKind::Tarot: return QStringLiteral("塔罗牌");
+    case ConsumableKind::Planet: return QStringLiteral("星球牌");
+    case ConsumableKind::Spectral: return QStringLiteral("幻灵牌");
+    }
+    return QStringLiteral("消耗牌");
+}
+
+QString collectionConsumableAccent(ConsumableKind kind)
+{
+    switch (kind) {
+    case ConsumableKind::Tarot: return QStringLiteral("#a782d1");
+    case ConsumableKind::Planet: return QStringLiteral("#009dff");
+    case ConsumableKind::Spectral: return QStringLiteral("#315dff");
+    }
+    return QStringLiteral("#a782d1");
+}
+
+QVector<TagType> collectionTagOrder()
+{
+    return {
+        TagType::Uncommon, TagType::Rare, TagType::Negative, TagType::Foil,
+        TagType::Holographic, TagType::Polychrome, TagType::Investment,
+        TagType::Voucher, TagType::Boss, TagType::Standard,
+        TagType::Charm, TagType::Meteor, TagType::Buffoon,
+        TagType::Handy, TagType::Garbage, TagType::Ethereal,
+        TagType::Coupon, TagType::Double, TagType::Juggle,
+        TagType::D6, TagType::TopUp, TagType::Skip,
+        TagType::Orbital, TagType::Economy,
+    };
+}
+
+struct CollectionPackEntry {
+    PackKind kind;
+    PackSize size;
+    int variant;
+};
+
+QVector<CollectionPackEntry> collectionPackOrder()
+{
+    QVector<CollectionPackEntry> out;
+    auto add = [&](PackKind kind, PackSize size) {
+        const int count = packSpriteVariantCount(kind, size);
+        for (int i = 0; i < count; ++i) out.append({kind, size, i});
+    };
+    add(PackKind::Arcana, PackSize::Normal);
+    add(PackKind::Arcana, PackSize::Jumbo);
+    add(PackKind::Arcana, PackSize::Mega);
+    add(PackKind::Celestial, PackSize::Normal);
+    add(PackKind::Celestial, PackSize::Jumbo);
+    add(PackKind::Celestial, PackSize::Mega);
+    add(PackKind::Standard, PackSize::Normal);
+    add(PackKind::Standard, PackSize::Jumbo);
+    add(PackKind::Standard, PackSize::Mega);
+    add(PackKind::Buffoon, PackSize::Normal);
+    add(PackKind::Buffoon, PackSize::Jumbo);
+    add(PackKind::Buffoon, PackSize::Mega);
+    add(PackKind::Spectral, PackSize::Normal);
+    add(PackKind::Spectral, PackSize::Jumbo);
+    add(PackKind::Spectral, PackSize::Mega);
+    return out;
+}
+
+int collectionPackCost(PackSize size)
+{
+    switch (size) {
+    case PackSize::Normal: return 4;
+    case PackSize::Jumbo: return 6;
+    case PackSize::Mega: return 8;
+    }
+    return 4;
+}
+
+struct CollectionBlindEntry {
+    QString name;
+    QString description;
+    int chipRow;
+};
+
+QVector<CollectionBlindEntry> collectionBlindOrder()
+{
+    auto boss = [](BossEffect effect) {
+        const BossInfo info = bossInfo(effect);
+        return CollectionBlindEntry{info.name, info.description, bossChipRow(effect)};
+    };
+    return {
+        {QStringLiteral("小盲注"), QStringLiteral("基础盲注"), 0},
+        {QStringLiteral("大盲注"), QStringLiteral("更高分数要求"), 1},
+        boss(BossEffect::TheHook),
+        boss(BossEffect::TheOx),
+        boss(BossEffect::TheHouse),
+        boss(BossEffect::TheWall),
+        boss(BossEffect::TheWheel),
+        boss(BossEffect::TheArm),
+        boss(BossEffect::TheClub),
+        boss(BossEffect::TheFish),
+        boss(BossEffect::ThePsychic),
+        boss(BossEffect::TheGoad),
+        boss(BossEffect::TheWater),
+        boss(BossEffect::TheWindow),
+        boss(BossEffect::TheManacle),
+        boss(BossEffect::TheEye),
+        boss(BossEffect::TheMouth),
+        boss(BossEffect::ThePlant),
+        boss(BossEffect::TheSerpent),
+        boss(BossEffect::ThePillar),
+        boss(BossEffect::TheNeedle),
+        boss(BossEffect::TheHead),
+        boss(BossEffect::TheTooth),
+        boss(BossEffect::TheFlint),
+        boss(BossEffect::TheMark),
+        boss(BossEffect::AmberAcorn),
+        boss(BossEffect::VerdantLeaf),
+        boss(BossEffect::VioletVessel),
+        boss(BossEffect::CrimsonHeart),
+        boss(BossEffect::CeruleanBell),
+    };
+}
+
+struct CollectionCardModifierEntry {
+    QString name;
+    QString description;
+    Enhancement enhancement = Enhancement::None;
+    Seal seal = Seal::None;
+    Edition edition = Edition::None;
+};
+
+QRect collectionEnhancerRect(Enhancement enhancement)
+{
+    switch (enhancement) {
+    case Enhancement::Bonus: return QRect(1 * CardItem::SRC_W, 1 * CardItem::SRC_H, CardItem::SRC_W, CardItem::SRC_H);
+    case Enhancement::Mult: return QRect(2 * CardItem::SRC_W, 1 * CardItem::SRC_H, CardItem::SRC_W, CardItem::SRC_H);
+    case Enhancement::Wild: return QRect(3 * CardItem::SRC_W, 1 * CardItem::SRC_H, CardItem::SRC_W, CardItem::SRC_H);
+    case Enhancement::Lucky: return QRect(4 * CardItem::SRC_W, 1 * CardItem::SRC_H, CardItem::SRC_W, CardItem::SRC_H);
+    case Enhancement::Glass: return QRect(5 * CardItem::SRC_W, 1 * CardItem::SRC_H, CardItem::SRC_W, CardItem::SRC_H);
+    case Enhancement::Steel: return QRect(6 * CardItem::SRC_W, 1 * CardItem::SRC_H, CardItem::SRC_W, CardItem::SRC_H);
+    case Enhancement::Stone: return QRect(5 * CardItem::SRC_W, 0 * CardItem::SRC_H, CardItem::SRC_W, CardItem::SRC_H);
+    case Enhancement::Gold: return QRect(6 * CardItem::SRC_W, 0 * CardItem::SRC_H, CardItem::SRC_W, CardItem::SRC_H);
+    case Enhancement::None: break;
+    }
+    return QRect(1 * CardItem::SRC_W, 0 * CardItem::SRC_H, CardItem::SRC_W, CardItem::SRC_H);
+}
+
+QRect collectionSealRect(Seal seal)
+{
+    switch (seal) {
+    case Seal::Gold: return QRect(2 * CardItem::SRC_W, 0 * CardItem::SRC_H, CardItem::SRC_W, CardItem::SRC_H);
+    case Seal::Purple: return QRect(4 * CardItem::SRC_W, 4 * CardItem::SRC_H, CardItem::SRC_W, CardItem::SRC_H);
+    case Seal::Red: return QRect(5 * CardItem::SRC_W, 4 * CardItem::SRC_H, CardItem::SRC_W, CardItem::SRC_H);
+    case Seal::Blue: return QRect(6 * CardItem::SRC_W, 4 * CardItem::SRC_H, CardItem::SRC_W, CardItem::SRC_H);
+    case Seal::None: break;
+    }
+    return QRect();
+}
+
+QPixmap collectionPlayingCardPixmap(Enhancement enhancement, Seal seal, Edition edition, const QSize &target)
+{
+    QPixmap enh(QStringLiteral(":/textures/images/Enhancers.png"));
+    QPixmap deck(QStringLiteral(":/textures/images/8BitDeck.png"));
+    if (enh.isNull() || deck.isNull()) return QPixmap();
+
+    QPixmap body(CardItem::SRC_W, CardItem::SRC_H);
+    body.fill(Qt::transparent);
+    {
+        QPainter p(&body);
+        p.setRenderHint(QPainter::SmoothPixmapTransform, false);
+        p.drawPixmap(QRect(0, 0, CardItem::SRC_W, CardItem::SRC_H), enh, collectionEnhancerRect(enhancement));
+        if (enhancement != Enhancement::Stone) {
+            p.drawPixmap(QRect(0, 0, CardItem::SRC_W, CardItem::SRC_H),
+                         deck, QRect(12 * CardItem::SRC_W, 0, CardItem::SRC_W, CardItem::SRC_H));
+        }
+    }
+    if (edition != Edition::None)
+        body = BalatroShaders::renderEditionPixmap(body, edition);
+
+    QPixmap out(CardItem::SRC_W, CardItem::SRC_H);
+    out.fill(Qt::transparent);
+    {
+        QPainter p(&out);
+        p.drawPixmap(QRect(0, 0, CardItem::SRC_W, CardItem::SRC_H), body);
+        const QRect sealRect = collectionSealRect(seal);
+        if (!sealRect.isNull())
+            p.drawPixmap(QRect(0, 0, CardItem::SRC_W, CardItem::SRC_H), enh, sealRect);
+    }
+    return out.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+}
+
+QVector<CollectionCardModifierEntry> collectionEnhancementOrder()
+{
+    return {
+        {QStringLiteral("奖励牌"), QStringLiteral("+30 筹码"), Enhancement::Bonus},
+        {QStringLiteral("倍率牌"), QStringLiteral("+4 倍率"), Enhancement::Mult},
+        {QStringLiteral("万能牌"), QStringLiteral("可视作任意花色"), Enhancement::Wild},
+        {QStringLiteral("玻璃牌"), QStringLiteral("×2 倍率，1/4 概率摧毁"), Enhancement::Glass},
+        {QStringLiteral("钢铁牌"), QStringLiteral("留在手牌中时 ×1.5 倍率"), Enhancement::Steel},
+        {QStringLiteral("石头牌"), QStringLiteral("+50 筹码，无点数花色"), Enhancement::Stone},
+        {QStringLiteral("黄金牌"), QStringLiteral("回合结束时仍在手牌中，+$3"), Enhancement::Gold},
+        {QStringLiteral("幸运牌"), QStringLiteral("1/5 概率 +20 倍率，1/15 概率 +$20"), Enhancement::Lucky},
+    };
+}
+
+QVector<CollectionCardModifierEntry> collectionSealOrder()
+{
+    return {
+        {QStringLiteral("金色蜡封"), QStringLiteral("计分时 +$3"), Enhancement::None, Seal::Gold},
+        {QStringLiteral("红色蜡封"), QStringLiteral("重新触发此牌 1 次"), Enhancement::None, Seal::Red},
+        {QStringLiteral("蓝色蜡封"), QStringLiteral("回合结束时生成对应牌型的星球牌"), Enhancement::None, Seal::Blue},
+        {QStringLiteral("紫色蜡封"), QStringLiteral("弃掉此牌时生成 1 张塔罗牌"), Enhancement::None, Seal::Purple},
+    };
+}
+
+QVector<CollectionCardModifierEntry> collectionEditionOrder()
+{
+    return {
+        {QStringLiteral("闪箔"), QStringLiteral("+50 筹码"), Enhancement::None, Seal::None, Edition::Foil},
+        {QStringLiteral("镭射"), QStringLiteral("+10 倍率"), Enhancement::None, Seal::None, Edition::Holographic},
+        {QStringLiteral("多彩"), QStringLiteral("×1.5 倍率"), Enhancement::None, Seal::None, Edition::Polychrome},
+        {QStringLiteral("负片"), QStringLiteral("+1 小丑槽位"), Enhancement::None, Seal::None, Edition::Negative},
+        {QStringLiteral("基础"), QStringLiteral("没有版本效果"), Enhancement::None, Seal::None, Edition::None},
+    };
+}
+
+struct CollectionDeckEntry {
+    QString name;
+    QString description;
+    QPoint pos;
+};
+
+QVector<CollectionDeckEntry> collectionDeckOrder()
+{
+    return {
+        {QStringLiteral("红色牌组"), QStringLiteral("+1 次弃牌"), {0, 0}},
+        {QStringLiteral("蓝色牌组"), QStringLiteral("+1 次出牌"), {1, 0}},
+        {QStringLiteral("黄色牌组"), QStringLiteral("开局额外 +$10"), {2, 0}},
+        {QStringLiteral("绿色牌组"), QStringLiteral("回合结束不获得利息；每剩余出牌 +$2，每剩余弃牌 +$1"), {3, 0}},
+        {QStringLiteral("黑色牌组"), QStringLiteral("+1 小丑槽位，-1 次出牌"), {4, 0}},
+        {QStringLiteral("魔法牌组"), QStringLiteral("开局拥有水晶球优惠券和 2 张愚者"), {0, 1}},
+        {QStringLiteral("星云牌组"), QStringLiteral("开局拥有望远镜优惠券，-1 消耗牌槽位"), {3, 1}},
+        {QStringLiteral("幽灵牌组"), QStringLiteral("商店可能出现幻灵牌；开局拥有 1 张妖法"), {6, 1}},
+        {QStringLiteral("废弃牌组"), QStringLiteral("开局牌组没有人头牌"), {2, 1}},
+        {QStringLiteral("方格牌组"), QStringLiteral("开局只有 26 张黑桃和 26 张红心"), {1, 1}},
+        {QStringLiteral("黄道牌组"), QStringLiteral("开局拥有塔罗商人、星球商人和库存过剩"), {4, 1}},
+        {QStringLiteral("彩绘牌组"), QStringLiteral("+2 手牌上限，-1 小丑槽位"), {5, 1}},
+        {QStringLiteral("浮雕牌组"), QStringLiteral("击败 Boss 盲注后获得 1 个双倍标签"), {0, 2}},
+        {QStringLiteral("等离子牌组"), QStringLiteral("出牌结算时平衡筹码和倍率；盲注分数要求 ×2"), {2, 2}},
+        {QStringLiteral("古怪牌组"), QStringLiteral("开局随机化所有牌的点数和花色"), {3, 2}},
+    };
+}
 }
 
 void MainWindow::showStatsOverlay()
@@ -2546,7 +2931,7 @@ void MainWindow::showCollectionOverlay()
 {
     QWidget *host = mPlayPage ? mPlayPage : this;
     if (mCollectionOverlay) { mCollectionOverlay->hide(); mCollectionOverlay->deleteLater(); }
-    auto p = makeOverlayPanel(host, dp(640), "#a782d1");
+    auto p = makeOverlayPanel(host, dp(920), "#a782d1");
     mCollectionOverlay = p.first;
     mCollectionOverlay->setGeometry(host->rect());
 
@@ -2556,18 +2941,81 @@ void MainWindow::showCollectionOverlay()
     title->setStyleSheet("color:#a782d1; background:transparent; border:none;");
     p.second->addWidget(title);
 
-    auto *body = new QLabel(
-        "已持有的小丑 / 消耗牌 / 优惠券会在游戏过程中自动登记。\n\n"
-        "本局已获取的内容：\n"
-        "・小丑：" + QString::number(mGameState->jokers().size()) + " 张\n"
-        "・消耗牌：" + QString::number(mGameState->consumables().size()) + " 张\n"
-        "・优惠券：" + QString::number(mGameState->redeemedVouchers().size()) + " 张\n\n"
-        "完整图鉴（包含未发现的卡牌剪影）正在制作中。"
-    );
-    QFont bf = mCNFont; bf.setPixelSize(uiPx(16));
-    body->setFont(bf); body->setWordWrap(true); body->setAlignment(Qt::AlignCenter);
-    body->setStyleSheet("color:#eaffff; background:transparent; border:none; padding:10px 0;");
-    p.second->addWidget(body);
+    QFont cardFont = mCNFont; cardFont.setPixelSize(uiPx(23)); cardFont.setBold(true);
+    auto makeTile = [&](const QString &name, const QString &count, const QString &bg,
+                        const QString &hover, QWidget *parent) {
+        auto *b = new QPushButton(parent);
+        b->setCursor(Qt::PointingHandCursor);
+        b->setMinimumHeight(dp(72));
+        b->setStyleSheet(QString(
+            "QPushButton { background:%1; color:white; border:none; border-radius:%2px;"
+            " border-bottom:%3px solid rgba(0,0,0,90); padding:4px 10px; }"
+            "QPushButton:hover { background:%4; }"
+            "QPushButton:pressed { border-bottom:2px solid rgba(0,0,0,110); margin-top:%5px; }"
+        ).arg(bg, QString::number(dp(10)), QString::number(dp(5)), hover, QString::number(dp(3))));
+        b->setText(count.isEmpty() ? name : QString("%1\n%2").arg(name, count));
+        b->setFont(cardFont);
+        return b;
+    };
+
+    auto *gridWrap = new QWidget;
+    gridWrap->setStyleSheet("background:transparent; border:none;");
+    auto *grid = new QGridLayout(gridWrap);
+    grid->setContentsMargins(0, 0, 0, 0);
+    grid->setHorizontalSpacing(dp(14));
+    grid->setVerticalSpacing(dp(12));
+
+    auto addMain = [&](int row, int col, const QString &name, const QString &count) {
+        QPushButton *button = makeTile(name, count, "#fe5f55", "#ff7066", gridWrap);
+        grid->addWidget(button, row, col);
+        return button;
+    };
+    QPushButton *jokerTile = addMain(0, 0, "小丑", "150 / 150");
+    connect(jokerTile, &QPushButton::clicked, this, &MainWindow::showCollectionJokersOverlay);
+    QPushButton *enhancementTile = addMain(0, 1, "增强卡牌", "8 / 8");
+    connect(enhancementTile, &QPushButton::clicked, this, &MainWindow::showCollectionEnhancementsOverlay);
+    QPushButton *deckTile = addMain(1, 0, "牌组", "15 / 15");
+    connect(deckTile, &QPushButton::clicked, this, &MainWindow::showCollectionDecksOverlay);
+    QPushButton *sealTile = addMain(1, 1, "蜡封", "4 / 4");
+    connect(sealTile, &QPushButton::clicked, this, &MainWindow::showCollectionSealsOverlay);
+    QPushButton *voucherTile = addMain(2, 0, "优惠券", "32 / 32");
+    connect(voucherTile, &QPushButton::clicked, this, &MainWindow::showCollectionVouchersOverlay);
+    QPushButton *editionTile = addMain(2, 1, "版本", "5 / 5");
+    connect(editionTile, &QPushButton::clicked, this, &MainWindow::showCollectionEditionsOverlay);
+
+    auto *consumableBox = new QWidget;
+    consumableBox->setAttribute(Qt::WA_StyledBackground, true);
+    consumableBox->setStyleSheet(QString(
+        "background:#142023; border:2px solid rgba(167,130,209,100); border-radius:%1px;"
+    ).arg(dp(12)));
+    auto *consumableGrid = new QGridLayout(consumableBox);
+    consumableGrid->setContentsMargins(dp(12), dp(10), dp(12), dp(10));
+    consumableGrid->setHorizontalSpacing(dp(10));
+    consumableGrid->setVerticalSpacing(dp(10));
+    auto *label = new QLabel("消耗牌");
+    QFont lf = mCNFont; lf.setPixelSize(uiPx(19)); lf.setBold(true);
+    label->setFont(lf);
+    label->setAlignment(Qt::AlignCenter);
+    label->setStyleSheet("color:#60797f; background:transparent; border:none;");
+    consumableGrid->addWidget(label, 0, 0, 3, 1);
+    auto *tarotTile = makeTile("塔罗牌", "22 / 22", "#a782d1", "#bc97e8", consumableBox);
+    auto *planetTile = makeTile("星球牌", "12 / 12", "#009dff", "#2bb0ff", consumableBox);
+    auto *spectralTile = makeTile("幻灵牌", "18 / 18", "#315dff", "#5076ff", consumableBox);
+    consumableGrid->addWidget(tarotTile, 0, 1);
+    consumableGrid->addWidget(planetTile, 1, 1);
+    consumableGrid->addWidget(spectralTile, 2, 1);
+    connect(tarotTile, &QPushButton::clicked, this, [this]() { showCollectionConsumablesOverlay(ConsumableKind::Tarot); });
+    connect(planetTile, &QPushButton::clicked, this, [this]() { showCollectionConsumablesOverlay(ConsumableKind::Planet); });
+    connect(spectralTile, &QPushButton::clicked, this, [this]() { showCollectionConsumablesOverlay(ConsumableKind::Spectral); });
+    grid->addWidget(consumableBox, 3, 0, 3, 1);
+
+    QPushButton *packTile = addMain(3, 1, "补充包", "32 / 32");
+    connect(packTile, &QPushButton::clicked, this, &MainWindow::showCollectionPacksOverlay);
+    QPushButton *tagTile = addMain(4, 1, "标签", "24 / 24");
+    connect(tagTile, &QPushButton::clicked, this, &MainWindow::showCollectionTagsOverlay);
+    QPushButton *blindTile = addMain(5, 1, "盲注", "30 / 30");
+    connect(blindTile, &QPushButton::clicked, this, &MainWindow::showCollectionBlindsOverlay);
+    p.second->addWidget(gridWrap);
 
     auto *back = new QPushButton("返回");
     QFont btnFont = mCNFont; btnFont.setPixelSize(uiPx(20)); btnFont.setBold(true);
@@ -2581,6 +3029,912 @@ void MainWindow::showCollectionOverlay()
     connect(back, &QPushButton::clicked, this, [this]() {
         if (mCollectionOverlay) { mCollectionOverlay->hide(); mCollectionOverlay->deleteLater(); }
     });
+    p.second->addWidget(back);
+
+    mCollectionOverlay->raise();
+    mCollectionOverlay->show();
+}
+
+void MainWindow::showCollectionJokersOverlay()
+{
+    QWidget *host = mPlayPage ? mPlayPage : this;
+    if (mCollectionOverlay) { mCollectionOverlay->hide(); mCollectionOverlay->deleteLater(); }
+    auto p = makeOverlayPanel(host, dp(1040), "#a782d1");
+    mCollectionOverlay = p.first;
+    mCollectionOverlay->setGeometry(host->rect());
+
+    QFont titleFont = mCNFont; titleFont.setPixelSize(uiPx(27)); titleFont.setBold(true);
+    auto *title = new QLabel("小丑\n150 / 150");
+    title->setFont(titleFont);
+    title->setAlignment(Qt::AlignCenter);
+    title->setStyleSheet("color:#ffffff; background:#fe5f55; border:none; border-radius:12px; padding:6px 0;");
+    p.second->addWidget(title);
+
+    auto *scroll = new QScrollArea;
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setStyleSheet(
+        "QScrollArea{background:transparent;border:none;}"
+        "QScrollBar:vertical{background:#142023;width:12px;border-radius:6px;}"
+        "QScrollBar::handle:vertical{background:#a782d1;border-radius:6px;}"
+        "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}"
+    );
+
+    auto *content = new QWidget;
+    content->setStyleSheet("background:transparent; border:none;");
+    auto *grid = new QGridLayout(content);
+    grid->setContentsMargins(0, 0, 0, 0);
+    grid->setHorizontalSpacing(dp(8));
+    grid->setVerticalSpacing(dp(10));
+
+    QFont nameFont = mCNFont; nameFont.setPixelSize(uiPx(12)); nameFont.setBold(true);
+    QFont metaFont = mPixelFont; metaFont.setPixelSize(uiPx(12));
+    const QVector<JokerType> order = collectionJokerOrder();
+    const int cols = 10;
+    const QSize iconSize(dp(58), dp(78));
+
+    for (int i = 0; i < order.size(); ++i) {
+        const JokerType type = order[i];
+        const Joker joker = createJoker(type);
+        const JokerRarity rarity = jokerRarity(type);
+        const QString rarityName = collectionRarityName(rarity);
+
+        auto *cell = new QWidget(content);
+        cell->setFixedSize(dp(92), dp(132));
+        cell->setAttribute(Qt::WA_StyledBackground, true);
+        cell->setToolTip(QString("%1\n%2 · $%3 / 售价 $%4\n%5")
+                             .arg(joker.name,
+                                  rarityName,
+                                  QString::number(jokerBaseCost(type)),
+                                  QString::number(joker.sellValue),
+                                  collectionPlainText(joker.description)));
+        cell->setStyleSheet(
+            "QWidget{background:#162226;border:2px solid rgba(167,130,209,95);border-radius:8px;}"
+            "QWidget:hover{border:2px solid #e9d7ff;background:#203238;}"
+        );
+
+        auto *v = new QVBoxLayout(cell);
+        v->setContentsMargins(dp(5), dp(5), dp(5), dp(5));
+        v->setSpacing(dp(3));
+
+        auto *img = new QLabel(cell);
+        img->setFixedSize(iconSize);
+        img->setAlignment(Qt::AlignCenter);
+        img->setStyleSheet("background:transparent; border:none;");
+        const QPixmap pm = collectionJokerPixmap(type, iconSize);
+        if (!pm.isNull()) img->setPixmap(pm);
+        v->addWidget(img, 0, Qt::AlignCenter);
+
+        auto *name = new QLabel(joker.name, cell);
+        name->setFont(nameFont);
+        name->setAlignment(Qt::AlignCenter);
+        name->setWordWrap(true);
+        name->setStyleSheet("color:#ffffff; background:transparent; border:none;");
+        v->addWidget(name, 1);
+
+        auto *meta = new QLabel(QString("#%1").arg(i + 1), cell);
+        meta->setFont(metaFont);
+        meta->setAlignment(Qt::AlignCenter);
+        meta->setStyleSheet("color:#fda200; background:transparent; border:none;");
+        v->addWidget(meta);
+
+        grid->addWidget(cell, i / cols, i % cols);
+    }
+
+    scroll->setWidget(content);
+    scroll->setMinimumHeight(dp(560));
+    scroll->setMaximumHeight(dp(610));
+    p.second->addWidget(scroll);
+
+    auto *back = new QPushButton("返回");
+    QFont btnFont = mCNFont; btnFont.setPixelSize(uiPx(20)); btnFont.setBold(true);
+    back->setFont(btnFont); back->setMinimumHeight(dp(56));
+    back->setStyleSheet(
+        "QPushButton { background:#fda200; color:white; border:2px solid rgba(255,255,255,90);"
+        " border-radius:12px; font-weight:bold; padding:6px 18px; }"
+        "QPushButton:hover { background:#ffb730; border:2px solid rgba(255,255,255,170); }"
+        "QPushButton:pressed { background:#d98a00; }"
+    );
+    connect(back, &QPushButton::clicked, this, &MainWindow::showCollectionOverlay);
+    p.second->addWidget(back);
+
+    mCollectionOverlay->raise();
+    mCollectionOverlay->show();
+}
+
+void MainWindow::showCollectionConsumablesOverlay(ConsumableKind kind)
+{
+    QWidget *host = mPlayPage ? mPlayPage : this;
+    if (mCollectionOverlay) { mCollectionOverlay->hide(); mCollectionOverlay->deleteLater(); }
+
+    const QString titleText = collectionConsumableTitle(kind);
+    const QString accent = collectionConsumableAccent(kind);
+    const QVector<ConsumableType> order = collectionConsumableOrder(kind);
+
+    auto p = makeOverlayPanel(host, dp(860), accent);
+    mCollectionOverlay = p.first;
+    mCollectionOverlay->setGeometry(host->rect());
+
+    QFont titleFont = mCNFont; titleFont.setPixelSize(uiPx(27)); titleFont.setBold(true);
+    auto *title = new QLabel(QString("%1\n%2 / %2").arg(titleText).arg(order.size()));
+    title->setFont(titleFont);
+    title->setAlignment(Qt::AlignCenter);
+    title->setStyleSheet(QString("color:#ffffff; background:%1; border:none; border-radius:12px; padding:6px 0;").arg(accent));
+    p.second->addWidget(title);
+
+    auto *scroll = new QScrollArea;
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setStyleSheet(QString(
+        "QScrollArea{background:transparent;border:none;}"
+        "QScrollBar:vertical{background:#142023;width:12px;border-radius:6px;}"
+        "QScrollBar::handle:vertical{background:%1;border-radius:6px;}"
+        "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}"
+    ).arg(accent));
+
+    auto *content = new QWidget;
+    content->setStyleSheet("background:transparent; border:none;");
+    auto *grid = new QGridLayout(content);
+    grid->setContentsMargins(0, 0, 0, 0);
+    grid->setHorizontalSpacing(dp(10));
+    grid->setVerticalSpacing(dp(12));
+
+    QFont nameFont = mCNFont; nameFont.setPixelSize(uiPx(14)); nameFont.setBold(true);
+    QFont metaFont = mPixelFont; metaFont.setPixelSize(uiPx(12));
+    const int cols = (kind == ConsumableKind::Planet) ? 6 : 8;
+    const QSize iconSize(dp(62), dp(84));
+
+    for (int i = 0; i < order.size(); ++i) {
+        const ConsumableType type = order[i];
+        const Consumable c = createConsumable(type);
+
+        auto *cell = new QWidget(content);
+        cell->setFixedSize(dp(96), dp(138));
+        cell->setAttribute(Qt::WA_StyledBackground, true);
+        cell->setToolTip(QString("%1\n$%2 / 售价 $%3\n%4")
+                             .arg(c.name,
+                                  QString::number(kind == ConsumableKind::Spectral ? 4 : 3),
+                                  QString::number(c.sellValue),
+                                  collectionPlainText(c.description)));
+        cell->setStyleSheet(QString(
+            "QWidget{background:#162226;border:2px solid rgba(255,255,255,55);border-radius:8px;}"
+            "QWidget:hover{border:2px solid %1;background:#203238;}"
+        ).arg(accent));
+
+        auto *v = new QVBoxLayout(cell);
+        v->setContentsMargins(dp(5), dp(5), dp(5), dp(5));
+        v->setSpacing(dp(3));
+
+        auto *img = new QLabel(cell);
+        img->setFixedSize(iconSize);
+        img->setAlignment(Qt::AlignCenter);
+        img->setStyleSheet("background:transparent; border:none;");
+        img->setPixmap(ConsumableItem::renderPixmap(type).scaled(iconSize, Qt::KeepAspectRatio,
+                                                                  Qt::SmoothTransformation));
+        v->addWidget(img, 0, Qt::AlignCenter);
+
+        auto *name = new QLabel(c.name, cell);
+        name->setFont(nameFont);
+        name->setAlignment(Qt::AlignCenter);
+        name->setWordWrap(true);
+        name->setStyleSheet("color:#ffffff; background:transparent; border:none;");
+        v->addWidget(name, 1);
+
+        auto *meta = new QLabel(QString("#%1").arg(i + 1), cell);
+        meta->setFont(metaFont);
+        meta->setAlignment(Qt::AlignCenter);
+        meta->setStyleSheet("color:#fda200; background:transparent; border:none;");
+        v->addWidget(meta);
+
+        grid->addWidget(cell, i / cols, i % cols);
+    }
+
+    scroll->setWidget(content);
+    scroll->setMinimumHeight(dp(390));
+    scroll->setMaximumHeight(dp(570));
+    p.second->addWidget(scroll);
+
+    auto *back = new QPushButton("返回");
+    QFont btnFont = mCNFont; btnFont.setPixelSize(uiPx(20)); btnFont.setBold(true);
+    back->setFont(btnFont); back->setMinimumHeight(dp(56));
+    back->setStyleSheet(
+        "QPushButton { background:#fda200; color:white; border:2px solid rgba(255,255,255,90);"
+        " border-radius:12px; font-weight:bold; padding:6px 18px; }"
+        "QPushButton:hover { background:#ffb730; border:2px solid rgba(255,255,255,170); }"
+        "QPushButton:pressed { background:#d98a00; }"
+    );
+    connect(back, &QPushButton::clicked, this, &MainWindow::showCollectionOverlay);
+    p.second->addWidget(back);
+
+    mCollectionOverlay->raise();
+    mCollectionOverlay->show();
+}
+
+void MainWindow::showCollectionVouchersOverlay()
+{
+    QWidget *host = mPlayPage ? mPlayPage : this;
+    if (mCollectionOverlay) { mCollectionOverlay->hide(); mCollectionOverlay->deleteLater(); }
+
+    const QVector<VoucherType> order = baseVoucherPool();
+    auto p = makeOverlayPanel(host, dp(900), "#fda200");
+    mCollectionOverlay = p.first;
+    mCollectionOverlay->setGeometry(host->rect());
+
+    QFont titleFont = mCNFont; titleFont.setPixelSize(uiPx(27)); titleFont.setBold(true);
+    auto *title = new QLabel(QString("优惠券\n%1 / %1").arg(order.size()));
+    title->setFont(titleFont);
+    title->setAlignment(Qt::AlignCenter);
+    title->setStyleSheet("color:#ffffff; background:#fe5f55; border:none; border-radius:12px; padding:6px 0;");
+    p.second->addWidget(title);
+
+    auto *scroll = new QScrollArea;
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setStyleSheet(
+        "QScrollArea{background:transparent;border:none;}"
+        "QScrollBar:vertical{background:#142023;width:12px;border-radius:6px;}"
+        "QScrollBar::handle:vertical{background:#fda200;border-radius:6px;}"
+        "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}"
+    );
+
+    auto *content = new QWidget;
+    content->setStyleSheet("background:transparent; border:none;");
+    auto *grid = new QGridLayout(content);
+    grid->setContentsMargins(0, 0, 0, 0);
+    grid->setHorizontalSpacing(dp(10));
+    grid->setVerticalSpacing(dp(12));
+
+    QPixmap sheet(":/textures/images/Vouchers.png");
+    QFont nameFont = mCNFont; nameFont.setPixelSize(uiPx(14)); nameFont.setBold(true);
+    QFont metaFont = mPixelFont; metaFont.setPixelSize(uiPx(12));
+    const int cols = 8;
+    const QSize iconSize(dp(62), dp(84));
+
+    for (int i = 0; i < order.size(); ++i) {
+        const VoucherData vd = voucherData(order[i]);
+
+        auto *cell = new QWidget(content);
+        cell->setFixedSize(dp(96), dp(138));
+        cell->setAttribute(Qt::WA_StyledBackground, true);
+        cell->setToolTip(QString("%1\n$%2\n%3").arg(vd.name,
+                                                     QString::number(vd.cost),
+                                                     vd.description));
+        cell->setStyleSheet(
+            "QWidget{background:#162226;border:2px solid rgba(253,162,0,110);border-radius:8px;}"
+            "QWidget:hover{border:2px solid #ffdf8a;background:#203238;}"
+        );
+
+        auto *v = new QVBoxLayout(cell);
+        v->setContentsMargins(dp(5), dp(5), dp(5), dp(5));
+        v->setSpacing(dp(3));
+
+        auto *img = new QLabel(cell);
+        img->setFixedSize(iconSize);
+        img->setAlignment(Qt::AlignCenter);
+        img->setStyleSheet("background:transparent; border:none;");
+        if (!sheet.isNull()) {
+            QPixmap pm = sheet.copy(vd.spritePos.x() * ConsumableItem::SRC_W,
+                                    vd.spritePos.y() * ConsumableItem::SRC_H,
+                                    ConsumableItem::SRC_W,
+                                    ConsumableItem::SRC_H);
+            img->setPixmap(pm.scaled(iconSize, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        }
+        v->addWidget(img, 0, Qt::AlignCenter);
+
+        auto *name = new QLabel(vd.name, cell);
+        name->setFont(nameFont);
+        name->setAlignment(Qt::AlignCenter);
+        name->setWordWrap(true);
+        name->setStyleSheet("color:#ffffff; background:transparent; border:none;");
+        v->addWidget(name, 1);
+
+        auto *meta = new QLabel(QString("#%1").arg(i + 1), cell);
+        meta->setFont(metaFont);
+        meta->setAlignment(Qt::AlignCenter);
+        meta->setStyleSheet("color:#fda200; background:transparent; border:none;");
+        v->addWidget(meta);
+
+        grid->addWidget(cell, i / cols, i % cols);
+    }
+
+    scroll->setWidget(content);
+    scroll->setMinimumHeight(dp(470));
+    scroll->setMaximumHeight(dp(570));
+    p.second->addWidget(scroll);
+
+    auto *back = new QPushButton("返回");
+    QFont btnFont = mCNFont; btnFont.setPixelSize(uiPx(20)); btnFont.setBold(true);
+    back->setFont(btnFont); back->setMinimumHeight(dp(56));
+    back->setStyleSheet(
+        "QPushButton { background:#fda200; color:white; border:2px solid rgba(255,255,255,90);"
+        " border-radius:12px; font-weight:bold; padding:6px 18px; }"
+        "QPushButton:hover { background:#ffb730; border:2px solid rgba(255,255,255,170); }"
+        "QPushButton:pressed { background:#d98a00; }"
+    );
+    connect(back, &QPushButton::clicked, this, &MainWindow::showCollectionOverlay);
+    p.second->addWidget(back);
+
+    mCollectionOverlay->raise();
+    mCollectionOverlay->show();
+}
+
+void MainWindow::showCollectionTagsOverlay()
+{
+    QWidget *host = mPlayPage ? mPlayPage : this;
+    if (mCollectionOverlay) { mCollectionOverlay->hide(); mCollectionOverlay->deleteLater(); }
+
+    const QVector<TagType> order = collectionTagOrder();
+    auto p = makeOverlayPanel(host, dp(820), "#fe5f55");
+    mCollectionOverlay = p.first;
+    mCollectionOverlay->setGeometry(host->rect());
+
+    QFont titleFont = mCNFont; titleFont.setPixelSize(uiPx(27)); titleFont.setBold(true);
+    auto *title = new QLabel(QString("标签\n%1 / %1").arg(order.size()));
+    title->setFont(titleFont);
+    title->setAlignment(Qt::AlignCenter);
+    title->setStyleSheet("color:#ffffff; background:#fe5f55; border:none; border-radius:12px; padding:6px 0;");
+    p.second->addWidget(title);
+
+    auto *content = new QWidget;
+    content->setStyleSheet("background:transparent; border:none;");
+    auto *grid = new QGridLayout(content);
+    grid->setContentsMargins(0, 0, 0, 0);
+    grid->setHorizontalSpacing(dp(10));
+    grid->setVerticalSpacing(dp(12));
+
+    QPixmap sheet(":/textures/images/tags.png");
+    QFont nameFont = mCNFont; nameFont.setPixelSize(uiPx(14)); nameFont.setBold(true);
+    QFont metaFont = mPixelFont; metaFont.setPixelSize(uiPx(12));
+    const int cols = 8;
+    const QSize iconSize(dp(54), dp(54));
+
+    for (int i = 0; i < order.size(); ++i) {
+        const TagData td = tagData(order[i]);
+        auto *cell = new QWidget(content);
+        cell->setFixedSize(dp(92), dp(116));
+        cell->setAttribute(Qt::WA_StyledBackground, true);
+        cell->setToolTip(QString("%1\n%2").arg(td.name, td.description));
+        cell->setStyleSheet(
+            "QWidget{background:#162226;border:2px solid rgba(254,95,85,110);border-radius:8px;}"
+            "QWidget:hover{border:2px solid #ffb2aa;background:#203238;}"
+        );
+
+        auto *v = new QVBoxLayout(cell);
+        v->setContentsMargins(dp(5), dp(5), dp(5), dp(5));
+        v->setSpacing(dp(3));
+
+        auto *img = new QLabel(cell);
+        img->setFixedSize(iconSize);
+        img->setAlignment(Qt::AlignCenter);
+        img->setStyleSheet("background:transparent; border:none;");
+        if (!sheet.isNull()) {
+            QPixmap pm = sheet.copy(td.spritePos.x() * 68, td.spritePos.y() * 68, 68, 68);
+            img->setPixmap(pm.scaled(iconSize, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        }
+        v->addWidget(img, 0, Qt::AlignCenter);
+
+        auto *name = new QLabel(td.name, cell);
+        name->setFont(nameFont);
+        name->setAlignment(Qt::AlignCenter);
+        name->setWordWrap(true);
+        name->setStyleSheet("color:#ffffff; background:transparent; border:none;");
+        v->addWidget(name, 1);
+
+        auto *meta = new QLabel(QString("#%1").arg(i + 1), cell);
+        meta->setFont(metaFont);
+        meta->setAlignment(Qt::AlignCenter);
+        meta->setStyleSheet("color:#fda200; background:transparent; border:none;");
+        v->addWidget(meta);
+
+        grid->addWidget(cell, i / cols, i % cols);
+    }
+
+    p.second->addWidget(content);
+
+    auto *back = new QPushButton("返回");
+    QFont btnFont = mCNFont; btnFont.setPixelSize(uiPx(20)); btnFont.setBold(true);
+    back->setFont(btnFont); back->setMinimumHeight(dp(56));
+    back->setStyleSheet(
+        "QPushButton { background:#fda200; color:white; border:2px solid rgba(255,255,255,90);"
+        " border-radius:12px; font-weight:bold; padding:6px 18px; }"
+        "QPushButton:hover { background:#ffb730; border:2px solid rgba(255,255,255,170); }"
+        "QPushButton:pressed { background:#d98a00; }"
+    );
+    connect(back, &QPushButton::clicked, this, &MainWindow::showCollectionOverlay);
+    p.second->addWidget(back);
+
+    mCollectionOverlay->raise();
+    mCollectionOverlay->show();
+}
+
+void MainWindow::showCollectionPacksOverlay()
+{
+    QWidget *host = mPlayPage ? mPlayPage : this;
+    if (mCollectionOverlay) { mCollectionOverlay->hide(); mCollectionOverlay->deleteLater(); }
+
+    const QVector<CollectionPackEntry> order = collectionPackOrder();
+    auto p = makeOverlayPanel(host, dp(900), "#fe5f55");
+    mCollectionOverlay = p.first;
+    mCollectionOverlay->setGeometry(host->rect());
+
+    QFont titleFont = mCNFont; titleFont.setPixelSize(uiPx(27)); titleFont.setBold(true);
+    auto *title = new QLabel(QString("补充包\n%1 / %1").arg(order.size()));
+    title->setFont(titleFont);
+    title->setAlignment(Qt::AlignCenter);
+    title->setStyleSheet("color:#ffffff; background:#fe5f55; border:none; border-radius:12px; padding:6px 0;");
+    p.second->addWidget(title);
+
+    auto *scroll = new QScrollArea;
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setStyleSheet(
+        "QScrollArea{background:transparent;border:none;}"
+        "QScrollBar:vertical{background:#142023;width:12px;border-radius:6px;}"
+        "QScrollBar::handle:vertical{background:#fe5f55;border-radius:6px;}"
+        "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}"
+    );
+
+    auto *content = new QWidget;
+    content->setStyleSheet("background:transparent; border:none;");
+    auto *grid = new QGridLayout(content);
+    grid->setContentsMargins(0, 0, 0, 0);
+    grid->setHorizontalSpacing(dp(10));
+    grid->setVerticalSpacing(dp(12));
+
+    QPixmap sheet(":/textures/images/boosters.png");
+    QFont nameFont = mCNFont; nameFont.setPixelSize(uiPx(13)); nameFont.setBold(true);
+    QFont metaFont = mPixelFont; metaFont.setPixelSize(uiPx(12));
+    const int cols = 8;
+    const QSize iconSize(dp(62), dp(84));
+
+    for (int i = 0; i < order.size(); ++i) {
+        const CollectionPackEntry entry = order[i];
+        const QString name = packDisplayName(entry.kind, entry.size);
+        auto *cell = new QWidget(content);
+        cell->setFixedSize(dp(96), dp(138));
+        cell->setAttribute(Qt::WA_StyledBackground, true);
+        cell->setToolTip(QString("%1\n$%2\n变体 %3").arg(name,
+                                                          QString::number(collectionPackCost(entry.size)),
+                                                          QString::number(entry.variant + 1)));
+        cell->setStyleSheet(
+            "QWidget{background:#162226;border:2px solid rgba(254,95,85,110);border-radius:8px;}"
+            "QWidget:hover{border:2px solid #ffb2aa;background:#203238;}"
+        );
+
+        auto *v = new QVBoxLayout(cell);
+        v->setContentsMargins(dp(5), dp(5), dp(5), dp(5));
+        v->setSpacing(dp(3));
+
+        auto *img = new QLabel(cell);
+        img->setFixedSize(iconSize);
+        img->setAlignment(Qt::AlignCenter);
+        img->setStyleSheet("background:transparent; border:none;");
+        if (!sheet.isNull()) {
+            const QPoint pos = packSpritePos(entry.kind, entry.size, entry.variant);
+            QPixmap pm = sheet.copy(pos.x() * ConsumableItem::SRC_W,
+                                    pos.y() * ConsumableItem::SRC_H,
+                                    ConsumableItem::SRC_W,
+                                    ConsumableItem::SRC_H);
+            img->setPixmap(pm.scaled(iconSize, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        }
+        v->addWidget(img, 0, Qt::AlignCenter);
+
+        auto *label = new QLabel(name, cell);
+        label->setFont(nameFont);
+        label->setAlignment(Qt::AlignCenter);
+        label->setWordWrap(true);
+        label->setStyleSheet("color:#ffffff; background:transparent; border:none;");
+        v->addWidget(label, 1);
+
+        auto *meta = new QLabel(QString("#%1").arg(i + 1), cell);
+        meta->setFont(metaFont);
+        meta->setAlignment(Qt::AlignCenter);
+        meta->setStyleSheet("color:#fda200; background:transparent; border:none;");
+        v->addWidget(meta);
+
+        grid->addWidget(cell, i / cols, i % cols);
+    }
+
+    scroll->setWidget(content);
+    scroll->setMinimumHeight(dp(470));
+    scroll->setMaximumHeight(dp(570));
+    p.second->addWidget(scroll);
+
+    auto *back = new QPushButton("返回");
+    QFont btnFont = mCNFont; btnFont.setPixelSize(uiPx(20)); btnFont.setBold(true);
+    back->setFont(btnFont); back->setMinimumHeight(dp(56));
+    back->setStyleSheet(
+        "QPushButton { background:#fda200; color:white; border:2px solid rgba(255,255,255,90);"
+        " border-radius:12px; font-weight:bold; padding:6px 18px; }"
+        "QPushButton:hover { background:#ffb730; border:2px solid rgba(255,255,255,170); }"
+        "QPushButton:pressed { background:#d98a00; }"
+    );
+    connect(back, &QPushButton::clicked, this, &MainWindow::showCollectionOverlay);
+    p.second->addWidget(back);
+
+    mCollectionOverlay->raise();
+    mCollectionOverlay->show();
+}
+
+void MainWindow::showCollectionBlindsOverlay()
+{
+    QWidget *host = mPlayPage ? mPlayPage : this;
+    if (mCollectionOverlay) { mCollectionOverlay->hide(); mCollectionOverlay->deleteLater(); }
+
+    const QVector<CollectionBlindEntry> order = collectionBlindOrder();
+    auto p = makeOverlayPanel(host, dp(900), "#fe5f55");
+    mCollectionOverlay = p.first;
+    mCollectionOverlay->setGeometry(host->rect());
+
+    QFont titleFont = mCNFont; titleFont.setPixelSize(uiPx(27)); titleFont.setBold(true);
+    auto *title = new QLabel(QString("盲注\n%1 / %1").arg(order.size()));
+    title->setFont(titleFont);
+    title->setAlignment(Qt::AlignCenter);
+    title->setStyleSheet("color:#ffffff; background:#9f2727; border:none; border-radius:12px; padding:6px 0;");
+    p.second->addWidget(title);
+
+    auto *scroll = new QScrollArea;
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setStyleSheet(
+        "QScrollArea{background:transparent;border:none;}"
+        "QScrollBar:vertical{background:#142023;width:12px;border-radius:6px;}"
+        "QScrollBar::handle:vertical{background:#fe5f55;border-radius:6px;}"
+        "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}"
+    );
+
+    auto *content = new QWidget;
+    content->setStyleSheet("background:transparent; border:none;");
+    auto *grid = new QGridLayout(content);
+    grid->setContentsMargins(0, 0, 0, 0);
+    grid->setHorizontalSpacing(dp(10));
+    grid->setVerticalSpacing(dp(12));
+
+    QPixmap sheet(":/textures/images/BlindChips.png");
+    QFont nameFont = mCNFont; nameFont.setPixelSize(uiPx(14)); nameFont.setBold(true);
+    QFont metaFont = mPixelFont; metaFont.setPixelSize(uiPx(12));
+    const int cols = 6;
+    const QSize iconSize(dp(64), dp(64));
+    constexpr int frameSize = 68;
+
+    for (int i = 0; i < order.size(); ++i) {
+        const CollectionBlindEntry entry = order[i];
+        auto *cell = new QWidget(content);
+        cell->setFixedSize(dp(128), dp(126));
+        cell->setAttribute(Qt::WA_StyledBackground, true);
+        cell->setToolTip(QString("%1\n%2").arg(entry.name, entry.description));
+        cell->setStyleSheet(
+            "QWidget{background:#162226;border:2px solid rgba(254,95,85,110);border-radius:8px;}"
+            "QWidget:hover{border:2px solid #ffb2aa;background:#203238;}"
+        );
+
+        auto *v = new QVBoxLayout(cell);
+        v->setContentsMargins(dp(5), dp(5), dp(5), dp(5));
+        v->setSpacing(dp(3));
+
+        auto *img = new QLabel(cell);
+        img->setFixedSize(iconSize);
+        img->setAlignment(Qt::AlignCenter);
+        img->setStyleSheet("background:transparent; border:none;");
+        if (!sheet.isNull()) {
+            const int row = qBound(0, entry.chipRow, qMax(0, sheet.height() / frameSize - 1));
+            QPixmap pm = sheet.copy(0, row * frameSize, frameSize, frameSize);
+            img->setPixmap(pm.scaled(iconSize, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        }
+        v->addWidget(img, 0, Qt::AlignCenter);
+
+        auto *name = new QLabel(entry.name, cell);
+        name->setFont(nameFont);
+        name->setAlignment(Qt::AlignCenter);
+        name->setWordWrap(true);
+        name->setStyleSheet("color:#ffffff; background:transparent; border:none;");
+        v->addWidget(name, 1);
+
+        auto *meta = new QLabel(QString("#%1").arg(i + 1), cell);
+        meta->setFont(metaFont);
+        meta->setAlignment(Qt::AlignCenter);
+        meta->setStyleSheet("color:#fda200; background:transparent; border:none;");
+        v->addWidget(meta);
+
+        grid->addWidget(cell, i / cols, i % cols);
+    }
+
+    scroll->setWidget(content);
+    scroll->setMinimumHeight(dp(500));
+    scroll->setMaximumHeight(dp(600));
+    p.second->addWidget(scroll);
+
+    auto *back = new QPushButton("返回");
+    QFont btnFont = mCNFont; btnFont.setPixelSize(uiPx(20)); btnFont.setBold(true);
+    back->setFont(btnFont); back->setMinimumHeight(dp(56));
+    back->setStyleSheet(
+        "QPushButton { background:#fda200; color:white; border:2px solid rgba(255,255,255,90);"
+        " border-radius:12px; font-weight:bold; padding:6px 18px; }"
+        "QPushButton:hover { background:#ffb730; border:2px solid rgba(255,255,255,170); }"
+        "QPushButton:pressed { background:#d98a00; }"
+    );
+    connect(back, &QPushButton::clicked, this, &MainWindow::showCollectionOverlay);
+    p.second->addWidget(back);
+
+    mCollectionOverlay->raise();
+    mCollectionOverlay->show();
+}
+
+static void addCollectionCardModifierCells(QWidget *content, QGridLayout *grid,
+                                           const QVector<CollectionCardModifierEntry> &order,
+                                           const QFont &nameFont, const QFont &metaFont,
+                                           int cols, const QSize &iconSize)
+{
+    for (int i = 0; i < order.size(); ++i) {
+        const CollectionCardModifierEntry entry = order[i];
+        auto *cell = new QWidget(content);
+        cell->setFixedSize(116, 158);
+        cell->setAttribute(Qt::WA_StyledBackground, true);
+        cell->setToolTip(QString("%1\n%2").arg(entry.name, entry.description));
+        cell->setStyleSheet(
+            "QWidget{background:#162226;border:2px solid rgba(254,95,85,110);border-radius:8px;}"
+            "QWidget:hover{border:2px solid #ffb2aa;background:#203238;}"
+        );
+
+        auto *v = new QVBoxLayout(cell);
+        v->setContentsMargins(5, 5, 5, 5);
+        v->setSpacing(3);
+
+        auto *img = new QLabel(cell);
+        img->setFixedSize(iconSize);
+        img->setAlignment(Qt::AlignCenter);
+        img->setStyleSheet("background:transparent; border:none;");
+        const QPixmap pm = collectionPlayingCardPixmap(entry.enhancement, entry.seal, entry.edition, iconSize);
+        if (!pm.isNull()) img->setPixmap(pm);
+        v->addWidget(img, 0, Qt::AlignCenter);
+
+        auto *name = new QLabel(entry.name, cell);
+        name->setFont(nameFont);
+        name->setAlignment(Qt::AlignCenter);
+        name->setWordWrap(true);
+        name->setStyleSheet("color:#ffffff; background:transparent; border:none;");
+        v->addWidget(name, 1);
+
+        auto *meta = new QLabel(QString("#%1").arg(i + 1), cell);
+        meta->setFont(metaFont);
+        meta->setAlignment(Qt::AlignCenter);
+        meta->setStyleSheet("color:#fda200; background:transparent; border:none;");
+        v->addWidget(meta);
+
+        grid->addWidget(cell, i / cols, i % cols);
+    }
+}
+
+void MainWindow::showCollectionEnhancementsOverlay()
+{
+    QWidget *host = mPlayPage ? mPlayPage : this;
+    if (mCollectionOverlay) { mCollectionOverlay->hide(); mCollectionOverlay->deleteLater(); }
+    const QVector<CollectionCardModifierEntry> order = collectionEnhancementOrder();
+    auto p = makeOverlayPanel(host, dp(620), "#fe5f55");
+    mCollectionOverlay = p.first;
+    mCollectionOverlay->setGeometry(host->rect());
+
+    QFont titleFont = mCNFont; titleFont.setPixelSize(uiPx(27)); titleFont.setBold(true);
+    auto *title = new QLabel(QString("增强卡牌\n%1 / %1").arg(order.size()));
+    title->setFont(titleFont);
+    title->setAlignment(Qt::AlignCenter);
+    title->setStyleSheet("color:#ffffff; background:#fe5f55; border:none; border-radius:12px; padding:6px 0;");
+    p.second->addWidget(title);
+
+    auto *content = new QWidget;
+    content->setStyleSheet("background:transparent; border:none;");
+    auto *grid = new QGridLayout(content);
+    grid->setContentsMargins(0, 0, 0, 0);
+    grid->setHorizontalSpacing(dp(10));
+    grid->setVerticalSpacing(dp(12));
+    QFont nameFont = mCNFont; nameFont.setPixelSize(uiPx(14)); nameFont.setBold(true);
+    QFont metaFont = mPixelFont; metaFont.setPixelSize(uiPx(12));
+    addCollectionCardModifierCells(content, grid, order, nameFont, metaFont, 4, QSize(dp(62), dp(84)));
+    p.second->addWidget(content);
+
+    auto *back = new QPushButton("返回");
+    QFont btnFont = mCNFont; btnFont.setPixelSize(uiPx(20)); btnFont.setBold(true);
+    back->setFont(btnFont); back->setMinimumHeight(dp(56));
+    back->setStyleSheet(
+        "QPushButton { background:#fda200; color:white; border:2px solid rgba(255,255,255,90);"
+        " border-radius:12px; font-weight:bold; padding:6px 18px; }"
+        "QPushButton:hover { background:#ffb730; border:2px solid rgba(255,255,255,170); }"
+        "QPushButton:pressed { background:#d98a00; }"
+    );
+    connect(back, &QPushButton::clicked, this, &MainWindow::showCollectionOverlay);
+    p.second->addWidget(back);
+    mCollectionOverlay->raise();
+    mCollectionOverlay->show();
+}
+
+void MainWindow::showCollectionSealsOverlay()
+{
+    QWidget *host = mPlayPage ? mPlayPage : this;
+    if (mCollectionOverlay) { mCollectionOverlay->hide(); mCollectionOverlay->deleteLater(); }
+    const QVector<CollectionCardModifierEntry> order = collectionSealOrder();
+    auto p = makeOverlayPanel(host, dp(620), "#fe5f55");
+    mCollectionOverlay = p.first;
+    mCollectionOverlay->setGeometry(host->rect());
+
+    QFont titleFont = mCNFont; titleFont.setPixelSize(uiPx(27)); titleFont.setBold(true);
+    auto *title = new QLabel(QString("蜡封\n%1 / %1").arg(order.size()));
+    title->setFont(titleFont);
+    title->setAlignment(Qt::AlignCenter);
+    title->setStyleSheet("color:#ffffff; background:#fe5f55; border:none; border-radius:12px; padding:6px 0;");
+    p.second->addWidget(title);
+
+    auto *content = new QWidget;
+    content->setStyleSheet("background:transparent; border:none;");
+    auto *grid = new QGridLayout(content);
+    grid->setContentsMargins(0, 0, 0, 0);
+    grid->setHorizontalSpacing(dp(10));
+    grid->setVerticalSpacing(dp(12));
+    QFont nameFont = mCNFont; nameFont.setPixelSize(uiPx(14)); nameFont.setBold(true);
+    QFont metaFont = mPixelFont; metaFont.setPixelSize(uiPx(12));
+    addCollectionCardModifierCells(content, grid, order, nameFont, metaFont, 4, QSize(dp(62), dp(84)));
+    p.second->addWidget(content);
+
+    auto *back = new QPushButton("返回");
+    QFont btnFont = mCNFont; btnFont.setPixelSize(uiPx(20)); btnFont.setBold(true);
+    back->setFont(btnFont); back->setMinimumHeight(dp(56));
+    back->setStyleSheet(
+        "QPushButton { background:#fda200; color:white; border:2px solid rgba(255,255,255,90);"
+        " border-radius:12px; font-weight:bold; padding:6px 18px; }"
+        "QPushButton:hover { background:#ffb730; border:2px solid rgba(255,255,255,170); }"
+        "QPushButton:pressed { background:#d98a00; }"
+    );
+    connect(back, &QPushButton::clicked, this, &MainWindow::showCollectionOverlay);
+    p.second->addWidget(back);
+    mCollectionOverlay->raise();
+    mCollectionOverlay->show();
+}
+
+void MainWindow::showCollectionEditionsOverlay()
+{
+    QWidget *host = mPlayPage ? mPlayPage : this;
+    if (mCollectionOverlay) { mCollectionOverlay->hide(); mCollectionOverlay->deleteLater(); }
+    const QVector<CollectionCardModifierEntry> order = collectionEditionOrder();
+    auto p = makeOverlayPanel(host, dp(720), "#fe5f55");
+    mCollectionOverlay = p.first;
+    mCollectionOverlay->setGeometry(host->rect());
+
+    QFont titleFont = mCNFont; titleFont.setPixelSize(uiPx(27)); titleFont.setBold(true);
+    auto *title = new QLabel(QString("版本\n%1 / %1").arg(order.size()));
+    title->setFont(titleFont);
+    title->setAlignment(Qt::AlignCenter);
+    title->setStyleSheet("color:#ffffff; background:#fe5f55; border:none; border-radius:12px; padding:6px 0;");
+    p.second->addWidget(title);
+
+    auto *content = new QWidget;
+    content->setStyleSheet("background:transparent; border:none;");
+    auto *grid = new QGridLayout(content);
+    grid->setContentsMargins(0, 0, 0, 0);
+    grid->setHorizontalSpacing(dp(10));
+    grid->setVerticalSpacing(dp(12));
+    QFont nameFont = mCNFont; nameFont.setPixelSize(uiPx(14)); nameFont.setBold(true);
+    QFont metaFont = mPixelFont; metaFont.setPixelSize(uiPx(12));
+    addCollectionCardModifierCells(content, grid, order, nameFont, metaFont, 5, QSize(dp(62), dp(84)));
+    p.second->addWidget(content);
+
+    auto *back = new QPushButton("返回");
+    QFont btnFont = mCNFont; btnFont.setPixelSize(uiPx(20)); btnFont.setBold(true);
+    back->setFont(btnFont); back->setMinimumHeight(dp(56));
+    back->setStyleSheet(
+        "QPushButton { background:#fda200; color:white; border:2px solid rgba(255,255,255,90);"
+        " border-radius:12px; font-weight:bold; padding:6px 18px; }"
+        "QPushButton:hover { background:#ffb730; border:2px solid rgba(255,255,255,170); }"
+        "QPushButton:pressed { background:#d98a00; }"
+    );
+    connect(back, &QPushButton::clicked, this, &MainWindow::showCollectionOverlay);
+    p.second->addWidget(back);
+    mCollectionOverlay->raise();
+    mCollectionOverlay->show();
+}
+
+void MainWindow::showCollectionDecksOverlay()
+{
+    QWidget *host = mPlayPage ? mPlayPage : this;
+    if (mCollectionOverlay) { mCollectionOverlay->hide(); mCollectionOverlay->deleteLater(); }
+
+    const QVector<CollectionDeckEntry> order = collectionDeckOrder();
+    auto p = makeOverlayPanel(host, dp(900), "#fe5f55");
+    mCollectionOverlay = p.first;
+    mCollectionOverlay->setGeometry(host->rect());
+
+    QFont titleFont = mCNFont; titleFont.setPixelSize(uiPx(27)); titleFont.setBold(true);
+    auto *title = new QLabel(QString("牌组\n%1 / %1").arg(order.size()));
+    title->setFont(titleFont);
+    title->setAlignment(Qt::AlignCenter);
+    title->setStyleSheet("color:#ffffff; background:#fe5f55; border:none; border-radius:12px; padding:6px 0;");
+    p.second->addWidget(title);
+
+    auto *scroll = new QScrollArea;
+    scroll->setWidgetResizable(true);
+    scroll->setFrameShape(QFrame::NoFrame);
+    scroll->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
+    scroll->setStyleSheet(
+        "QScrollArea{background:transparent;border:none;}"
+        "QScrollBar:vertical{background:#142023;width:12px;border-radius:6px;}"
+        "QScrollBar::handle:vertical{background:#fe5f55;border-radius:6px;}"
+        "QScrollBar::add-line:vertical,QScrollBar::sub-line:vertical{height:0;}"
+    );
+
+    auto *content = new QWidget;
+    content->setStyleSheet("background:transparent; border:none;");
+    auto *grid = new QGridLayout(content);
+    grid->setContentsMargins(0, 0, 0, 0);
+    grid->setHorizontalSpacing(dp(10));
+    grid->setVerticalSpacing(dp(12));
+
+    QPixmap sheet(":/textures/images/Enhancers.png");
+    QFont nameFont = mCNFont; nameFont.setPixelSize(uiPx(14)); nameFont.setBold(true);
+    QFont metaFont = mPixelFont; metaFont.setPixelSize(uiPx(12));
+    const int cols = 5;
+    const QSize iconSize(dp(62), dp(84));
+
+    for (int i = 0; i < order.size(); ++i) {
+        const CollectionDeckEntry entry = order[i];
+        auto *cell = new QWidget(content);
+        cell->setFixedSize(dp(128), dp(150));
+        cell->setAttribute(Qt::WA_StyledBackground, true);
+        cell->setToolTip(QString("%1\n%2").arg(entry.name, entry.description));
+        cell->setStyleSheet(
+            "QWidget{background:#162226;border:2px solid rgba(254,95,85,110);border-radius:8px;}"
+            "QWidget:hover{border:2px solid #ffb2aa;background:#203238;}"
+        );
+
+        auto *v = new QVBoxLayout(cell);
+        v->setContentsMargins(dp(5), dp(5), dp(5), dp(5));
+        v->setSpacing(dp(3));
+
+        auto *img = new QLabel(cell);
+        img->setFixedSize(iconSize);
+        img->setAlignment(Qt::AlignCenter);
+        img->setStyleSheet("background:transparent; border:none;");
+        if (!sheet.isNull()) {
+            const QRect src(entry.pos.x() * CardItem::SRC_W, entry.pos.y() * CardItem::SRC_H,
+                            CardItem::SRC_W, CardItem::SRC_H);
+            QPixmap pm = sheet.copy(src);
+            img->setPixmap(pm.scaled(iconSize, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        }
+        v->addWidget(img, 0, Qt::AlignCenter);
+
+        auto *name = new QLabel(entry.name, cell);
+        name->setFont(nameFont);
+        name->setAlignment(Qt::AlignCenter);
+        name->setWordWrap(true);
+        name->setStyleSheet("color:#ffffff; background:transparent; border:none;");
+        v->addWidget(name, 1);
+
+        auto *meta = new QLabel(QString("#%1").arg(i + 1), cell);
+        meta->setFont(metaFont);
+        meta->setAlignment(Qt::AlignCenter);
+        meta->setStyleSheet("color:#fda200; background:transparent; border:none;");
+        v->addWidget(meta);
+
+        grid->addWidget(cell, i / cols, i % cols);
+    }
+
+    scroll->setWidget(content);
+    scroll->setMinimumHeight(dp(470));
+    scroll->setMaximumHeight(dp(570));
+    p.second->addWidget(scroll);
+
+    auto *back = new QPushButton("返回");
+    QFont btnFont = mCNFont; btnFont.setPixelSize(uiPx(20)); btnFont.setBold(true);
+    back->setFont(btnFont); back->setMinimumHeight(dp(56));
+    back->setStyleSheet(
+        "QPushButton { background:#fda200; color:white; border:2px solid rgba(255,255,255,90);"
+        " border-radius:12px; font-weight:bold; padding:6px 18px; }"
+        "QPushButton:hover { background:#ffb730; border:2px solid rgba(255,255,255,170); }"
+        "QPushButton:pressed { background:#d98a00; }"
+    );
+    connect(back, &QPushButton::clicked, this, &MainWindow::showCollectionOverlay);
     p.second->addWidget(back);
 
     mCollectionOverlay->raise();
@@ -2767,6 +4121,13 @@ void MainWindow::showMainMenuOverlay()
     connect(btnPlay, &QPushButton::clicked, this, [this]() {
         hideMainMenuOverlay();
         startNewRunFromOptions();
+    });
+
+    auto *btnCollection = makeBtn("收藏", "#a782d1", "#7a5aa1", "#bc97e8",
+                                  bigW, bigH, uiPx(22), true);
+    connect(btnCollection, &QPushButton::clicked, this, [this]() {
+        hideMainMenuOverlay();
+        showCollectionOverlay();
     });
 
     auto *btnSettings = makeBtn("选项", "#fda200", "#c47d00", "#ffb730",
@@ -4116,6 +5477,12 @@ QString MainWindow::jokerRuntimeStateSuffix(int idx) const
         default: return QString::number(int(r));
         }
     };
+    auto countDeckCards = [this](auto predicate) -> int {
+        int count = 0;
+        for (const CardData &card : mGameState->fullDeckCards())
+            if (predicate(card)) ++count;
+        return count;
+    };
     switch (j.type) {
     // ── 传奇 / 已有 ─────────────────────────────────────────────────
     case JokerType::Yorick:
@@ -4142,6 +5509,11 @@ QString MainWindow::jokerRuntimeStateSuffix(int idx) const
         return mGameState->dnaCanTriggerThisPlay()
                    ? QStringLiteral("\n{C:attention}本次出 1 张可触发")
                    : QStringLiteral("\n{C:inactive}仅本盲注第一次且只出 1 张时触发");
+    case JokerType::ToDoList: {
+        const HandType target = static_cast<HandType>(j.counter);
+        return QString("\n{C:inactive}当前目标：{C:attention}%1")
+            .arg(HandEvaluator::handTypeName(target));
+    }
     case JokerType::Blueprint:
         return (idx + 1 < js.size())
                    ? QString("\n{C:inactive}指向右侧：{C:attention}%1").arg(js[idx + 1].name)
@@ -4170,6 +5542,8 @@ QString MainWindow::jokerRuntimeStateSuffix(int idx) const
         return QString("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(c);
     case JokerType::FlashCard:
         return QString("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(c);
+    case JokerType::RedCard:
+        return QString("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(c);
     case JokerType::FortuneTeller:
         return QString("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(c);
     case JokerType::Popcorn:
@@ -4186,7 +5560,7 @@ QString MainWindow::jokerRuntimeStateSuffix(int idx) const
             .arg(1.0 + 0.1 * c, 0, 'f', 1);
     case JokerType::Madness:
         return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
-            .arg(1.0 + 0.5 * c, 0, 'f', 1);
+            .arg(1.0 + c / 100.0, 0, 'f', 1);   // counter 每张疯狂 +50 表示 +X0.5
     case JokerType::LuckyCat:
         return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
             .arg(1.0 + 0.25 * c, 0, 'f', 2);
@@ -4202,13 +5576,67 @@ QString MainWindow::jokerRuntimeStateSuffix(int idx) const
     case JokerType::Throwback:
         return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
             .arg(1.0 + 0.25 * c, 0, 'f', 2);
+    case JokerType::Campfire:
+        return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
+            .arg(1.0 + 0.25 * c, 0, 'f', 2);
     case JokerType::CeremonialDagger:
         return QString("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(c);
-    case JokerType::SteelJoker:
+    case JokerType::JokerStencil: {
+        int stencils = 0;
+        for (const Joker &other : js)
+            if (!other.isDebuffed && other.type == JokerType::JokerStencil) ++stencils;
+        const int xmult = qMax(0, mGameState->jokerSlots() - js.size()) + stencils;
+        return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率").arg(xmult);
+    }
+    case JokerType::SteelJoker: {
+        const int steel = countDeckCards([](const CardData &card) {
+            return card.enhancement == Enhancement::Steel;
+        });
         return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
-            .arg(1.0 + 0.2 * c, 0, 'f', 1);
-    case JokerType::StoneJoker:
-        return QString("\n{C:inactive}当前：{C:chips}+%1{} 筹码").arg(c);
+            .arg(1.0 + 0.2 * steel, 0, 'f', 1);
+    }
+    case JokerType::StoneJoker: {
+        const int stone = countDeckCards([](const CardData &card) {
+            return card.enhancement == Enhancement::Stone;
+        });
+        return QString("\n{C:inactive}当前：{C:chips}+%1{} 筹码").arg(25 * stone);
+    }
+    case JokerType::BlueJoker:
+        return QString("\n{C:inactive}当前：{C:chips}+%1{} 筹码")
+            .arg(2 * mGameState->deckRemaining());
+    case JokerType::Erosion:
+        return QString("\n{C:inactive}当前：{C:mult}+%1{} 倍率")
+            .arg(4 * qMax(0, 52 - mGameState->fullDeckCards().size()));
+    case JokerType::Bull:
+        return QString("\n{C:inactive}当前：{C:chips}+%1{} 筹码")
+            .arg(2 * qMax(0, mGameState->gold()));
+    case JokerType::Bootstraps:
+        return QString("\n{C:inactive}当前：{C:mult}+%1{} 倍率")
+            .arg(2 * (qMax(0, mGameState->gold()) / 5));
+    case JokerType::AbstractJoker:
+        return QString("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(3 * js.size());
+    case JokerType::Swashbuckler: {
+        int sellTotal = 0;
+        for (int i = 0; i < js.size(); ++i)
+            if (i != idx) sellTotal += qMax(0, js[i].sellValue);
+        return QString("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(sellTotal);
+    }
+    case JokerType::BaseballCard: {
+        int uncommon = 0;
+        for (int i = 0; i < js.size(); ++i) {
+            if (i == idx || js[i].isDebuffed) continue;
+            if (jokerRarity(js[i].type) == JokerRarity::Uncommon) ++uncommon;
+        }
+        return QString("\n{C:inactive}当前罕见小丑：{C:attention}%1{}，合计 {X:mult,C:white}X%2{} 倍率")
+            .arg(uncommon)
+            .arg(std::pow(1.5, uncommon), 0, 'f', 2);
+    }
+    case JokerType::Cloud9: {
+        const int nines = countDeckCards([](const CardData &card) {
+            return card.enhancement != Enhancement::Stone && card.rank == Rank::Nine;
+        });
+        return QString("\n{C:inactive}当前：{C:money}$%1{}").arg(nines);
+    }
 
     case JokerType::LoyaltyCard:
         return QString("\n{C:inactive}状态：%1{}")
@@ -4218,7 +5646,18 @@ QString MainWindow::jokerRuntimeStateSuffix(int idx) const
     case JokerType::Egg:
         return QString("\n{C:inactive}当前售价：{C:money}$%1").arg(j.sellValue);
     case JokerType::GiftCard:
-        return QString("\n{C:inactive}已累计 {C:money}$%1{} 售价加成").arg(c);
+        return QString("\n{C:inactive}本牌售价加成：{C:money}$%1{}").arg(qMax(0, j.extraSellValue));
+    case JokerType::Rocket:
+        return QString("\n{C:inactive}当前回合结束获得：{C:money}$%1{}").arg(qMax(0, j.counter));
+    case JokerType::Satellite:
+        return QString("\n{C:inactive}已使用星球牌种类：{C:attention}%1{}，当前 {C:money}$%2{}")
+            .arg(mGameState->planetsUsedThisRunCount())
+            .arg(mGameState->planetsUsedThisRunCount());
+    case JokerType::DelayedGratification:
+        return mGameState->noDiscardsUsedThisRound()
+                   ? QString("\n{C:inactive}当前回合结束获得：{C:money}$%1{}")
+                         .arg(2 * mGameState->discardLeft())
+                   : QStringLiteral("\n{C:inactive}本回合已使用弃牌，未激活");
     case JokerType::ToTheMoon:
         return QString("\n{C:inactive}当前持有金额按 $5 + $%1{} 利息发放")
             .arg(qMin(mGameState->gold() / 5, 5));
@@ -4234,9 +5673,16 @@ QString MainWindow::jokerRuntimeStateSuffix(int idx) const
             .arg(rankName(mGameState->mailRank()));
 
     case JokerType::Ramen:
+        return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率，每弃 1 张失去 {X:mult,C:white}X0.01")
+            .arg(qMax(100, j.counter) / 100.0, 0, 'f', 2);
     case JokerType::Seltzer:
+        return QString("\n{C:inactive}剩余 {C:attention}%1{} 手牌").arg(c);
     case JokerType::TurtleBean:
-        return QString("\n{C:inactive}剩余 {C:attention}%1{} 次").arg(c);
+        return QString("\n{C:inactive}当前手牌上限：{C:attention}+%1{}，回合结束 -1").arg(c);
+    case JokerType::InvisibleJoker:
+        return (j.counter >= 2)
+                   ? QStringLiteral("\n{C:attention}已激活：售出时复制 1 张随机小丑")
+                   : QString("\n{C:inactive}进度：{C:attention}%1/2{} 回合").arg(qMax(0, j.counter));
 
     default:
         return QString();
@@ -5207,10 +6653,17 @@ void MainWindow::showJokerInfo(int idx, bool showSellButton)
             mSelectedJokerIdx < mGameState->jokers().size()
             && mGameState->jokers()[mSelectedJokerIdx].type == JokerType::Luchador
             && mGameState->bossEffect() != BossEffect::None;
+        const bool addDoubleTagIcon =
+            mSelectedJokerIdx < mGameState->jokers().size()
+            && mGameState->jokers()[mSelectedJokerIdx].type == JokerType::DietCola;
         if (mGameState->sellJoker(mSelectedJokerIdx)) {
             if (bossDisableSound) {
                 playOriginalStatusGenericSound(this);
                 playOriginalBlindWiggleSound(this);
+            }
+            if (addDoubleTagIcon) {   // 零糖可乐：卖出即在右下角显示一个双倍标签图标
+                TagData td = tagData(TagType::Double);
+                addObtainedTag(TagType::Double, td.spritePos.x(), td.spritePos.y());
             }
             QTimer::singleShot(200, this, []() {
                 AudioManager::instance()->play(QStringLiteral("coin2"), 1.0, 1.0);
@@ -6266,6 +7719,7 @@ void MainWindow::onPackChoiceMade(int chosenIdx, QVector<int> selectedPackHandId
         const bool ok = mGameState->applyPackChoice(mPendingPack, chosenIdx,
                                                     selectedPackHandIdx, mPendingPackHand);
         if (ok) {
+            mPendingPackChoiceMade = true;   // 做出了选择 → 本包不算被跳过
             if (mPendingPack.kind == PackKind::Standard || mPendingPack.kind == PackKind::Buffoon) {
                 AudioManager::instance()->play(QStringLiteral("card1"), 0.8, 0.6);
                 AudioManager::instance()->play(QStringLiteral("generic1"), 1.0, 1.0);
@@ -6345,6 +7799,10 @@ void MainWindow::onInventoryConsumableUseRequested(int inventoryIdx, QVector<int
 
 void MainWindow::onPackFinished()
 {
+    // 关闭开包界面时若未做出任何选择，视为"跳过补充包"→ 红牌 +3 倍率。
+    if (!mPendingPackChoiceMade)
+        mGameState->notifyBoosterSkipped();
+    mPendingPackChoiceMade = false;
     if (!mPendingPackHand.isEmpty())
         mGameState->returnPackHand(mPendingPackHand);
     mPendingPackHand.clear();
@@ -6669,6 +8127,7 @@ void MainWindow::openImmediateTagPack(PackKind kind)
     }
 
     mPackFromTag = true;
+    mPendingPackChoiceMade = false;
     AudioManager::instance()->setPitchMod(1.0);
     AudioManager::instance()->setDesiredMusic(musicTrackForPack(kind));
     playOriginalMaterializeSound(this);
@@ -6956,6 +8415,7 @@ void MainWindow::onPackBuyRequested(int slot)
         anim->start(QAbstractAnimation::DeleteWhenStopped);
     }
     mPackFromTag = false;
+    mPendingPackChoiceMade = false;
     setBackgroundMoodForPack(mPendingPack.kind);
 
     mPendingPackHand.clear();
@@ -6985,6 +8445,7 @@ void MainWindow::resetTransientOverlaysForNewRun()
         mPackOpenWidget->hide();
         mPendingPackHand.clear();
         mPackFromTag = false;
+        mPendingPackChoiceMade = false;
     }
     if (mRoundEndOverlay) mRoundEndOverlay->hide();
     if (mDeckViewWidget) mDeckViewWidget->hide();
@@ -8073,8 +9534,7 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev, double percent)
     case ScoreEventKind::EditionXMult:
         AudioManager::instance()->play(QStringLiteral("foil2"), statusPitch, 0.3);
         color = QColor("#fe5f55");
-        text = QString("x%1").arg(QString::number(ev.xmultValue, 'g', 3));
-        text = QString("脳%1").arg(QString::number(ev.xmultValue, 'g', 3));
+        text = QStringLiteral("×%1").arg(QString::number(ev.xmultValue, 'g', 3));
         isXMult = true;
         mDisplayedMult = std::max(1.0, mDisplayedMult * ev.xmultValue);
         if (!std::isfinite(mDisplayedMult)) mDisplayedMult = std::numeric_limits<double>::infinity();

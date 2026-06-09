@@ -198,7 +198,7 @@ QPoint JokerItem::spritePos(JokerType t) {
     case JokerType::Bull:            return {7, 14};
     case JokerType::Bootstraps:      return {9,  8};
     case JokerType::AbstractJoker:   return {3,  3};
-    case JokerType::Supernova:       return {4,  2};
+    case JokerType::Supernova:       return {2,  4};
     case JokerType::GrosMichel:      return {7,  6};
     case JokerType::Cavendish:       return {5, 11};
     case JokerType::IceCream:        return {4, 10};
@@ -313,6 +313,12 @@ QPoint JokerItem::spritePos(JokerType t) {
     case JokerType::DietCola:        return {8, 14};
     case JokerType::FourFingers:     return {6,  6};
     case JokerType::OopsAllSixes:    return {5,  6};
+    case JokerType::SixthSense:      return {8, 10};
+    case JokerType::RedCard:         return {7, 11};
+    case JokerType::BaseballCard:    return {6, 14};
+    case JokerType::TradingCard:     return {9, 14};
+    case JokerType::Matador:         return {4,  5};
+    case JokerType::Astronomer:      return {2,  7};
     }
     return {0, 0};
 }
@@ -438,7 +444,16 @@ void JokerItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) 
             body = BalatroShaders::renderEditionPixmap(body, mJoker.edition);
         if (mJoker.isDebuffed)
             body = BalatroShaders::renderDebuffedPixmap(body);
-        cp.drawPixmap(QRect(0, 0, SRC_W, SRC_H), body);
+        if (mJoker.type == JokerType::WeeJoker) {
+            // 原版 card.lua 对小小丑的 T.w/T.h ×0.7：复用普通 sprite 但整张缩小显示，
+            // 阴影剪影随之缩小（阴影按渲染后的 body alpha 投影）。
+            const QRectF weeDst(SRC_W * 0.15, SRC_H * 0.15, SRC_W * 0.70, SRC_H * 0.70);
+            cp.setRenderHint(QPainter::SmoothPixmapTransform, true);
+            cp.drawPixmap(weeDst, body, QRectF(0, 0, SRC_W, SRC_H));
+            cp.setRenderHint(QPainter::SmoothPixmapTransform, false);
+        } else {
+            cp.drawPixmap(QRect(0, 0, SRC_W, SRC_H), body);
+        }
         paintLegendaryFloatingSprite(&cp, sSheet, mJoker.type);
         paintHologramFloatingSprite(&cp, sSheet, mJoker.type);
         cache.insert(key, pix);

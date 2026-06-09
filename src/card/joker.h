@@ -64,6 +64,8 @@ enum class JokerType {
     Pareidolia, Hallucination, Luchador, InvisibleJoker,
     // Batch 9：收尾小丑
     CreditCard, MrBones, DietCola, FourFingers, OopsAllSixes,
+    // Batch 10：补充小丑
+    SixthSense, RedCard, BaseballCard, TradingCard, Matador, Astronomer,
 };
 
 class Joker; // 前置声明，供 TriggerContext::self 使用
@@ -101,5 +103,7 @@ public:
 Joker createJoker(JokerType type);
 JokerRarity jokerRarity(JokerType t);
 int jokerBaseCost(JokerType t);
+// 蓝图/头脑风暴能否复制该小丑的效果（原版部分被动/机制类小丑不可复制）。
+bool jokerBlueprintCompatible(JokerType t);
 
 #endif // JOKER_HH

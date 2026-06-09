@@ -175,6 +175,9 @@ static QVector<JokerType> allBuffoonJokers() {
         JokerType::Erosion,         JokerType::BusinessCard,
         JokerType::FacelessJoker,   JokerType::Cloud9,
         JokerType::GoldenTicket,    JokerType::SeeingDouble,
+        JokerType::SixthSense,      JokerType::RedCard,
+        JokerType::BaseballCard,    JokerType::TradingCard,
+        JokerType::Matador,         JokerType::Astronomer,
         // Batch 2
         JokerType::SquareJoker,     JokerType::Runner,
         JokerType::Castle,          JokerType::GreenJoker,

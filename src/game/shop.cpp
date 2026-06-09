@@ -144,6 +144,12 @@ static int rawJokerCostForType(JokerType t)
     case JokerType::DietCola:        raw = 6;  break;
     case JokerType::FourFingers:     raw = 7;  break;
     case JokerType::OopsAllSixes:    raw = 4;  break;
+    case JokerType::SixthSense:      raw = 6;  break;
+    case JokerType::RedCard:         raw = 5;  break;
+    case JokerType::BaseballCard:    raw = 8;  break;
+    case JokerType::TradingCard:     raw = 6;  break;
+    case JokerType::Matador:         raw = 7;  break;
+    case JokerType::Astronomer:      raw = 8;  break;
     }
     return raw;
 }
@@ -560,6 +566,7 @@ void Shop::appendVoucherOffer()
 
 int Shop::applyDiscount(int rawCost) const {
     // 原版 Card:set_cost(): floor((base_cost + extra_cost + 0.5) * (100-discount)/100)，最低 $1。
+    if (rawCost <= 0) return 0;   // 天文学家等令原价为 0 的项保持免费，不被抬到 $1
     if (mDiscountPercent <= 0) return qMax(1, rawCost);
     return qMax(1, int(std::floor((rawCost + 0.5) * (100 - mDiscountPercent) / 100.0)));
 }
@@ -579,11 +586,13 @@ int Shop::rawCostFor(const ShopOffer &o) const
         return raw;
     }
     case OfferKind::Tarot:       return 3;
-    case OfferKind::Planet:      return 3;
+    case OfferKind::Planet:      return mOwnedJokers.contains(JokerType::Astronomer) ? 0 : 3;
     case OfferKind::Spectral:    return 4;
     case OfferKind::PlayingCard: return 3;
     case OfferKind::Voucher:     return voucherData(o.voucher).cost;
     case OfferKind::Pack:
+        if (o.pack == PackKind::Celestial && mOwnedJokers.contains(JokerType::Astronomer))
+            return 0;   // 天文学家：天体包免费
         if (o.packSize == PackSize::Normal) return 4;
         if (o.packSize == PackSize::Jumbo)  return 6;
         return 8;
@@ -710,7 +719,7 @@ ShopOffer Shop::randomShopOffer(const QVector<ShopOffer> &alreadyRolled) const {
         if (roll <= acc) {
             o.kind = OfferKind::Planet;
             o.consumable = randomPlanetType();
-            o.cost = mNextShopFree ? 0 : applyDiscount(3);
+            o.cost = mNextShopFree ? 0 : applyDiscount(rawCostFor(o));
             if (!duplicatesOffer(o, alreadyRolled)) return o;
             continue;
         }
@@ -745,7 +754,7 @@ ShopOffer Shop::randomShopOffer(const QVector<ShopOffer> &alreadyRolled) const {
         ShopOffer fallback;
         fallback.kind = kind;
         fallback.consumable = choices[QRandomGenerator::global()->bounded(choices.size())];
-        fallback.cost = mNextShopFree ? 0 : applyDiscount(baseCost);
+        fallback.cost = mNextShopFree ? 0 : applyDiscount(rawCostFor(fallback));
         fallbackOffers.append(fallback);
     };
     if (mRates.tarot > 0.0) {
@@ -847,7 +856,7 @@ ShopOffer Shop::randomBoosterOffer(const QVector<ShopOffer> &alreadyRolled) cons
         o.pack = chosen.kind;
         o.packSize = chosen.size;
         o.packVariant = chosen.variant;
-        o.cost = mNextShopFree ? 0 : applyDiscount(chosen.cost);
+        o.cost = mNextShopFree ? 0 : applyDiscount(rawCostFor(o));
         if (!duplicatesOffer(o, alreadyRolled)) return o;
     }
 
@@ -856,7 +865,7 @@ ShopOffer Shop::randomBoosterOffer(const QVector<ShopOffer> &alreadyRolled) cons
     o.pack = PackKind::Arcana;
     o.packSize = PackSize::Normal;
     o.packVariant = choosePackVariant(o.pack, o.packSize, alreadyRolled);
-    o.cost = mNextShopFree ? 0 : applyDiscount(4);
+    o.cost = mNextShopFree ? 0 : applyDiscount(rawCostFor(o));
     return o;
 }
 
@@ -946,7 +955,9 @@ QVector<JokerType> Shop::jokerPool() {
         JokerType::JokerStencil, JokerType::SteelJoker, JokerType::StoneJoker,
         JokerType::BlueJoker, JokerType::Erosion, JokerType::BusinessCard,
         JokerType::FacelessJoker, JokerType::Cloud9, JokerType::GoldenTicket,
-        JokerType::SeeingDouble,
+        JokerType::SeeingDouble, JokerType::SixthSense, JokerType::RedCard,
+        JokerType::BaseballCard, JokerType::TradingCard, JokerType::Matador,
+        JokerType::Astronomer,
         JokerType::SquareJoker, JokerType::Runner, JokerType::Castle,
         JokerType::GreenJoker, JokerType::Obelisk, JokerType::RideTheBus,
         JokerType::SpareTrousers, JokerType::WeeJoker, JokerType::HitTheRoad,

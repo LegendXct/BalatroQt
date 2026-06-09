@@ -6,6 +6,66 @@
 #include <climits>
 #include <QSet>
 
+// 花色匹配（对齐原版 Card:is_suit）：石头牌无花色、百搭牌算任意花色、被禁用牌不计；
+// "模糊小丑"(Smeared)把红/黑同色视为同花色。flushCalc=true 用于同花/黑板类计算
+// （被禁用的普通牌仍按花色参与，但被禁用的百搭牌不算），bypassDebuff 绕过单牌禁用。
+static bool sameSmearedColor(Suit a, Suit b)
+{
+    const bool aRed = (a == Suit::Hearts || a == Suit::Diamonds);
+    const bool bRed = (b == Suit::Hearts || b == Suit::Diamonds);
+    return aRed == bRed;
+}
+
+static bool cardIsSuitLikeOriginal(const CardData &card,
+                                   Suit suit,
+                                   bool bypassDebuff,
+                                   bool flushCalc,
+                                   bool smeared)
+{
+    if (!flushCalc && card.isDebuffed && !bypassDebuff) return false;
+    if (card.enhancement == Enhancement::Stone) return false;
+    if (card.enhancement == Enhancement::Wild) {
+        if (flushCalc && card.isDebuffed) return false;
+        return true;
+    }
+    if (smeared && sameSmearedColor(card.suit, suit)) return true;
+    return card.suit == suit;
+}
+
+static void fillFirstMatchingSuitLikeOriginal(QSet<int> &suits,
+                                              const CardData &card,
+                                              const QVector<Suit> &order,
+                                              bool bypassDebuff,
+                                              bool flushCalc,
+                                              bool smeared)
+{
+    for (Suit suit : order) {
+        const int key = static_cast<int>(suit);
+        if (!suits.contains(key)
+            && cardIsSuitLikeOriginal(card, suit, bypassDebuff, flushCalc, smeared)) {
+            suits.insert(key);
+            return;
+        }
+    }
+}
+
+// 待办清单可指定的牌型（不含五条/同花五条等特殊牌型）。
+static QVector<HandType> toDoListVisibleHands()
+{
+    return {
+        HandType::HighCard, HandType::Pair, HandType::TwoPair, HandType::ThreeOfAKind,
+        HandType::Straight, HandType::Flush, HandType::FullHouse, HandType::FourOfAKind,
+        HandType::StraightFlush
+    };
+}
+
+static HandType randomToDoListHand(HandType exclude = HandType::FlushFive)
+{
+    QVector<HandType> pool;
+    for (HandType hand : toDoListVisibleHands())
+        if (hand != exclude) pool.append(hand);
+    return pool.at(QRandomGenerator::global()->bounded(pool.size()));
+}
 
 int jokerBaseCost(JokerType t)
 {
@@ -154,6 +214,12 @@ int jokerBaseCost(JokerType t)
     case JokerType::DietCola:        return 6;
     case JokerType::FourFingers:     return 7;
     case JokerType::OopsAllSixes:    return 4;
+    case JokerType::SixthSense:      return 6;
+    case JokerType::RedCard:         return 5;
+    case JokerType::BaseballCard:    return 8;
+    case JokerType::TradingCard:     return 6;
+    case JokerType::Matador:         return 7;
+    case JokerType::Astronomer:      return 8;
     }
     return 4;
 }
@@ -223,6 +289,10 @@ JokerRarity jokerRarity(JokerType t) {
     case JokerType::Satellite:
     case JokerType::Cartomancer:
     case JokerType::Bootstraps:
+    case JokerType::SixthSense:
+    case JokerType::TradingCard:
+    case JokerType::Matador:
+    case JokerType::Astronomer:
         return JokerRarity::Uncommon;
     // Rare
     case JokerType::DNA:
@@ -244,6 +314,7 @@ JokerRarity jokerRarity(JokerType t) {
     case JokerType::Brainstorm:
     case JokerType::DriversLicense:
     case JokerType::BurntJoker:
+    case JokerType::BaseballCard:
         return JokerRarity::Rare;
     // Legendary
     case JokerType::Caino:
@@ -254,6 +325,44 @@ JokerRarity jokerRarity(JokerType t) {
         return JokerRarity::Legendary;
     default:
         return JokerRarity::Common;
+    }
+}
+
+bool jokerBlueprintCompatible(JokerType t)
+{
+    switch (t) {
+    case JokerType::FourFingers:
+    case JokerType::CreditCard:
+    case JokerType::ChaosTheClown:
+    case JokerType::DelayedGratification:
+    case JokerType::Pareidolia:
+    case JokerType::Egg:
+    case JokerType::Splash:
+    case JokerType::SixthSense:
+    case JokerType::Shortcut:
+    case JokerType::Cloud9:
+    case JokerType::Rocket:
+    case JokerType::MidasMask:
+    case JokerType::GiftCard:
+    case JokerType::TurtleBean:
+    case JokerType::ToTheMoon:
+    case JokerType::Juggler:
+    case JokerType::Drunkard:
+    case JokerType::GoldenJoker:
+    case JokerType::TradingCard:
+    case JokerType::MrBones:
+    case JokerType::Troubadour:
+    case JokerType::SmearedJoker:
+    case JokerType::Showman:
+    case JokerType::MerryAndy:
+    case JokerType::OopsAllSixes:
+    case JokerType::InvisibleJoker:
+    case JokerType::Satellite:
+    case JokerType::Astronomer:
+    case JokerType::Chicot:
+        return false;
+    default:
+        return true;
     }
 }
 
@@ -277,9 +386,9 @@ Joker createJoker(JokerType type) {
         j.description = "每张♦计分牌 +3 倍率";
         j.timing = TriggerTiming::OnScoringCard;
         j.effect = [](TriggerContext &ctx) {
-            if (ctx.currentCard &&
-                ctx.currentCard->suit == Suit::Diamonds &&
-                !ctx.currentCard->isDebuffed)
+            if (ctx.currentCard
+                && cardIsSuitLikeOriginal(*ctx.currentCard, Suit::Diamonds, false, false,
+                                          ctx.state.hasJokerType(JokerType::SmearedJoker)))
                 ctx.result.mult += 3;
         };
         break;
@@ -289,9 +398,9 @@ Joker createJoker(JokerType type) {
         j.description = "每张♥计分牌 +3 倍率";
         j.timing = TriggerTiming::OnScoringCard;
         j.effect = [](TriggerContext &ctx) {
-            if (ctx.currentCard &&
-                ctx.currentCard->suit == Suit::Hearts &&
-                !ctx.currentCard->isDebuffed)
+            if (ctx.currentCard
+                && cardIsSuitLikeOriginal(*ctx.currentCard, Suit::Hearts, false, false,
+                                          ctx.state.hasJokerType(JokerType::SmearedJoker)))
                 ctx.result.mult += 3;
         };
         break;
@@ -301,9 +410,9 @@ Joker createJoker(JokerType type) {
         j.description = "每张♠计分牌 +3 倍率";
         j.timing = TriggerTiming::OnScoringCard;
         j.effect = [](TriggerContext &ctx) {
-            if (ctx.currentCard &&
-                ctx.currentCard->suit == Suit::Spades &&
-                !ctx.currentCard->isDebuffed)
+            if (ctx.currentCard
+                && cardIsSuitLikeOriginal(*ctx.currentCard, Suit::Spades, false, false,
+                                          ctx.state.hasJokerType(JokerType::SmearedJoker)))
                 ctx.result.mult += 3;
         };
         break;
@@ -313,9 +422,9 @@ Joker createJoker(JokerType type) {
         j.description = "每张♣计分牌 +3 倍率";
         j.timing = TriggerTiming::OnScoringCard;
         j.effect = [](TriggerContext &ctx) {
-            if (ctx.currentCard &&
-                ctx.currentCard->suit == Suit::Clubs &&
-                !ctx.currentCard->isDebuffed)
+            if (ctx.currentCard
+                && cardIsSuitLikeOriginal(*ctx.currentCard, Suit::Clubs, false, false,
+                                          ctx.state.hasJokerType(JokerType::SmearedJoker)))
                 ctx.result.mult += 3;
         };
         break;
@@ -392,15 +501,13 @@ Joker createJoker(JokerType type) {
 
     case JokerType::ToDoList:
         j.name = "待办清单";
-        j.description = "出高牌 +4 金币";
+        j.description = "打出指定牌型时，获得 $4（牌型每回合变化）";
         j.timing = TriggerTiming::OnPlayedHand;
-        j.effect = [](TriggerContext &ctx) {
-            if (ctx.result.type == HandType::HighCard)
-                ctx.state.addGold(4);
-        };
+        j.counter = static_cast<int>(randomToDoListHand());   // 当前目标牌型存于 counter
+        j.effect = [](TriggerContext &) {};   // 由 applyResolvedJokerEffect() 比对 counter 处理
         break;
     case JokerType::SlyJoker:
-        j.name = "狡猾小丑"; j.description = "出对子 +50 筹码";
+        j.name = "奸诈小丑"; j.description = "出对子 +50 筹码";
         j.timing = TriggerTiming::OnPlayedHand;
         j.effect = [](TriggerContext &ctx) {
             if (ctx.result.type == HandType::Pair) ctx.result.chips += 50;
@@ -408,7 +515,7 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::WilyJoker:
-        j.name = "狡黠小丑"; j.description = "出三条 +100 筹码";
+        j.name = "狡猾小丑"; j.description = "出三条 +100 筹码";
         j.timing = TriggerTiming::OnPlayedHand;
         j.effect = [](TriggerContext &ctx) {
             if (ctx.result.type == HandType::ThreeOfAKind) ctx.result.chips += 100;
@@ -416,7 +523,7 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::CleverJoker:
-        j.name = "聪明小丑"; j.description = "出两对 +80 筹码";
+        j.name = "聪敏小丑"; j.description = "出两对 +80 筹码";
         j.timing = TriggerTiming::OnPlayedHand;
         j.effect = [](TriggerContext &ctx) {
             if (ctx.result.type == HandType::TwoPair) ctx.result.chips += 80;
@@ -424,7 +531,7 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::DeviousJoker:
-        j.name = "奸诈小丑"; j.description = "出顺子 +100 筹码";
+        j.name = "阴险小丑"; j.description = "出顺子 +100 筹码";
         j.timing = TriggerTiming::OnPlayedHand;
         j.effect = [](TriggerContext &ctx) {
             if (ctx.result.type == HandType::Straight) ctx.result.chips += 100;
@@ -432,7 +539,7 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::CraftyJoker:
-        j.name = "灵巧小丑"; j.description = "出同花 +80 筹码";
+        j.name = "精明小丑"; j.description = "出同花 +80 筹码";
         j.timing = TriggerTiming::OnPlayedHand;
         j.effect = [](TriggerContext &ctx) {
             if (ctx.result.type == HandType::Flush) ctx.result.chips += 80;
@@ -441,7 +548,7 @@ Joker createJoker(JokerType type) {
 
     // ─── 杂项倍率 ───────────────────────────
     case JokerType::Banner:
-        j.name = "横幅"; j.description = "每剩余弃牌 +30 筹码";
+        j.name = "旗帜"; j.description = "每剩余弃牌 +30 筹码";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &ctx) {
             ctx.result.chips += 30 * ctx.state.discardLeft();
@@ -465,7 +572,7 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::RaisedFist:
-        j.name = "举拳"; j.description = "手牌中最低牌点数 ×2 加倍率";
+        j.name = "致胜之拳"; j.description = "手牌中最低牌点数 ×2 加倍率";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &ctx) {
             int low = INT_MAX;
@@ -528,7 +635,7 @@ Joker createJoker(JokerType type) {
 
     // ─── 经济联动 ───────────────────────────
     case JokerType::Bull:
-        j.name = "公牛"; j.description = "每金币 +2 筹码";
+        j.name = "斗牛"; j.description = "每金币 +2 筹码";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &ctx) {
             ctx.result.chips += 2 * qMax(0, ctx.state.gold());
@@ -536,7 +643,7 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::Bootstraps:
-        j.name = "靴子"; j.description = "每 5 金币 +2 倍率";
+        j.name = "提靴带"; j.description = "每 5 金币 +2 倍率";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &ctx) {
             ctx.result.mult += 2 * (qMax(0, ctx.state.gold()) / 5);
@@ -558,7 +665,8 @@ Joker createJoker(JokerType type) {
         j.timing = TriggerTiming::OnPlayedHand;
         j.effect = [](TriggerContext &ctx) {
             auto it = ctx.state.handLevels().constFind(ctx.result.type);
-            if (it != ctx.state.handLevels().constEnd()) ctx.result.mult += it->played;
+            // +1：本牌型的 played 计数要到 finalizePlayedHand 才自增，这里手动把当前这手算进去。
+            if (it != ctx.state.handLevels().constEnd()) ctx.result.mult += it->played + 1;
         };
         break;
 
@@ -569,7 +677,7 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::Cavendish:
-        j.name = "卡文迪许香蕉"; j.description = "×3 倍率；回合结束 1/1000 概率消失";
+        j.name = "卡文迪什"; j.description = "×3 倍率；回合结束 1/1000 概率消失";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &ctx) { ctx.result.xmult *= 3.0; };
         break;
@@ -588,7 +696,7 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::TheDuo:
-        j.name = "二人组"; j.description = "若出牌含对子，×2 倍率";
+        j.name = "二重奏"; j.description = "若出牌含对子，×2 倍率";
         j.timing = TriggerTiming::OnPlayedHand;
         j.effect = [](TriggerContext &ctx) {
             // 含对子的牌型：三条/葫芦/四条/五条等内部都存在对子。
@@ -601,7 +709,7 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::TheTrio:
-        j.name = "三人组"; j.description = "若出牌含三条，×3 倍率";
+        j.name = "三重奏"; j.description = "若出牌含三条，×3 倍率";
         j.timing = TriggerTiming::OnPlayedHand;
         j.effect = [](TriggerContext &ctx) {
             if (ctx.result.type == HandType::ThreeOfAKind || ctx.result.type == HandType::FullHouse ||
@@ -647,13 +755,15 @@ Joker createJoker(JokerType type) {
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &ctx) {
             // 原版黑板：手牌中所有牌都必须是♠/♣（空手牌也算满足）。
+            // flushCalc=true：被禁用的普通牌仍按花色参与，石头牌破坏条件，模糊小丑放宽到同色。
+            const bool smeared = ctx.state.hasJokerType(JokerType::SmearedJoker);
             bool ok = true;
             for (const CardData &c : ctx.hand) {
-                // 百搭牌视作任意花色，满足条件。
-                if (c.enhancement == Enhancement::Wild) continue;
-                // 石头牌没有花色，会破坏条件。
-                if (c.enhancement == Enhancement::Stone) { ok = false; break; }
-                if (!(c.suit == Suit::Spades || c.suit == Suit::Clubs)) { ok = false; break; }
+                if (!cardIsSuitLikeOriginal(c, Suit::Clubs, false, true, smeared)
+                    && !cardIsSuitLikeOriginal(c, Suit::Spades, false, true, smeared)) {
+                    ok = false;
+                    break;
+                }
             }
             if (ok) ctx.result.xmult *= 3.0;
         };
@@ -669,7 +779,7 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::SmileyFace:
-        j.name = "笑脸"; j.description = "每张人头计分牌 +5 倍率";
+        j.name = "微笑表情"; j.description = "每张人头计分牌 +5 倍率";
         j.timing = TriggerTiming::OnScoringCard;
         j.effect = [](TriggerContext &ctx) {
             if (!ctx.currentCard || ctx.currentCard->isDebuffed) return;
@@ -693,25 +803,31 @@ Joker createJoker(JokerType type) {
         j.name = "箭头"; j.description = "每张♠计分牌 +50 筹码";
         j.timing = TriggerTiming::OnScoringCard;
         j.effect = [](TriggerContext &ctx) {
-            if (ctx.currentCard && !ctx.currentCard->isDebuffed && ctx.currentCard->suit == Suit::Spades)
+            if (ctx.currentCard
+                && cardIsSuitLikeOriginal(*ctx.currentCard, Suit::Spades, false, false,
+                                          ctx.state.hasJokerType(JokerType::SmearedJoker)))
                 ctx.result.chips += 50;
         };
         break;
 
     case JokerType::OnyxAgate:
-        j.name = "黑玛瑙"; j.description = "每张♣计分牌 +7 倍率";
+        j.name = "缟玛瑙"; j.description = "每张♣计分牌 +7 倍率";
         j.timing = TriggerTiming::OnScoringCard;
         j.effect = [](TriggerContext &ctx) {
-            if (ctx.currentCard && !ctx.currentCard->isDebuffed && ctx.currentCard->suit == Suit::Clubs)
+            if (ctx.currentCard
+                && cardIsSuitLikeOriginal(*ctx.currentCard, Suit::Clubs, false, false,
+                                          ctx.state.hasJokerType(JokerType::SmearedJoker)))
                 ctx.result.mult += 7;
         };
         break;
 
     case JokerType::RoughGem:
-        j.name = "原石"; j.description = "每张♦计分牌 +$1";
+        j.name = "璞玉"; j.description = "每张♦计分牌 +$1";
         j.timing = TriggerTiming::OnScoringCard;
         j.effect = [](TriggerContext &ctx) {
-            if (ctx.currentCard && !ctx.currentCard->isDebuffed && ctx.currentCard->suit == Suit::Diamonds)
+            if (ctx.currentCard
+                && cardIsSuitLikeOriginal(*ctx.currentCard, Suit::Diamonds, false, false,
+                                          ctx.state.hasJokerType(JokerType::SmearedJoker)))
                 ctx.state.addGold(1);
         };
         break;
@@ -720,8 +836,10 @@ Joker createJoker(JokerType type) {
         j.name = "血石"; j.description = "每张♥计分牌有 1/2 概率 ×1.5 倍率";
         j.timing = TriggerTiming::OnScoringCard;
         j.effect = [](TriggerContext &ctx) {
-            if (ctx.currentCard && !ctx.currentCard->isDebuffed && ctx.currentCard->suit == Suit::Hearts &&
-                QRandomGenerator::global()->bounded(ctx.state.probDenom(2)) == 0)
+            if (ctx.currentCard
+                && cardIsSuitLikeOriginal(*ctx.currentCard, Suit::Hearts, false, false,
+                                          ctx.state.hasJokerType(JokerType::SmearedJoker))
+                && ctx.state.chanceIn(2))
                 ctx.result.xmult *= 1.5;
         };
         break;
@@ -744,13 +862,18 @@ Joker createJoker(JokerType type) {
         j.name = "花盆"; j.description = "计分牌含四种花色时，×3 倍率";
         j.timing = TriggerTiming::OnPlayedHand;
         j.effect = [](TriggerContext &ctx) {
+            // 原版花盆：先让非百搭牌各占一个花色（被禁用牌仍按花色参与，bypassDebuff=true），
+            // 再让百搭牌去填补缺的花色。模糊小丑放宽到同色。
+            const bool smeared = ctx.state.hasJokerType(JokerType::SmearedJoker);
+            const QVector<Suit> order = { Suit::Hearts, Suit::Diamonds, Suit::Spades, Suit::Clubs };
             QSet<int> suits;
             for (const CardData &c : ctx.scoringCards) {
-                if (c.isDebuffed || c.enhancement == Enhancement::Stone) continue;
-                suits.insert(static_cast<int>(c.suit));
-                if (c.enhancement == Enhancement::Wild) {
-                    suits.insert(0); suits.insert(1); suits.insert(2); suits.insert(3);
-                }
+                if (c.enhancement == Enhancement::Wild) continue;
+                fillFirstMatchingSuitLikeOriginal(suits, c, order, true, false, smeared);
+            }
+            for (const CardData &c : ctx.scoringCards) {
+                if (c.enhancement != Enhancement::Wild) continue;
+                fillFirstMatchingSuitLikeOriginal(suits, c, order, false, false, smeared);
             }
             if (suits.size() >= 4) ctx.result.xmult *= 3.0;
         };
@@ -803,7 +926,7 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::CardSharp:
-        j.name = "锋利卡牌"; j.description = "若本回合已经出过该牌型，×3 倍率";
+        j.name = "老千小丑"; j.description = "若本回合已经出过该牌型，×3 倍率";
         j.timing = TriggerTiming::OnPlayedHand;
         j.effect = [](TriggerContext &ctx) {
             if (ctx.state.handTypePlayedThisRound(ctx.result.type)) ctx.result.xmult *= 3.0;
@@ -811,7 +934,7 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::Hologram:
-        j.name = "全息图"; j.description = "每向牌组添加 1 张游戏牌，本小丑 +X0.25 倍率";
+        j.name = "全息影像"; j.description = "每向牌组添加 1 张游戏牌，本小丑 +X0.25 倍率";
         j.counter = 0;
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &ctx) {
@@ -857,7 +980,7 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::SockAndBuskin:
-        j.name = "袜子与公交鞋"; j.description = "所有计分人头牌重新触发 1 次";
+        j.name = "喜与悲"; j.description = "所有计分人头牌重新触发 1 次";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};
         break;
@@ -920,20 +1043,20 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::Chicot:
-        j.name = "奇科特"; j.description = "传奇小丑：禁用 Boss 盲注效果";
+        j.name = "希科"; j.description = "传奇小丑：禁用 Boss 盲注效果";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};
         break;
 
     case JokerType::Perkeo:
-        j.name = "佩克欧"; j.description = "传奇小丑：离开商店时复制 1 张随机消耗牌，并使复制品变为负片";
+        j.name = "帕奇欧"; j.description = "传奇小丑：离开商店时复制 1 张随机消耗牌，并使复制品变为负片";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};
         break;
 
     // ─── Batch 1：纯计分效果小丑 ─────────────────────────
     case JokerType::JokerStencil:
-        j.name = "小丑模板"; j.description = "每个空小丑槽位 ×1 倍率（含自身）";
+        j.name = "模具小丑"; j.description = "每个空小丑槽位 ×1 倍率（含自身）";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &ctx) {
             int empty = ctx.state.jokerSlots() - ctx.state.jokers().size();
@@ -990,7 +1113,7 @@ Joker createJoker(JokerType type) {
         j.effect = [](TriggerContext &ctx) {
             if (!ctx.currentCard || ctx.currentCard->isDebuffed) return;
             if (ctx.state.isFaceCard(*ctx.currentCard)
-                && QRandomGenerator::global()->bounded(ctx.state.probDenom(2)) == 0)
+                && ctx.state.chanceIn(2))
                 ctx.state.addGold(2);
         };
         break;
@@ -1009,7 +1132,7 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::Cloud9:
-        j.name = "九霄云"; j.description = "回合结束时，牌组每张 9 给 +$1";
+        j.name = "9霄云外"; j.description = "回合结束时，牌组每张 9 给 +$1";
         j.timing = TriggerTiming::OnRoundEnd;
         j.effect = [](TriggerContext &ctx) {
             int n = 0;
@@ -1033,26 +1156,39 @@ Joker createJoker(JokerType type) {
         j.name = "重影"; j.description = "计分牌同时含♣牌和其他花色牌时 ×2 倍率";
         j.timing = TriggerTiming::OnPlayedHand;
         j.effect = [](TriggerContext &ctx) {
-            bool hasClub = false, hasOther = false;
+            // 原版重影：非百搭牌按花色登记（模糊小丑放宽到同色），百搭牌再填补缺色（♣优先）。
+            const bool smeared = ctx.state.hasJokerType(JokerType::SmearedJoker);
+            QSet<int> suits;
             for (const CardData &c : ctx.scoringCards) {
-                if (c.isDebuffed || c.enhancement == Enhancement::Stone) continue;
-                const bool wild = c.enhancement == Enhancement::Wild;
-                if (wild || c.suit == Suit::Clubs) hasClub = true;
-                if (wild || c.suit != Suit::Clubs) hasOther = true;
+                if (c.enhancement == Enhancement::Wild) continue;
+                const QVector<Suit> order = { Suit::Hearts, Suit::Diamonds, Suit::Spades, Suit::Clubs };
+                for (Suit suit : order) {
+                    if (cardIsSuitLikeOriginal(c, suit, false, false, smeared))
+                        suits.insert(static_cast<int>(suit));
+                }
             }
+            const QVector<Suit> wildOrder = { Suit::Clubs, Suit::Diamonds, Suit::Spades, Suit::Hearts };
+            for (const CardData &c : ctx.scoringCards) {
+                if (c.enhancement != Enhancement::Wild) continue;
+                fillFirstMatchingSuitLikeOriginal(suits, c, wildOrder, false, false, smeared);
+            }
+            const bool hasClub = suits.contains(static_cast<int>(Suit::Clubs));
+            const bool hasOther = suits.contains(static_cast<int>(Suit::Hearts))
+                               || suits.contains(static_cast<int>(Suit::Diamonds))
+                               || suits.contains(static_cast<int>(Suit::Spades));
             if (hasClub && hasOther) ctx.result.xmult *= 2.0;
         };
         break;
 
     // ─── Batch 2：计数器型小丑（动态数值由 GameState 按 counter 处理）───────
     case JokerType::SquareJoker:
-        j.name = "方块小丑"; j.description = "每次打出恰好 4 张牌时永久 +4 筹码";
+        j.name = "方形小丑"; j.description = "每次打出恰好 4 张牌时永久 +4 筹码";
         j.counter = 0; j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};
         break;
 
     case JokerType::Runner:
-        j.name = "跑者"; j.description = "每次打出顺子时永久 +15 筹码";
+        j.name = "跑步选手"; j.description = "每次打出顺子时永久 +15 筹码";
         j.counter = 0; j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};
         break;
@@ -1070,13 +1206,13 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::Obelisk:
-        j.name = "方尖碑"; j.description = "连续不打出最常用牌型时 +X0.2 倍率，打出则重置";
+        j.name = "方尖石塔"; j.description = "连续不打出最常用牌型时 +X0.2 倍率，打出则重置";
         j.counter = 0; j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};
         break;
 
     case JokerType::RideTheBus:
-        j.name = "坐巴士"; j.description = "连续打出不含计分人头牌的手牌时 +1 倍率，含则重置";
+        j.name = "搭乘巴士"; j.description = "连续打出不含计分人头牌的手牌时 +1 倍率，含则重置";
         j.counter = 0; j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};
         break;
@@ -1088,13 +1224,13 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::WeeJoker:
-        j.name = "小小小丑"; j.description = "每张计分的 2 永久为本牌 +8 筹码";
+        j.name = "小小丑"; j.description = "每张计分的 2 永久为本牌 +8 筹码";
         j.counter = 0; j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};
         break;
 
     case JokerType::HitTheRoad:
-        j.name = "上路"; j.description = "本回合每弃掉 1 张 J +X0.5 倍率，回合结束重置";
+        j.name = "上路吧杰克"; j.description = "本回合每弃掉 1 张 J +X0.5 倍率，回合结束重置";
         j.counter = 0; j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};
         break;
@@ -1106,7 +1242,7 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::LuckyCat:
-        j.name = "幸运猫"; j.description = "每次幸运牌触发 +X0.25 倍率";
+        j.name = "招财猫"; j.description = "每次幸运牌触发 +X0.25 倍率";
         j.counter = 0; j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};
         break;
@@ -1119,25 +1255,25 @@ Joker createJoker(JokerType type) {
 
     // ─── Batch 3：手牌/弃牌/经济/每回合参数型小丑 ─────────────
     case JokerType::Juggler:
-        j.name = "杂耍者"; j.description = "手牌上限 +1";
+        j.name = "杂耍师"; j.description = "手牌上限 +1";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};   // 由 handSize() 处理
         break;
 
     case JokerType::Drunkard:
-        j.name = "酒鬼"; j.description = "每回合 +1 次弃牌";
+        j.name = "醉汉"; j.description = "每回合 +1 次弃牌";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};   // 由 startBlind() 处理
         break;
 
     case JokerType::MerryAndy:
-        j.name = "欢乐安迪"; j.description = "每回合 +3 次弃牌，手牌上限 -1";
+        j.name = "快乐安迪"; j.description = "每回合 +3 次弃牌，手牌上限 -1";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};
         break;
 
     case JokerType::Troubadour:
-        j.name = "吟游诗人"; j.description = "手牌上限 +2，每回合 -1 次出牌";
+        j.name = "游吟诗人"; j.description = "手牌上限 +2，每回合 -1 次出牌";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};
         break;
@@ -1152,19 +1288,19 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::ToTheMoon:
-        j.name = "飞向月球"; j.description = "每 $5 额外获得 $1 利息";
+        j.name = "冲向月球"; j.description = "每 $5 额外获得 $1 利息";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};   // 由回合结算利息处理
         break;
 
     case JokerType::ReservedParking:
-        j.name = "预留车位"; j.description = "手牌中每张人头牌有 1/2 概率 +$1";
+        j.name = "私人车位"; j.description = "手牌中每张人头牌有 1/2 概率 +$1";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};   // 由留手牌结算阶段处理
         break;
 
     case JokerType::MailInRebate:
-        j.name = "邮寄回扣"; j.description = "每弃掉 1 张指定点数的牌 +$5（点数每回合变化）";
+        j.name = "邮件回扣"; j.description = "每弃掉 1 张指定点数的牌 +$5（点数每回合变化）";
         j.timing = TriggerTiming::OnDiscard;
         j.effect = [](TriggerContext &ctx) {
             for (const CardData &c : ctx.scoringCards)
@@ -1175,12 +1311,12 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::AncientJoker:
-        j.name = "远古小丑"; j.description = "每张指定花色的计分牌 ×1.5 倍率（花色每回合变化）";
+        j.name = "古老小丑"; j.description = "每张指定花色的计分牌 ×1.5 倍率（花色每回合变化）";
         j.timing = TriggerTiming::OnScoringCard;
         j.effect = [](TriggerContext &ctx) {
             if (!ctx.currentCard || ctx.currentCard->isDebuffed) return;
-            if (ctx.currentCard->enhancement == Enhancement::Wild
-                || ctx.currentCard->suit == ctx.state.ancientSuit())
+            if (cardIsSuitLikeOriginal(*ctx.currentCard, ctx.state.ancientSuit(), false, false,
+                                       ctx.state.hasJokerType(JokerType::SmearedJoker)))
                 ctx.result.xmult *= 1.5;
         };
         break;
@@ -1190,8 +1326,8 @@ Joker createJoker(JokerType type) {
         j.timing = TriggerTiming::OnScoringCard;
         j.effect = [](TriggerContext &ctx) {
             if (!ctx.currentCard || ctx.currentCard->isDebuffed) return;
-            const bool suitOk = ctx.currentCard->enhancement == Enhancement::Wild
-                || ctx.currentCard->suit == ctx.state.idolSuit();
+            const bool suitOk = cardIsSuitLikeOriginal(*ctx.currentCard, ctx.state.idolSuit(), false, false,
+                                                       ctx.state.hasJokerType(JokerType::SmearedJoker));
             if (ctx.currentCard->rank == ctx.state.idolRank() && suitOk)
                 ctx.result.xmult *= 2.0;
         };
@@ -1201,13 +1337,13 @@ Joker createJoker(JokerType type) {
         j.name = "太空小丑"; j.description = "打出的手牌有 1/4 概率升级该牌型";
         j.timing = TriggerTiming::OnPlayedHand;
         j.effect = [](TriggerContext &ctx) {
-            if (QRandomGenerator::global()->bounded(ctx.state.probDenom(4)) == 0)
+            if (ctx.state.chanceIn(4))
                 ctx.state.levelUpHand(ctx.result.type);
         };
         break;
 
     case JokerType::Hack:
-        j.name = "黑客"; j.description = "重新触发每张计分的 2/3/4/5";
+        j.name = "烂脱口秀演员"; j.description = "重新触发每张计分的 2/3/4/5";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};   // 由计分重触发阶段处理
         break;
@@ -1220,7 +1356,7 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::MarbleJoker:
-        j.name = "弹珠小丑"; j.description = "选择盲注时，向牌组添加 1 张石头牌";
+        j.name = "大理石小丑"; j.description = "选择盲注时，向牌组添加 1 张石头牌";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};
         break;
@@ -1238,7 +1374,7 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::Certificate:
-        j.name = "证书"; j.description = "选择盲注时，向牌组添加 1 张带随机蜡封的随机牌";
+        j.name = "证书"; j.description = "回合开始时，随机添加 1 张带随机蜡封的牌到手牌中";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};
         break;
@@ -1255,13 +1391,13 @@ Joker createJoker(JokerType type) {
         j.effect = [](TriggerContext &ctx) {
             if (ctx.currentCard && !ctx.currentCard->isDebuffed
                 && ctx.currentCard->rank == Rank::Eight
-                && QRandomGenerator::global()->bounded(ctx.state.probDenom(4)) == 0)
+                && ctx.state.chanceIn(4))
                 ctx.state.addConsumable(randomTarotType());
         };
         break;
 
     case JokerType::Seance:
-        j.name = "降神会"; j.description = "打出同花顺时，创建 1 张随机幻灵牌";
+        j.name = "通灵"; j.description = "打出同花顺时，创建 1 张随机幻灵牌";
         j.timing = TriggerTiming::OnPlayedHand;
         j.effect = [](TriggerContext &ctx) {
             if (ctx.result.type == HandType::StraightFlush
@@ -1297,13 +1433,13 @@ Joker createJoker(JokerType type) {
 
     // ─── Batch 5：计数器/经济型小丑 ─────────────────────────
     case JokerType::FlashCard:
-        j.name = "闪卡"; j.description = "每次商店重摇永久 +2 倍率";
+        j.name = "闪示卡"; j.description = "每次商店重摇永久 +2 倍率";
         j.counter = 0; j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};
         break;
 
     case JokerType::Throwback:
-        j.name = "复古"; j.description = "本局每跳过 1 个盲注 +X0.25 倍率";
+        j.name = "回溯"; j.description = "本局每跳过 1 个盲注 +X0.25 倍率";
         j.counter = 0; j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};
         break;
@@ -1315,13 +1451,13 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::FortuneTeller:
-        j.name = "算命师"; j.description = "本局每使用 1 张塔罗牌 +1 倍率";
+        j.name = "占卜师"; j.description = "本局每使用 1 张塔罗牌 +1 倍率";
         j.counter = 0; j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};
         break;
 
     case JokerType::LoyaltyCard:
-        j.name = "忠诚卡"; j.description = "每打出 6 手牌，该手 ×4 倍率";
+        j.name = "积分卡"; j.description = "每打出 6 手牌，该手 ×4 倍率";
         j.counter = 0; j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};
         break;
@@ -1358,13 +1494,13 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::SmearedJoker:
-        j.name = "涂抹小丑"; j.description = "♥与♦视为同花色，♠与♣视为同花色";
+        j.name = "模糊小丑"; j.description = "♥与♦视为同花色，♠与♣视为同花色";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};
         break;
 
     case JokerType::Splash:
-        j.name = "水花"; j.description = "每张打出的牌都参与计分";
+        j.name = "飞溅"; j.description = "每张打出的牌都参与计分";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};
         break;
@@ -1383,13 +1519,13 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::CeremonialDagger:
-        j.name = "祭祀匕首"; j.description = "选择盲注时，摧毁右侧小丑并永久获得其出售价值×2 的倍率";
+        j.name = "仪式匕首"; j.description = "选择盲注时，摧毁右侧小丑并永久获得其出售价值×2 的倍率";
         j.counter = 0; j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};   // counter 由 applyResolvedJokerEffect 读
         break;
 
     case JokerType::TurtleBean:
-        j.name = "海龟豆"; j.description = "手牌上限 +5，每回合 -1，归零时消失";
+        j.name = "黑龟豆"; j.description = "手牌上限 +5，每回合 -1，归零时消失";
         j.counter = 5; j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};   // 由 handSize() 处理
         break;
@@ -1401,7 +1537,7 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::BurntJoker:
-        j.name = "焦痕小丑"; j.description = "每回合第一次弃牌时，升级该牌型等级";
+        j.name = "烧焦小丑"; j.description = "每回合第一次弃牌时，升级该牌型等级";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};   // 由 discardCards() 处理
         break;
@@ -1414,7 +1550,7 @@ Joker createJoker(JokerType type) {
 
     // ─── Batch 8：杂项机制型小丑 ─────────────────────────────
     case JokerType::Pareidolia:
-        j.name = "幻想性错觉"; j.description = "所有牌都视为人头牌";
+        j.name = "幻视"; j.description = "所有牌都视为人头牌";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};   // 由 GameState::isFaceCard() 处理
         break;
@@ -1445,27 +1581,71 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::MrBones:
-        j.name = "骨头先生"; j.description = "得分达到要求 25% 时免于失败，随后本牌消失";
+        j.name = "骷髅先生"; j.description = "得分达到要求 25% 时免于失败，随后本牌消失";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};   // 由 checkGameOver() 处理
         break;
 
     case JokerType::DietCola:
-        j.name = "无糖可乐"; j.description = "出售本牌可获得 1 个双倍标签";
+        j.name = "零糖可乐"; j.description = "售出这牌就可以创建一个免费的双倍标签";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};   // 由 sellJoker() 处理
         break;
 
     case JokerType::FourFingers:
-        j.name = "四根手指"; j.description = "同花和顺子只需 4 张牌即可组成";
+        j.name = "四指"; j.description = "同花和顺子只需 4 张牌即可组成";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};   // 由 HandEvaluator/HandMods 处理
         break;
 
     case JokerType::OopsAllSixes:
-        j.name = "全是 6"; j.description = "所有概率翻倍";
+        j.name = "六六大顺"; j.description = "所有概率翻倍";
         j.timing = TriggerTiming::Passive;
-        j.effect = [](TriggerContext &) {};   // 由 probDenom() 处理
+        j.effect = [](TriggerContext &) {};   // 由 chanceIn() 处理
+        break;
+
+    // Batch 10：补充小丑（多数效果由 GameState 接管，见 A3b/A7）
+    case JokerType::SixthSense:
+        j.name = "第六感";
+        j.description = "若本回合第一手只打出一张 6，摧毁它并生成一张幻灵牌";
+        j.timing = TriggerTiming::Passive;
+        j.effect = [](TriggerContext &) {};   // 由 GameState::playCards() 处理
+        break;
+
+    case JokerType::RedCard:
+        j.name = "红牌";
+        j.description = "每跳过一个补充包，本小丑永久 +3 倍率";
+        j.counter = 0;
+        j.timing = TriggerTiming::Passive;
+        j.effect = [](TriggerContext &) {};   // 由 applyResolvedJokerEffect() 按 counter 处理
+        break;
+
+    case JokerType::BaseballCard:
+        j.name = "棒球卡";
+        j.description = "每张罕见小丑牌给予 ×1.5 倍率";
+        j.timing = TriggerTiming::Passive;
+        j.effect = [](TriggerContext &) {};   // 由 applyResolvedJokerEffect() 处理
+        break;
+
+    case JokerType::TradingCard:
+        j.name = "交易卡";
+        j.description = "若本回合第一次弃牌只有 1 张，摧毁它并获得 $3";
+        j.timing = TriggerTiming::Passive;
+        j.effect = [](TriggerContext &) {};   // 由 GameState::discardCards() 处理
+        break;
+
+    case JokerType::Matador:
+        j.name = "斗牛士";
+        j.description = "若打出的手牌触发 Boss 盲注能力，获得 $8";
+        j.timing = TriggerTiming::Passive;
+        j.effect = [](TriggerContext &) {};   // 由 GameState::playCards/finalizePlayedHand 处理
+        break;
+
+    case JokerType::Astronomer:
+        j.name = "天文学家";
+        j.description = "商店中的所有星球牌和天体包免费";
+        j.timing = TriggerTiming::Passive;
+        j.effect = [](TriggerContext &) {};   // 由 Shop 定价处理
         break;
 
     }
