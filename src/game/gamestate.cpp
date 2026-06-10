@@ -659,6 +659,12 @@ void GameState::playCards(const QVector<int> &indices) {
         if (i < 0 || i >= mHand.size()) return;
         if (i >= playWin) { qWarning("playCards: 队列窗口外的牌 idx=%d", i); return; }
     }
+    // 栈牌组：必须包含最新到手的"栈顶"牌（mHand 末位）。
+    if (mGameDeck->mustIncludeNewest() && !mHand.isEmpty()
+        && !sorted.contains(mHand.size() - 1)) {
+        qWarning("playCards: 栈牌组出牌必须包含栈顶牌");
+        return;
+    }
 
     // 取出 played，评分动画期间暂时不补牌；补牌要等所有计分动画和收牌动画结束后再做。
     QVector<CardData> played;
@@ -1508,6 +1514,12 @@ void GameState::discardCards(const QVector<int> &indices)
     for (int i : indices) {
         if (i < 0 || i >= mHand.size()) return;
         if (i >= discardWin) { qWarning("discardCards: 队列窗口外的牌 idx=%d", i); return; }
+    }
+    // 栈牌组：必须包含最新到手的"栈顶"牌（mHand 末位）。
+    if (mGameDeck->mustIncludeNewest() && !mHand.isEmpty()
+        && !indices.contains(mHand.size() - 1)) {
+        qWarning("discardCards: 栈牌组弃牌必须包含栈顶牌");
+        return;
     }
 
     QVector<CardData> discarded;
@@ -2436,12 +2448,17 @@ QVector<int> GameState::findBestPlay()
             }
         }
     }
+    // 栈牌组：栈顶（mHand 末位）必须参与出牌，与蔚蓝铃铛同为强制包含项。
+    int stackTopIdx = -1;
+    if (mGameDeck->mustIncludeNewest() && mHand.size() - 1 < n)
+        stackTopIdx = mHand.size() - 1;
 
     QVector<int> best;
     double bestScore = -1.0;
 
     for (quint32 mask = 1; mask < (1u << n); ++mask) {
         if (forcedIdx >= 0 && !(mask & (1u << forcedIdx))) continue;
+        if (stackTopIdx >= 0 && !(mask & (1u << stackTopIdx))) continue;
         // 跳过任何包含"背面朝下"卡的子集——The Mark / The House / The Fish / The Wheel
         // 等 Boss 会把部分手牌发成背面，玩家本身就看不到这些牌的点数/花色，
         // 让"最佳出牌"也只在玩家能看见的牌里选，符合"不作弊"语义。

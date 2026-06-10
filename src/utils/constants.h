@@ -57,6 +57,10 @@ namespace Constants {
     constexpr int QUEUE_DECK_WINDOW = 6;         // 队首窗口：仅最前 6 张手牌可选
     constexpr int QUEUE_DECK_EXTRA_HANDS = 1;    // 每回合出牌次数补偿
     constexpr int QUEUE_DECK_EXTRA_DISCARDS = 1; // 每回合弃牌次数补偿
+
+    // 栈牌组：不限选牌窗口，但出牌/弃牌必须包含最新到手的"栈顶"牌
+    constexpr int STACK_DECK_EXTRA_HANDS = 1;    // 每回合出牌次数补偿
+    constexpr int STACK_DECK_EXTRA_DISCARDS = 1; // 每回合弃牌次数补偿
 }
 
 #endif // CONSTANTS_H

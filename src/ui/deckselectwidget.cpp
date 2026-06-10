@@ -65,7 +65,7 @@ DeckSelectWidget::DeckSelectWidget(const QFont &cnFont, QWidget *parent)
     auto *panel = new QWidget(this);
     panel->setAttribute(Qt::WA_StyledBackground, true);
     panel->setStyleSheet("background:#4f6367; border-radius:16px;");
-    panel->setFixedWidth(560);
+    panel->setFixedWidth(640);   // 三张牌组卡背并排
     auto *pv = new QVBoxLayout(panel);
     pv->setContentsMargins(24, 20, 24, 20);
     pv->setSpacing(14);
@@ -82,6 +82,7 @@ DeckSelectWidget::DeckSelectWidget(const QFont &cnFont, QWidget *parent)
     const QVector<QPair<GameDeckId, QPixmap>> options = {
         { GameDeckId::Base,  back },
         { GameDeckId::Queue, hueShifted(back, 150) },   // 队列牌组卡背：色相偏移区分
+        { GameDeckId::Stack, hueShifted(back, 280) },   // 栈牌组卡背：再偏一个角度
     };
     auto *row = new QHBoxLayout();
     row->setSpacing(18);

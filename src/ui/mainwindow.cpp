@@ -4935,6 +4935,17 @@ void MainWindow::refreshHand() {
         }
     }
 
+    // 栈牌组：最新到手的"栈顶"牌强制选中（出牌/弃牌必须包含它）。
+    if (mGameState->gameDeck().mustIncludeNewest()
+        && mGameState->phase() == GamePhase::Blind && !mScoringInProgress
+        && !mHandCards.isEmpty()) {
+        const int top = mHandCards.size() - 1;
+        if (!mSelected.contains(top) && mSelected.size() < 5) {
+            mHandCards[top]->setCardSelected(true);
+            mSelected.append(top);
+        }
+    }
+
     layoutHandCards();
     refreshCounters();
     updateHandPreview();
@@ -5004,19 +5015,26 @@ void MainWindow::layoutHandCards() {
         mHandCards[i]->setOpacity(i < mGameState->gameDeck().selectionWindow() ? 1.0 : 0.55);
     }
 
-    // 队首标记：仅队列牌组显示，挂在第一张手牌上方。
-    const bool queueDeck = mGameState->gameDeck().selectionWindow() < (1 << 30);
-    if (queueDeck && !mQueueHeadLabel) {
-        mQueueHeadLabel = mScene->addText(QStringLiteral("队首 →"));
+    // 队首/栈顶标记：文案与挂靠位置由牌组多态决定（队列=行首"队首 →"，栈=行尾"← 栈顶"）。
+    const QString marker = mGameState->gameDeck().handMarkerText();
+    if (!marker.isEmpty() && !mQueueHeadLabel) {
+        mQueueHeadLabel = mScene->addText(QString());
         QFont qf = mCNFont; qf.setPixelSize(18); qf.setBold(true);
         mQueueHeadLabel->setFont(qf);
         mQueueHeadLabel->setDefaultTextColor(QColor("#c8d8d8"));
         mQueueHeadLabel->setZValue(300);
     }
     if (mQueueHeadLabel) {
-        mQueueHeadLabel->setVisible(queueDeck && n > 0);
-        if (queueDeck && n > 0)
-            mQueueHeadLabel->setPos(startX, mHandY - 30);
+        mQueueHeadLabel->setVisible(!marker.isEmpty());
+        if (!marker.isEmpty()) {
+            mQueueHeadLabel->setPlainText(marker);
+            qreal lx = startX;
+            if (mGameState->gameDeck().handMarkerAtTail()) {
+                const qreal w = mQueueHeadLabel->boundingRect().width();
+                lx = startX + (n - 1) * step + CARD_W - w;
+            }
+            mQueueHeadLabel->setPos(lx, mHandY - 30);
+        }
     }
 }
 
@@ -5493,10 +5511,13 @@ void MainWindow::onCardClicked(CardItem *card) {
     // 蔚蓝铃铛 Boss：被锁定的手牌不能取消选中。
     const bool isForced = mGameState->ceruleanForcedUid() > 0
                           && card->cardData().uid == mGameState->ceruleanForcedUid();
+    // 栈牌组：栈顶牌（最新到手）不可取消选中。
+    const bool isStackTop = mGameState->gameDeck().mustIncludeNewest()
+                            && idx == mHandCards.size() - 1;
 
     const bool wasSelected = mSelected.contains(idx);
     if (wasSelected) {
-        if (isForced) return;
+        if (isForced || isStackTop) return;
         mSelected.removeAll(idx);
         card->setCardSelected(false);
     } else {

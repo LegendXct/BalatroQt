@@ -17,10 +17,21 @@ QString QueueGameDeck::description() const
         .arg(Constants::QUEUE_DECK_EXTRA_DISCARDS);
 }
 
+QString StackGameDeck::name() const { return QStringLiteral("栈牌组"); }
+QString StackGameDeck::description() const
+{
+    return QStringLiteral("手牌按抽牌顺序排列（后进先出），禁止整理；"
+                          "出牌/弃牌必须包含最新到手的\"栈顶\"牌。\n"
+                          "每回合 +%1 出牌次数、+%2 弃牌次数。")
+        .arg(Constants::STACK_DECK_EXTRA_HANDS)
+        .arg(Constants::STACK_DECK_EXTRA_DISCARDS);
+}
+
 std::unique_ptr<GameDeckType> createGameDeck(GameDeckId id)
 {
     switch (id) {
     case GameDeckId::Queue: return std::make_unique<QueueGameDeck>();
+    case GameDeckId::Stack: return std::make_unique<StackGameDeck>();
     case GameDeckId::Base:  break;
     }
     return std::make_unique<BaseGameDeck>();
