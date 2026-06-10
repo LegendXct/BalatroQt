@@ -10,7 +10,7 @@
 class DeckSkin
 {
 public:
-    enum Id { Default = 0, ChengShe = 1 };   // ChengShe = 程设专用牌组
+    enum Id { Default = 0, ChengShe = 1 };   // ChengShe = 程设牌组
 
     static int  count() { return 2; }
     static Id   current() { return sCurrent; }

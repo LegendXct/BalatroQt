@@ -13,10 +13,22 @@
         <file>images/balatro.png</file>
         <file>images/ShopSignAnimation.png</file>
         <file>images/Vouchers.png</file>
-        <file>images/deckskin_cs_J.png</file>
-        <file>images/deckskin_cs_Q.png</file>
-        <file>images/deckskin_cs_K.png</file>
-        <file>images/deckskin_cs_A.png</file>
+        <file>images/deckskin_cs_sA.png</file>
+        <file>images/deckskin_cs_sJ.png</file>
+        <file>images/deckskin_cs_sQ.png</file>
+        <file>images/deckskin_cs_sK.png</file>
+        <file>images/deckskin_cs_hA.png</file>
+        <file>images/deckskin_cs_hJ.png</file>
+        <file>images/deckskin_cs_hQ.png</file>
+        <file>images/deckskin_cs_hK.png</file>
+        <file>images/deckskin_cs_cA.png</file>
+        <file>images/deckskin_cs_cJ.png</file>
+        <file>images/deckskin_cs_cQ.png</file>
+        <file>images/deckskin_cs_cK.png</file>
+        <file>images/deckskin_cs_dA.png</file>
+        <file>images/deckskin_cs_dJ.png</file>
+        <file>images/deckskin_cs_dQ.png</file>
+        <file>images/deckskin_cs_dK.png</file>
     </qresource>
     <qresource prefix="/fonts">
         <file>fonts/m6x11plus.ttf</file>

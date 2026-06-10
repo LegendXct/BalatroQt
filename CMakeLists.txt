@@ -83,10 +83,22 @@ qt_add_resources(BalatroQt "textures"
         resources/images/balatro.png
         resources/images/ShopSignAnimation.png
         resources/images/Vouchers.png
-        resources/images/deckskin_cs_J.png
-        resources/images/deckskin_cs_Q.png
-        resources/images/deckskin_cs_K.png
-        resources/images/deckskin_cs_A.png
+        resources/images/deckskin_cs_sA.png
+        resources/images/deckskin_cs_sJ.png
+        resources/images/deckskin_cs_sQ.png
+        resources/images/deckskin_cs_sK.png
+        resources/images/deckskin_cs_hA.png
+        resources/images/deckskin_cs_hJ.png
+        resources/images/deckskin_cs_hQ.png
+        resources/images/deckskin_cs_hK.png
+        resources/images/deckskin_cs_cA.png
+        resources/images/deckskin_cs_cJ.png
+        resources/images/deckskin_cs_cQ.png
+        resources/images/deckskin_cs_cK.png
+        resources/images/deckskin_cs_dA.png
+        resources/images/deckskin_cs_dJ.png
+        resources/images/deckskin_cs_dQ.png
+        resources/images/deckskin_cs_dK.png
 )
 
 
