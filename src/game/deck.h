@@ -26,6 +26,8 @@ public:
     const QVector<CardData> &drawPile() const { return mDrawPile; }
     const QVector<CardData> &discardPile() const { return mDiscardPile; }
     QVector<CardData> allKnownCards() const;
+    // 浅拷贝塔罗的状态同步：按 uid 在摸牌/弃牌堆中找牌（可变指针；找不到返回 nullptr）。
+    CardData *findByUid(int uid);
 };
 
 #endif // DECK_H

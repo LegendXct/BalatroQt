@@ -58,6 +58,10 @@ enum class ConsumableType {
     Spectral_Cryptid,    // 复制 1 张选中手牌 2 次
     Spectral_Soul,       // 生成 1 张传奇小丑
     Spectral_BlackHole,  // 所有牌型等级 +1
+
+    // ── 程设扩展塔罗（追加在枚举末尾，避免挪动 Tarots.png 图集映射；kindOf 显式归类） ──
+    Tarot_Iterator,      // 选≤2张：迭代器增强（每次打出后点数+1，K→A→2）
+    Tarot_ShallowCopy,   // 选2张：左牌浅拷贝右牌，两牌共享全部状态
 };
 
 struct UseContext {

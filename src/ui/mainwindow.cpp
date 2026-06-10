@@ -2562,6 +2562,7 @@ QVector<JokerType> collectionJokerOrder()
         JokerType::DriversLicense, JokerType::Cartomancer, JokerType::Astronomer, JokerType::BurntJoker,
         JokerType::Bootstraps, JokerType::Caino, JokerType::Triboulet, JokerType::Yorick,
         JokerType::Chicot, JokerType::Perkeo,
+        JokerType::OperatorOverload, JokerType::ClassTemplate,   // 程设扩展
     };
 }
 
@@ -2584,13 +2585,15 @@ QString collectionPlainText(QString text)
 
 QPixmap collectionJokerPixmap(JokerType type, const QSize &target)
 {
-    QPixmap sheet(QStringLiteral(":/textures/images/Jokers.png"));
-    if (sheet.isNull()) return QPixmap();
-
-    const QPoint c = JokerItem::spritePos(type);
-    const QRect src(c.x() * JokerItem::SRC_W, c.y() * JokerItem::SRC_H,
-                    JokerItem::SRC_W, JokerItem::SRC_H);
-    QPixmap body = sheet.copy(src);
+    QPixmap body = JokerItem::customCardPixmap(type);   // 程设扩展小丑专属贴图
+    if (body.isNull()) {
+        QPixmap sheet(QStringLiteral(":/textures/images/Jokers.png"));
+        if (sheet.isNull()) return QPixmap();
+        const QPoint c = JokerItem::spritePos(type);
+        const QRect src(c.x() * JokerItem::SRC_W, c.y() * JokerItem::SRC_H,
+                        JokerItem::SRC_W, JokerItem::SRC_H);
+        body = sheet.copy(src);
+    }
     QPixmap pix(JokerItem::SRC_W, JokerItem::SRC_H);
     pix.fill(Qt::transparent);
     {
@@ -2624,6 +2627,7 @@ QVector<ConsumableType> collectionConsumableOrder(ConsumableKind kind)
             ConsumableType::Tarot_Tower, ConsumableType::Tarot_Star,
             ConsumableType::Tarot_Moon, ConsumableType::Tarot_Sun,
             ConsumableType::Tarot_Judgement, ConsumableType::Tarot_World,
+            ConsumableType::Tarot_Iterator, ConsumableType::Tarot_ShallowCopy,   // 程设扩展
         };
     }
     if (kind == ConsumableKind::Planet) {
@@ -2789,6 +2793,7 @@ QRect collectionEnhancerRect(Enhancement enhancement)
     case Enhancement::Steel: return QRect(6 * CardItem::SRC_W, 1 * CardItem::SRC_H, CardItem::SRC_W, CardItem::SRC_H);
     case Enhancement::Stone: return QRect(5 * CardItem::SRC_W, 0 * CardItem::SRC_H, CardItem::SRC_W, CardItem::SRC_H);
     case Enhancement::Gold: return QRect(6 * CardItem::SRC_W, 0 * CardItem::SRC_H, CardItem::SRC_W, CardItem::SRC_H);
+    case Enhancement::Iterator:   // 迭代器：白底 + 卡面蒙版（无图集贴图），走默认白色底片
     case Enhancement::None: break;
     }
     return QRect(1 * CardItem::SRC_W, 0 * CardItem::SRC_H, CardItem::SRC_W, CardItem::SRC_H);
@@ -2822,6 +2827,8 @@ QPixmap collectionPlayingCardPixmap(Enhancement enhancement, Seal seal, Edition 
             p.drawPixmap(QRect(0, 0, CardItem::SRC_W, CardItem::SRC_H),
                          deck, QRect(12 * CardItem::SRC_W, 0, CardItem::SRC_W, CardItem::SRC_H));
         }
+        if (enhancement == Enhancement::Iterator)
+            CardItem::drawIteratorOverlay(&p, QRectF(0, 0, CardItem::SRC_W, CardItem::SRC_H));
     }
     if (edition != Edition::None)
         body = BalatroShaders::renderEditionPixmap(body, edition);
@@ -2849,6 +2856,7 @@ QVector<CollectionCardModifierEntry> collectionEnhancementOrder()
         {QStringLiteral("石头牌"), QStringLiteral("+50 筹码，无点数花色"), Enhancement::Stone},
         {QStringLiteral("黄金牌"), QStringLiteral("回合结束时仍在手牌中，+$3"), Enhancement::Gold},
         {QStringLiteral("幸运牌"), QStringLiteral("1/5 概率 +20 倍率，1/15 概率 +$20"), Enhancement::Lucky},
+        {QStringLiteral("迭代器牌"), QStringLiteral("每次打出后点数 +1（K→A，A→2）"), Enhancement::Iterator},
     };
 }
 
@@ -3008,9 +3016,9 @@ void MainWindow::showCollectionOverlay()
         grid->addWidget(button, row, col);
         return button;
     };
-    QPushButton *jokerTile = addMain(0, 0, "小丑", "150 / 150");
+    QPushButton *jokerTile = addMain(0, 0, "小丑", "152 / 152");
     connect(jokerTile, &QPushButton::clicked, this, &MainWindow::showCollectionJokersOverlay);
-    QPushButton *enhancementTile = addMain(0, 1, "增强卡牌", "8 / 8");
+    QPushButton *enhancementTile = addMain(0, 1, "增强卡牌", "9 / 9");
     connect(enhancementTile, &QPushButton::clicked, this, &MainWindow::showCollectionEnhancementsOverlay);
     QPushButton *deckTile = addMain(1, 0, "牌组", "15 / 15");
     connect(deckTile, &QPushButton::clicked, this, &MainWindow::showCollectionDecksOverlay);
@@ -3036,7 +3044,7 @@ void MainWindow::showCollectionOverlay()
     label->setAlignment(Qt::AlignCenter);
     label->setStyleSheet("color:#60797f; background:transparent; border:none;");
     consumableGrid->addWidget(label, 0, 0, 3, 1);
-    auto *tarotTile = makeTile("塔罗牌", "22 / 22", "#a782d1", "#bc97e8", consumableBox);
+    auto *tarotTile = makeTile("塔罗牌", "24 / 24", "#a782d1", "#bc97e8", consumableBox);
     auto *planetTile = makeTile("星球牌", "12 / 12", "#009dff", "#2bb0ff", consumableBox);
     auto *spectralTile = makeTile("幻灵牌", "18 / 18", "#315dff", "#5076ff", consumableBox);
     consumableGrid->addWidget(tarotTile, 0, 1);
@@ -3083,7 +3091,7 @@ void MainWindow::showCollectionJokersOverlay()
     mCollectionOverlay->setGeometry(host->rect());
 
     QFont titleFont = mCNFont; titleFont.setPixelSize(uiPx(27)); titleFont.setBold(true);
-    auto *title = new QLabel("小丑\n150 / 150");
+    auto *title = new QLabel("小丑\n152 / 152");
     title->setFont(titleFont);
     title->setAlignment(Qt::AlignCenter);
     title->setStyleSheet("color:#ffffff; background:#fe5f55; border:none; border-radius:12px; padding:6px 0;");
@@ -9778,6 +9786,16 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev, double percent)
         mDisplayedMult = std::max(1.0, mDisplayedMult * ev.xmultValue);
         if (!std::isfinite(mDisplayedMult)) mDisplayedMult = std::numeric_limits<double>::infinity();
         setLabelScaledText(mLblMult, formatScoreNumber(mDisplayedMult), uiPx(42));
+        break;
+
+    case ScoreEventKind::ChipsXBoost:
+        // 运算符重载交换出的 ×筹码：蓝色 ×N 演出，乘到筹码计数上。
+        AudioManager::instance()->play(QStringLiteral("multhit2"), statusPitch, 0.7);
+        color = QColor("#009dff");
+        text = QStringLiteral("×%1").arg(QString::number(ev.xmultValue, 'g', 3));
+        mDisplayedChips = std::max(0.0, mDisplayedChips * ev.xmultValue);
+        if (!std::isfinite(mDisplayedChips)) mDisplayedChips = std::numeric_limits<double>::infinity();
+        setLabelScaledText(mLblChips, formatScoreNumber(mDisplayedChips), uiPx(42));
         break;
 
     case ScoreEventKind::DollarGain:

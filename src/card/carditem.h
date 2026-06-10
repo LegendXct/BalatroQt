@@ -42,6 +42,9 @@ public:
 
     static void loadResources();
     static QPixmap cardBackPixmap();   // 卡背贴图（牌组选择界面预览用）
+    // 迭代器增强（程设扩展）的卡面蒙版（enh_cs_iterator.png，透明底彩色装饰框）。
+    // CardItem / 查看牌组 / 商店 / 开包 的卡面合成路径共用，保证观感一致。
+    static void drawIteratorOverlay(QPainter *p, const QRectF &dst);
     explicit CardItem(const CardData &data, QGraphicsItem *parent = nullptr);
     ~CardItem() override;
     QRectF boundingRect() const override;

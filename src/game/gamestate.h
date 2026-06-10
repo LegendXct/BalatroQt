@@ -170,7 +170,13 @@ public:
     BossInfo currentBossInfo() const { return bossInfo(mBossEffect); }
 
     QVector<CardData> &handMutable() { return mHand; }
-    void notifyHandChanged() { emit handChanged(); }
+    // 手牌变化先做浅拷贝同步，再通知 UI——任何经 notifyHandChanged 收尾的卡牌
+    // 修改（塔罗增强/变点/变花色/Boss debuff 等）都会自动镜像到链接的另一侧。
+    void notifyHandChanged() { syncShallowLinks(); emit handChanged(); }
+
+    // ── 浅拷贝塔罗：两张牌共享状态（点数/花色/增强/版本/蜡封/debuff/永久加筹） ──
+    void registerShallowLink(int uidA, int uidB);
+    void syncShallowLinks();
 
     // 消耗品接口
     const QVector<Consumable> &consumables() const { return mConsumables; }
@@ -299,6 +305,18 @@ private:
     int  mTotalHandsPlayedThisRun = 0;     // Handy Tag 用：本局已打出的总手数（累加，不重置）
     int  mUnusedDiscardsThisRun = 0;       // Garbage Tag 用：上一回合结束时累加的"剩余弃牌数"
     void cleanupDepletedJokers();          // 移除计数耗尽的小丑（爆米花/拉面/苏打水/海龟豆）
+
+    // ── 浅拷贝塔罗（程设扩展） ──
+    // snapshot 记录上次同步后的两侧状态：哪侧与 snapshot 不一致即"写方"，把状态镜像给另一侧。
+    struct ShallowLink {
+        int uidA = -1, uidB = -1;
+        CardData snapA, snapB;             // 只比较/拷贝状态字段，uid 无意义
+    };
+    QVector<ShallowLink> mShallowLinks;
+    CardData *findCardByUidAnywhere(int uid);   // 手牌 → 摸牌堆 → 弃牌堆
+
+    // ── 运算符重载小丑（程设扩展）：事件流筹码/倍率互换 ──
+    void applyOperatorOverloadIfHeld(HandResult &result);
     BlindState mBlindStates[3] = {
         BlindState::Current, BlindState::Upcoming, BlindState::Upcoming
     };

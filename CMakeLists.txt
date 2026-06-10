@@ -99,6 +99,11 @@ qt_add_resources(BalatroQt "textures"
         resources/images/deckskin_cs_dJ.png
         resources/images/deckskin_cs_dQ.png
         resources/images/deckskin_cs_dK.png
+        resources/images/joker_cs_overload.png
+        resources/images/joker_cs_template.png
+        resources/images/tarot_cs_iterator.png
+        resources/images/tarot_cs_shallow.png
+        resources/images/enh_cs_iterator.png
 )
 
 

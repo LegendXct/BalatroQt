@@ -53,9 +53,43 @@ void ConsumableItem::loadResources() {
     if (sSheet->isNull()) qWarning("ConsumableItem: 加载 Tarots.png 失败");
 }
 
+namespace {
+// 程设扩展塔罗（迭代器/浅拷贝）的专属整卡贴图（142×190）；
+// 用图集愚者格 (0,0) 的 alpha 裁圆角，轮廓与其它塔罗一致。非扩展类型返回空。
+QPixmap customConsumablePixmap(ConsumableType t, const QPixmap *sheet)
+{
+    const char *res = nullptr;
+    switch (t) {
+    case ConsumableType::Tarot_Iterator:    res = ":/textures/images/tarot_cs_iterator.png"; break;
+    case ConsumableType::Tarot_ShallowCopy: res = ":/textures/images/tarot_cs_shallow.png";  break;
+    default: return QPixmap();
+    }
+    static QHash<int, QPixmap> cache;
+    const auto it = cache.constFind(int(t));
+    if (it != cache.constEnd()) return *it;
+
+    QPixmap cell(ConsumableItem::SRC_W, ConsumableItem::SRC_H);
+    cell.fill(Qt::transparent);
+    const QPixmap card{QString::fromLatin1(res)};
+    if (!card.isNull() && sheet && !sheet->isNull()) {
+        QPainter p(&cell);
+        p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        p.drawPixmap(QRect(0, 0, ConsumableItem::SRC_W, ConsumableItem::SRC_H), card);
+        p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+        p.drawPixmap(QRect(0, 0, ConsumableItem::SRC_W, ConsumableItem::SRC_H), *sheet,
+                     QRect(0, 0, ConsumableItem::SRC_W, ConsumableItem::SRC_H));
+    }
+    cache.insert(int(t), cell);
+    return cell;
+}
+}
+
 // 坐标取自原版 game.lua c_xxx pos
 QPoint ConsumableItem::spritePos(ConsumableType t) {
     switch (t) {
+    // 程设扩展：专属整卡贴图见 renderPixmap 的 custom 分支，不在图集里。
+    case ConsumableType::Tarot_Iterator:
+    case ConsumableType::Tarot_ShallowCopy:   return {0, 0};
     // 塔罗（原版 game.lua c_xxx pos）
     case ConsumableType::Tarot_Fool:          return {0, 0};
     case ConsumableType::Tarot_Magician:      return {1, 0};
@@ -142,7 +176,10 @@ QPixmap ConsumableItem::renderPixmap(ConsumableType type, bool negative)
     p.setRenderHint(QPainter::SmoothPixmapTransform, false);
     p.setRenderHint(QPainter::Antialiasing, true);
 
-    if (sSheet && !sSheet->isNull()) {
+    const QPixmap custom = customConsumablePixmap(type, sSheet);
+    if (!custom.isNull()) {
+        p.drawPixmap(QRect(0, 0, SRC_W, SRC_H), custom);
+    } else if (sSheet && !sSheet->isNull()) {
         QPoint c = spritePos(type);
         QRect src(c.x() * SRC_W, c.y() * SRC_H, SRC_W, SRC_H);
         p.drawPixmap(QRect(0, 0, SRC_W, SRC_H), *sSheet, src);

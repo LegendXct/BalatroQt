@@ -1,4 +1,5 @@
 #include "shopwidget.h"
+#include "../card/carditem.h"
 #include "../card/consumableitem.h"
 #include "../card/deckskin.h"
 #include "../card/jokeritem.h"
@@ -1580,11 +1581,14 @@ void ShopWidget::refresh()
 QPixmap ShopWidget::offerPixmap(const ShopOffer &o) const
 {
     if (o.kind == OfferKind::Joker) {
-        QPixmap sheet(":/textures/images/Jokers.png");
-        if (sheet.isNull()) return QPixmap();
-        QPoint c = JokerItem::spritePos(o.joker);
-        QPixmap pix = sheet.copy(c.x() * JokerItem::SRC_W, c.y() * JokerItem::SRC_H,
-                                 JokerItem::SRC_W, JokerItem::SRC_H);
+        QPixmap pix = JokerItem::customCardPixmap(o.joker);   // 程设扩展小丑专属贴图
+        if (pix.isNull()) {
+            QPixmap sheet(":/textures/images/Jokers.png");
+            if (sheet.isNull()) return QPixmap();
+            QPoint c = JokerItem::spritePos(o.joker);
+            pix = sheet.copy(c.x() * JokerItem::SRC_W, c.y() * JokerItem::SRC_H,
+                             JokerItem::SRC_W, JokerItem::SRC_H);
+        }
         // 全息投影 / 五张传奇牌：原版 card.lua:4512-4523 走 floating_sprite 浮动层。
         // 商店里如果只画 pos 主体，Hologram 看上去就是个空相框，传奇牌也少了肖像。
         {
@@ -1689,6 +1693,8 @@ QPixmap ShopWidget::playingCardPixmap(const CardData &c) const
         }
         p.drawPixmap(QRect(0, 0, W, H), deckSheet, QRect(col*W, row*H, W, H));
     }
+    if (c.enhancement == Enhancement::Iterator)
+        CardItem::drawIteratorOverlay(&p, QRectF(0, 0, W, H));
     p.end();
 
     if (c.edition != Edition::None)

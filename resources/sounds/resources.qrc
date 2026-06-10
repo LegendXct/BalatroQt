@@ -29,6 +29,11 @@
         <file>images/deckskin_cs_dJ.png</file>
         <file>images/deckskin_cs_dQ.png</file>
         <file>images/deckskin_cs_dK.png</file>
+        <file>images/joker_cs_overload.png</file>
+        <file>images/joker_cs_template.png</file>
+        <file>images/tarot_cs_iterator.png</file>
+        <file>images/tarot_cs_shallow.png</file>
+        <file>images/enh_cs_iterator.png</file>
     </qresource>
     <qresource prefix="/fonts">
         <file>fonts/m6x11plus.ttf</file>

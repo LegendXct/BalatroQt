@@ -76,6 +76,16 @@ void CardItem::loadResources() {
         qWarning("CardItem: Fail to Load Jokers.png");
 }
 
+void CardItem::drawIteratorOverlay(QPainter *p, const QRectF &dst)
+{
+    static QPixmap overlay(QStringLiteral(":/textures/images/enh_cs_iterator.png"));
+    if (overlay.isNull()) return;
+    const bool smooth = p->renderHints().testFlag(QPainter::SmoothPixmapTransform);
+    p->setRenderHint(QPainter::SmoothPixmapTransform, true);
+    p->drawPixmap(dst, overlay, QRectF(overlay.rect()));
+    p->setRenderHint(QPainter::SmoothPixmapTransform, smooth);
+}
+
 CardItem::CardItem(const CardData &data, QGraphicsItem *parent)
     : QGraphicsObject(parent)
     , mData(data)
@@ -243,6 +253,9 @@ void CardItem::paintFront(QPainter *painter)
             if (!enh.isNull()) bp.drawPixmap(cacheRect, *sEnhSheet, enh);
             if (mData.enhancement != Enhancement::Stone)
                 bp.drawPixmap(cacheRect, DeckSkin::deckSheet(), deckSrcRect());
+            // 迭代器增强：画在 body 里，让版本 shader / debuff 滤镜一并作用于装饰框。
+            if (mData.enhancement == Enhancement::Iterator)
+                drawIteratorOverlay(&bp, QRectF(cacheRect));
         }
 
         if (mData.edition != Edition::None)

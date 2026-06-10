@@ -952,13 +952,16 @@ QPixmap PackOpenWidget::renderOption(int i) const
     const QSize size(134, 180);
 
     if (mContent.kind == PackKind::Buffoon) {
-        QPixmap sheet(":/textures/images/Jokers.png");
-        if (sheet.isNull()) return QPixmap();
-        QPoint xy = JokerItem::spritePos(mContent.jokers[i]);
-        // Jokers.png 每格固定 142×190——必须使用 SRC_W / SRC_H 采样；之前用 WIDTH/HEIGHT
-        // (170×228 显示尺寸) 会按错误的步长切图，导致每张小丑里粘上隔壁单元的边缘。
-        QPixmap raw = sheet.copy(xy.x() * JokerItem::SRC_W, xy.y() * JokerItem::SRC_H,
-                                 JokerItem::SRC_W, JokerItem::SRC_H);
+        QPixmap raw = JokerItem::customCardPixmap(mContent.jokers[i]);   // 程设扩展小丑专属贴图
+        if (raw.isNull()) {
+            QPixmap sheet(":/textures/images/Jokers.png");
+            if (sheet.isNull()) return QPixmap();
+            QPoint xy = JokerItem::spritePos(mContent.jokers[i]);
+            // Jokers.png 每格固定 142×190——必须使用 SRC_W / SRC_H 采样；之前用 WIDTH/HEIGHT
+            // (170×228 显示尺寸) 会按错误的步长切图，导致每张小丑里粘上隔壁单元的边缘。
+            raw = sheet.copy(xy.x() * JokerItem::SRC_W, xy.y() * JokerItem::SRC_H,
+                             JokerItem::SRC_W, JokerItem::SRC_H);
+        }
         // 演示模式可以通过 pack.jokerEditions 给单张小丑挂版本（多彩/闪箔/镭射/负片）——
         // 包内 hover 时就应该看到 shader 效果，不能等买入后才显示。
         Edition ed = Edition::None;
@@ -1016,6 +1019,8 @@ QPixmap PackOpenWidget::renderPlayingCard(const CardData &c, const QSize &size) 
         }
         p.drawPixmap(QRect(0, 0, W, H), deckSheet, QRect(col*W, row*H, W, H));
     }
+    if (c.enhancement == Enhancement::Iterator)
+        CardItem::drawIteratorOverlay(&p, QRectF(0, 0, W, H));
     p.end();
 
     if (c.edition != Edition::None)

@@ -8,6 +8,67 @@
 #include <functional>
 #include <cmath>
 
+// ─────────────────── 程设扩展：C++ 概念道具的机制 helpers ───────────────────
+namespace {
+// 迭代器增强：每次打出后点数 +1，K→A→2 回绕（区别于"力量"塔罗的 nextRank：那个 A 封顶）。
+Rank iterNextRank(Rank r)
+{
+    return (r == Rank::Ace) ? Rank::Two : static_cast<Rank>(static_cast<int>(r) + 1);
+}
+
+// 类模板：牌型 → 构成张数（高牌1 对子2 三条3 两对/四条4 其余5）。
+int templateHandCards(HandType t)
+{
+    switch (t) {
+    case HandType::HighCard:     return 1;
+    case HandType::Pair:         return 2;
+    case HandType::ThreeOfAKind: return 3;
+    case HandType::TwoPair:
+    case HandType::FourOfAKind:  return 4;
+    default:                     return 5;
+    }
+}
+
+// 运算符重载：事件 kind 的筹码/倍率互换表（×倍率 → ×筹码用新 kind ChipsXBoost）。
+ScoreEventKind overloadSwappedKind(ScoreEventKind k)
+{
+    switch (k) {
+    case ScoreEventKind::ScoringCardChip:  return ScoreEventKind::EnhancementMult;
+    case ScoreEventKind::EditionChip:      return ScoreEventKind::EditionMult;
+    case ScoreEventKind::JokerChip:        return ScoreEventKind::JokerMult;
+    case ScoreEventKind::EnhancementMult:  return ScoreEventKind::ScoringCardChip;
+    case ScoreEventKind::EditionMult:      return ScoreEventKind::EditionChip;
+    case ScoreEventKind::JokerMult:        return ScoreEventKind::JokerChip;
+    case ScoreEventKind::EnhancementXMult:
+    case ScoreEventKind::EditionXMult:
+    case ScoreEventKind::SteelXMult:
+    case ScoreEventKind::JokerXMult:       return ScoreEventKind::ChipsXBoost;
+    default:                               return k;   // 金钱/再触发/碎裂等演出类事件不动
+    }
+}
+
+// 浅拷贝共享的状态字段比较/拷贝。uid / faceUp 是身份与动画字段，不参与；
+// isDebuffed 由 applyBossDebuffs 每次按规则重算，走快照差分会振荡，
+// 改在 applyBossDebuffs 末尾对链接对取 OR 单独同步。
+bool shallowStateEqual(const CardData &x, const CardData &y)
+{
+    return x.rank == y.rank && x.suit == y.suit
+        && x.enhancement == y.enhancement && x.edition == y.edition
+        && x.seal == y.seal
+        && x.permanentBonusChips == y.permanentBonusChips;
+}
+
+void shallowStateCopy(CardData &dst, const CardData &src)
+{
+    dst.rank = src.rank;
+    dst.suit = src.suit;
+    dst.enhancement = src.enhancement;
+    dst.edition = src.edition;
+    dst.seal = src.seal;
+    dst.permanentBonusChips = src.permanentBonusChips;
+}
+} // namespace
+
 GameState::GameState(QObject *parent)
     : QObject{parent}
 {
@@ -990,6 +1051,27 @@ void GameState::playCards(const QVector<int> &indices) {
         }
     }
 
+    // 类模板（程设扩展）：未实例化(counter==0)时被本手牌型实例化并立即生效（D2 用户确认）；
+    // 已实例化则只对匹配牌型生效。事件走 JokerXMult，UI 复用现成 ×倍率演出。
+    for (int ji = 0; ji < mJokers.size(); ++ji) {
+        Joker &j = mJokers[ji];
+        if (j.type != JokerType::ClassTemplate || j.isDebuffed) continue;
+        if (j.counter == 0) {
+            j.counter = static_cast<int>(result.type) + 1;
+            j.description = QString("{C:attention}template<%1>{} 已实例化\n"
+                                    "打出{C:attention}%1{}时 {X:mult,C:white}×%2{}\n"
+                                    "{C:inactive}Boss 击败后重置")
+                                .arg(HandEvaluator::handTypeName(result.type))
+                                .arg(templateHandCards(result.type));
+            emit jokersChanged();
+        }
+        if (j.counter == static_cast<int>(result.type) + 1) {
+            const double x = templateHandCards(result.type);
+            result.xmult *= x;
+            result.events.append({ ScoreEventKind::JokerXMult, -1, -1, ji, 0, x });
+        }
+    }
+
     // 只缓存本手最终分。真正加到回合总分，要等 UI 播完逐张牌/小丑动画之后。
     if (hasVoucher(VoucherType::Observatory)) {
         for (const Consumable &c : mConsumables) {
@@ -1000,6 +1082,9 @@ void GameState::playCards(const QVector<int> &indices) {
         }
     }
 
+    // 运算符重载（程设扩展）：全部事件生成完毕后统一交换筹码/倍率贡献并重算。
+    applyOperatorOverloadIfHeld(result);
+
     mPendingHandScore = result.chips * result.mult * result.xmult;
     if (!std::isfinite(mPendingHandScore)) mPendingHandScore = std::numeric_limits<double>::infinity();
     mPendingPlayedIndices = sorted;
@@ -1007,6 +1092,85 @@ void GameState::playCards(const QVector<int> &indices) {
     mAwaitingScoreFinalize = true;
     mLastResult = result;
     emit handPlayed();
+}
+
+CardData *GameState::findCardByUidAnywhere(int uid)
+{
+    for (CardData &c : mHand)
+        if (c.uid == uid) return &c;
+    return mDeck.findByUid(uid);
+}
+
+void GameState::registerShallowLink(int uidA, int uidB)
+{
+    if (uidA == uidB) return;
+    // 每张牌只保留一条链接：旧链接涉及任一侧时先拆除（再次浅拷贝 = 重定向）。
+    for (int i = mShallowLinks.size() - 1; i >= 0; --i) {
+        const ShallowLink &l = mShallowLinks[i];
+        if (l.uidA == uidA || l.uidB == uidA || l.uidA == uidB || l.uidB == uidB)
+            mShallowLinks.removeAt(i);
+    }
+    CardData *a = findCardByUidAnywhere(uidA);
+    CardData *b = findCardByUidAnywhere(uidB);
+    if (!a || !b) return;
+    ShallowLink link;
+    link.uidA = uidA; link.uidB = uidB;
+    link.snapA = *a;  link.snapB = *b;
+    mShallowLinks.append(link);
+}
+
+void GameState::syncShallowLinks()
+{
+    for (int i = mShallowLinks.size() - 1; i >= 0; --i) {
+        ShallowLink &l = mShallowLinks[i];
+        CardData *a = findCardByUidAnywhere(l.uidA);
+        CardData *b = findCardByUidAnywhere(l.uidB);
+        if (!a || !b) { mShallowLinks.removeAt(i); continue; }   // 任一侧被摧毁 → 解除链接
+        const bool aChanged = !shallowStateEqual(*a, l.snapA);
+        const bool bChanged = !shallowStateEqual(*b, l.snapB);
+        if (aChanged)      shallowStateCopy(*b, *a);   // 双侧同时变化的罕见情形以 A 侧为准
+        else if (bChanged) shallowStateCopy(*a, *b);
+        l.snapA = *a;
+        l.snapB = *b;
+    }
+}
+
+void GameState::applyOperatorOverloadIfHeld(HandResult &result)
+{
+    bool held = false;
+    for (const Joker &j : mJokers)
+        if (j.type == JokerType::OperatorOverload && !j.isDebuffed) { held = true; break; }
+    if (!held) return;
+
+    // 把每个事件的筹码/倍率方向互换，再按 UI 的回放规则（playScoreEvent：从
+    // baseChips/baseMult 起步，+ 项累加、× 项乘进对应计数）重算最终值——保证
+    // 屏幕动画终值与结算分严格一致。牌型基础值不交换（D1）。
+    double chips = result.baseChips;
+    double mult  = result.baseMult;
+    for (ScoreEvent &ev : result.events) {
+        ev.kind = overloadSwappedKind(ev.kind);
+        switch (ev.kind) {
+        case ScoreEventKind::ScoringCardChip:
+        case ScoreEventKind::EditionChip:
+        case ScoreEventKind::JokerChip:
+            chips += ev.intValue; break;
+        case ScoreEventKind::EnhancementMult:
+        case ScoreEventKind::EditionMult:
+        case ScoreEventKind::JokerMult:
+            mult += ev.intValue; break;
+        case ScoreEventKind::EnhancementXMult:
+        case ScoreEventKind::EditionXMult:
+        case ScoreEventKind::SteelXMult:
+        case ScoreEventKind::JokerXMult:
+            mult *= ev.xmultValue; break;        // 与 UI 一致：×倍率折进 mult
+        case ScoreEventKind::ChipsXBoost:
+            chips *= ev.xmultValue; break;       // 交换出来的 ×筹码
+        default: break;
+        }
+    }
+    result.chips = chips;
+    result.mult  = mult;
+    result.xmult = 1.0;   // 全部折算完毕，终算 chips×mult×1
 }
 
 void GameState::finalizePlayedHand()
@@ -1062,10 +1226,15 @@ void GameState::finalizePlayedHand()
         if (broken) {
             notifyPlayingCardDestroyed(mHand[pr.first]);
         } else {
+            // 迭代器增强（程设扩展）：每次打出后点数 +1（K→A→2），随牌进弃牌堆持续生效。
+            if (mHand[pr.first].enhancement == Enhancement::Iterator)
+                mHand[pr.first].rank = iterNextRank(mHand[pr.first].rank);
             mDeck.discard(mHand[pr.first]);
         }
         mHand.removeAt(pr.first);
     }
+    // 打出的牌点数可能变化（迭代器）/被摧毁（玻璃）——同步浅拷贝链接的另一侧。
+    syncShallowLinks();
 
     // DNA 复制牌已经在 playCards() 的 context.before 阶段加入 mHand，
     // 这里仅清理旧路径的临时缓存，避免遗留状态影响下一手。
@@ -1205,6 +1374,14 @@ void GameState::finishWinningRound()
                 break;
             case JokerType::Campfire:
                 if (bossDefeated) j.counter = 0;
+                break;
+            case JokerType::ClassTemplate:
+                // 类模板（程设扩展）：Boss 击败后回到未实例化状态。
+                if (bossDefeated) {
+                    j.counter = 0;
+                    j.description = createJoker(JokerType::ClassTemplate).description;
+                    emit jokersChanged();
+                }
                 break;
             case JokerType::TurtleBean:
                 j.counter -= 1;
@@ -1530,6 +1707,19 @@ void GameState::applyBossDebuffs() {
         if (!bossDisabled && mBossEffect == BossEffect::VerdantLeaf && mVerdantLeafActive)
             d = true;
         c.isDebuffed = d;
+    }
+    // 浅拷贝链接共享 debuff：任一侧被禁用则两侧都禁用。debuff 每次按规则重算，
+    // 不能走快照差分（会和规则互相覆盖形成振荡），这里直接取 OR。
+    for (const ShallowLink &l : mShallowLinks) {
+        CardData *a = nullptr, *b = nullptr;
+        for (CardData &c : mHand) {
+            if (c.uid == l.uidA) a = &c;
+            else if (c.uid == l.uidB) b = &c;
+        }
+        if (a && b && (a->isDebuffed || b->isDebuffed)) {
+            a->isDebuffed = true;
+            b->isDebuffed = true;
+        }
     }
 }
 
@@ -2202,6 +2392,15 @@ double GameState::simulatePlayScore(const QVector<int> &orderedIndices)
             default: break;
             }
         }
+    }
+
+    // 类模板（程设扩展）干跑近似：未实例化时任何牌型都会被实例化并立即吃倍率（D2），
+    // 已实例化只对匹配牌型生效。运算符重载的交换不进干跑——干跑没有完整事件流，
+    // "最佳出牌"按未交换分数排序，是可接受的近似。
+    for (const Joker &j : mJokers) {
+        if (j.type != JokerType::ClassTemplate || j.isDebuffed) continue;
+        if (j.counter == 0 || j.counter == static_cast<int>(result.type) + 1)
+            result.xmult *= templateHandCards(result.type);
     }
 
     if (hasVoucher(VoucherType::Observatory)) {
@@ -2878,6 +3077,7 @@ void GameState::startGame()
 
     mDeck = Deck();
     mHand.clear();
+    mShallowLinks.clear();   // 浅拷贝链接随上一局的卡牌一并失效
     mAwaitingScoreFinalize = false;
     mPendingHandScore = 0;
     mPendingPlayedIndices.clear();

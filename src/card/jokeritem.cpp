@@ -167,8 +167,39 @@ void JokerItem::loadResources() {
 }
 
 // 坐标取自原版 game.lua 的 j_xxx pos = {x=?, y=?}
+QPixmap JokerItem::customCardPixmap(JokerType t)
+{
+    const char *res = nullptr;
+    switch (t) {
+    case JokerType::OperatorOverload: res = ":/textures/images/joker_cs_overload.png"; break;
+    case JokerType::ClassTemplate:    res = ":/textures/images/joker_cs_template.png"; break;
+    default: return QPixmap();
+    }
+    static QHash<int, QPixmap> cache;
+    const auto it = cache.constFind(int(t));
+    if (it != cache.constEnd()) return *it;
+
+    if (!sSheet || sSheet->isNull()) loadResources();
+    QPixmap cell(SRC_W, SRC_H);
+    cell.fill(Qt::transparent);
+    const QPixmap card{QString::fromLatin1(res)};
+    if (!card.isNull() && sSheet && !sSheet->isNull()) {
+        QPainter p(&cell);
+        p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        p.drawPixmap(QRect(0, 0, SRC_W, SRC_H), card);
+        // 用图集 (0,0) 基础小丑格的 alpha 当圆角剪影，轮廓与其它小丑完全一致。
+        p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+        p.drawPixmap(QRect(0, 0, SRC_W, SRC_H), *sSheet, QRect(0, 0, SRC_W, SRC_H));
+    }
+    cache.insert(int(t), cell);
+    return cell;
+}
+
 QPoint JokerItem::spritePos(JokerType t) {
     switch (t) {
+    // 程设扩展：专属整卡贴图见 customCardPixmap()，不在图集里。
+    case JokerType::OperatorOverload:
+    case JokerType::ClassTemplate:   return {0, 0};
     case JokerType::Joker:           return {0, 0};
     case JokerType::JollyJoker:      return {2, 0};
     case JokerType::ZanyJoker:       return {3, 0};
@@ -437,9 +468,12 @@ void JokerItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) 
         QPainter cp(&pix);
         cp.setRenderHint(QPainter::SmoothPixmapTransform, false);
         cp.setRenderHint(QPainter::Antialiasing, true);
-        QPoint c = spritePos(mJoker.type);
-        QRect src(c.x() * SRC_W, c.y() * SRC_H, SRC_W, SRC_H);
-        QPixmap body = sSheet->copy(src);
+        QPixmap body = customCardPixmap(mJoker.type);
+        if (body.isNull()) {
+            QPoint c = spritePos(mJoker.type);
+            QRect src(c.x() * SRC_W, c.y() * SRC_H, SRC_W, SRC_H);
+            body = sSheet->copy(src);
+        }
         if (mJoker.edition != Edition::None)
             body = BalatroShaders::renderEditionPixmap(body, mJoker.edition);
         if (mJoker.isDebuffed)

@@ -1,6 +1,7 @@
 #include "deckviewwidget.h"
 #include "balatroinfopanel.h"
 #include "cardtooltipformat.h"
+#include "../card/carditem.h"
 #include "../card/consumableitem.h"
 #include "../card/deckskin.h"
 #include <QVBoxLayout>
@@ -555,6 +556,8 @@ QPixmap DeckViewWidget::renderCard(const CardData &c, const QSize &size) const
         }
         p.drawPixmap(QRect(0, 0, W, H), deckSheet, QRect(col*W, row*H, W, H));
     }
+    if (c.enhancement == Enhancement::Iterator)
+        CardItem::drawIteratorOverlay(&p, QRectF(0, 0, W, H));
 
     int sCol = -1, sRow = 0;
     switch (c.seal) {

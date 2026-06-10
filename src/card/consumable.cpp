@@ -5,6 +5,9 @@
 #include <algorithm>
 
 ConsumableKind kindOf(ConsumableType t) {
+    // 程设扩展塔罗追加在枚举末尾（保持图集映射稳定），需在区间判断之前显式归类。
+    if (t == ConsumableType::Tarot_Iterator || t == ConsumableType::Tarot_ShallowCopy)
+        return ConsumableKind::Tarot;
     if (static_cast<int>(t) < static_cast<int>(ConsumableType::Planet_Pluto))
         return ConsumableKind::Tarot;
     if (static_cast<int>(t) < static_cast<int>(ConsumableType::Spectral_Familiar))
@@ -193,6 +196,23 @@ static void deathConvertSelected(UseContext &ctx)
     const int aUid = hand[a].uid;
     hand[a] = hand[b];
     hand[a].uid = aUid;
+    ctx.state.notifyHandChanged();
+}
+
+// 浅拷贝（程设扩展）：左牌变为右牌的副本（保 uid，同死神），并登记共享链接——
+// 此后任一侧的点数/花色/增强/版本/蜡封/debuff 变化都会同步到另一侧
+// （见 GameState::syncShallowLinks）。任一侧被摧毁则链接解除。
+static void shallowCopySelected(UseContext &ctx)
+{
+    if (ctx.selectedHandIdx.size() != 2) return;
+    auto &hand = ctx.state.handMutable();
+    int a = ctx.selectedHandIdx[0];
+    int b = ctx.selectedHandIdx[1];
+    if (a < 0 || a >= hand.size() || b < 0 || b >= hand.size() || a == b) return;
+    const int aUid = hand[a].uid;
+    hand[a] = hand[b];
+    hand[a].uid = aUid;
+    ctx.state.registerShallowLink(aUid, hand[b].uid);
     ctx.state.notifyHandChanged();
 }
 
@@ -550,6 +570,25 @@ Consumable createConsumable(ConsumableType type) {
         c.needsSelection = 0; c.maxSelection = 0;
         c.effect = [](UseContext &ctx) { ctx.state.levelUpAllHands(1); };
         break;
+
+    // ── 程设扩展塔罗 ──
+    case ConsumableType::Tarot_Iterator:
+        c.name = "迭代器";
+        c.description = "至多 {C:attention}2{} 张选定手牌\n"
+                        "获得 {C:attention}迭代器{} 增强\n"
+                        "每次打出后点数 {C:attention}+1{}（K→A→2）";
+        c.needsSelection = 1; c.maxSelection = 2;
+        c.effect = [](UseContext &ctx) { enhanceSelected(ctx, Enhancement::Iterator, 2); };
+        break;
+    case ConsumableType::Tarot_ShallowCopy:
+        c.name = "浅拷贝";
+        c.description = "选定 {C:attention}2{} 张：\n"
+                        "{C:attention}靠左{} 浅拷贝 {C:attention}靠右{} 那张\n"
+                        "两张牌{C:attention}共享状态{}，改一张同步另一张\n"
+                        "{C:inactive}（拖动可调位置）";
+        c.needsSelection = 2; c.maxSelection = 2;
+        c.effect = [](UseContext &ctx) { shallowCopySelected(ctx); };
+        break;
     }
     return c;
 }
@@ -567,6 +606,7 @@ ConsumableType randomTarotType() {
         ConsumableType::Tarot_Tower, ConsumableType::Tarot_Star,
         ConsumableType::Tarot_Moon, ConsumableType::Tarot_Sun,
         ConsumableType::Tarot_Judgement, ConsumableType::Tarot_World,
+        ConsumableType::Tarot_Iterator, ConsumableType::Tarot_ShallowCopy,   // 程设扩展
     };
     int n = int(sizeof(pool)/sizeof(pool[0]));
     return pool[QRandomGenerator::global()->bounded(n)];

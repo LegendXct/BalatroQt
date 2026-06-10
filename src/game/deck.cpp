@@ -94,3 +94,10 @@ QVector<CardData> Deck::allKnownCards() const
         out.append(clearTransientFlags(c));
     return out;
 }
+
+CardData *Deck::findByUid(int uid)
+{
+    for (CardData &c : mDrawPile)    if (c.uid == uid) return &c;
+    for (CardData &c : mDiscardPile) if (c.uid == uid) return &c;
+    return nullptr;
+}

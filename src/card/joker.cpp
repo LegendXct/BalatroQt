@@ -143,6 +143,8 @@ int jokerBaseCost(JokerType t)
     case JokerType::Chicot:
     case JokerType::Perkeo: return 20;
     case JokerType::JokerStencil: return 8;
+    case JokerType::OperatorOverload:
+    case JokerType::ClassTemplate: return 8;
     case JokerType::SteelJoker:   return 7;
     case JokerType::StoneJoker:   return 6;
     case JokerType::BlueJoker:    return 5;
@@ -315,6 +317,8 @@ JokerRarity jokerRarity(JokerType t) {
     case JokerType::DriversLicense:
     case JokerType::BurntJoker:
     case JokerType::BaseballCard:
+    case JokerType::OperatorOverload:
+    case JokerType::ClassTemplate:
         return JokerRarity::Rare;
     // Legendary
     case JokerType::Caino:
@@ -360,6 +364,8 @@ bool jokerBlueprintCompatible(JokerType t)
     case JokerType::Satellite:
     case JokerType::Astronomer:
     case JokerType::Chicot:
+    case JokerType::OperatorOverload:   // 全局事件流变换，复制无意义
+    case JokerType::ClassTemplate:      // 自带实例化状态，复制语义不成立
         return false;
     default:
         return true;
@@ -1646,6 +1652,25 @@ Joker createJoker(JokerType type) {
         j.description = "商店中的所有星球牌和天体包免费";
         j.timing = TriggerTiming::Passive;
         j.effect = [](TriggerContext &) {};   // 由 Shop 定价处理
+        break;
+
+    case JokerType::OperatorOverload:
+        j.name = "运算符重载";
+        j.description = "计分时所有{C:chips}筹码{}与{C:mult}倍率{}的\n"
+                        "增减与倍乘{C:attention}互换{}\n"
+                        "{C:inactive}swap(mult, chips);";
+        j.timing = TriggerTiming::Passive;
+        j.effect = [](TriggerContext &) {};   // 交换在 GameState 计分事件流后处理统一执行
+        break;
+
+    case JokerType::ClassTemplate:
+        j.name = "类模板";
+        j.description = "{C:attention}template<?>{} 未实例化\n"
+                        "本底注打出的第一种牌型将其实例化\n"
+                        "此后该牌型{X:mult,C:white}×构成张数{}\n"
+                        "{C:inactive}Boss 击败后重置";
+        j.timing = TriggerTiming::OnPlayedHand;
+        j.effect = [](TriggerContext &) {};   // 实例化/倍率在 GameState 出牌管线专门处理（需改 counter）
         break;
 
     }

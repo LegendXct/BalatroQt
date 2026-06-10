@@ -981,6 +981,7 @@ QVector<JokerType> Shop::jokerPool() {
         JokerType::InvisibleJoker,
         JokerType::CreditCard, JokerType::MrBones, JokerType::DietCola,
         JokerType::FourFingers, JokerType::OopsAllSixes,
+        JokerType::OperatorOverload, JokerType::ClassTemplate,   // 程设扩展
     };
 }
 
