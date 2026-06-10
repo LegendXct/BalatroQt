@@ -91,5 +91,41 @@ class QueueGameDeck : public GameDeckType {
 
 ## 非目标（YAGNI）
 
-- 不做存档/牌组解锁条件；不做更多牌组（栈牌组等后续再加派生类）；
+- 不做存档/牌组解锁条件；
 - 不改 `DeckSkin`（换肤与游戏牌组正交，两者可同时生效）。
+
+---
+
+# 追加设计（2026-06-10 第二批，已与用户确认）
+
+## A. Bug 修复：队首标记进商店后未消失
+
+`layoutHandCards()` 在 `n == 0` 时提前 return，没有隐藏 `mQueueHeadLabel`——
+回合结束手牌收回牌组后标记残留在牌桌上。修复：`n == 0` 分支里先
+`mQueueHeadLabel->setVisible(false)` 再 return。
+
+## B. 栈牌组（Stack Deck）
+
+与队列牌组一致的部分：+1 出牌/+1 弃牌、禁排序/拖拽重排（`allowHandSort=false`，
+手牌锁定抽牌序）、卡背色相偏移区分。
+
+差异：**不限选牌窗口**（全手牌可选），唯一约束是**最新到手的"栈顶"牌
+（`mHand` 末位）必须被选中**才能出牌/弃牌——交互仿蔚蓝铃铛：栈顶牌自动强制
+选中、点击不可取消。
+
+### 实现
+
+- `GameDeckType` 新增虚函数：
+  - `bool mustIncludeNewest() const { return false; }` —— 栈牌组返回 true；
+  - `QString handMarkerText() const { return {}; }` —— 队列返回"队首 →"、栈返回"← 栈顶"、基础返回空（不显示）；
+  - `bool handMarkerAtTail() const { return false; }` —— 栈牌组 true（标记挂手牌行尾）。
+- `StackGameDeck` 派生类 + `GameDeckId::Stack` + 工厂 case。
+- `GameState`：
+  - `playCards`/`discardCards`：`mustIncludeNewest()` 时校验 indices 含 `mHand.size()-1`，否则拒绝；
+  - `findBestPlay`：`mustIncludeNewest()` 时栈顶作为强制包含项（与蔚蓝铃铛 forcedIdx 同机制）。
+- `MainWindow`：
+  - `refreshHand`：栈牌组下自动强制选中栈顶（仿蔚蓝铃铛块，限 Blind 阶段且非计分中）；
+  - `onCardClicked`：栈顶牌不可取消选中（与 isForced 同分支）；
+  - `layoutHandCards` 标记块泛化：文案/位置由 `handMarkerText()`/`handMarkerAtTail()` 决定。
+- `DeckSelectWidget`：第三个选项（色相偏移取另一角度），面板宽度 560→640 容纳三张卡背。
+- 蔚蓝铃铛与栈顶强制可共存（两张强制牌 ≤ 5 上限）；灵媒（必须 5 张）可满足。
