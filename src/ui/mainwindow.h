@@ -51,6 +51,7 @@ class QPropertyAnimation;
 class QGraphicsObject;
 class FlameTile;
 class BalatroInfoCluster;
+class DeckSelectWidget;
 
 class MainWindow : public QMainWindow
 {
@@ -471,6 +472,10 @@ private:
     // 队列牌组：手牌左上"队首"标记 + 按当前牌组启/禁排序按钮。
     QGraphicsTextItem *mQueueHeadLabel = nullptr;
     void updateSortButtonsForDeck();
+    // 开局牌组选择层：主菜单"开始游戏"→ 选牌组 → 开局；局内"新的一局"复用上次选择。
+    QPointer<DeckSelectWidget> mDeckSelectOverlay;
+    GameDeckId mSelectedGameDeckId = GameDeckId::Base;
+    void showDeckSelectOverlay();
     // 主菜单红蓝漩涡背景：用离屏 FBO 渲成 QPixmap 贴到普通 QLabel 上，再用定时器逐帧刷新。
     // 不用嵌套 QOpenGLWidget——后者在部分驱动上无法盖住底层 GL 场景，漩涡根本不显示。
     QPointer<QLabel> mMenuBgLabel;

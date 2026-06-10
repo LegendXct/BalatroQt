@@ -41,6 +41,7 @@ public:
     // ──────────────────────────────────────────────────
 
     static void loadResources();
+    static QPixmap cardBackPixmap();   // 卡背贴图（牌组选择界面预览用）
     explicit CardItem(const CardData &data, QGraphicsItem *parent = nullptr);
     ~CardItem() override;
     QRectF boundingRect() const override;

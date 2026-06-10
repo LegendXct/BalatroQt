@@ -20,6 +20,7 @@
 #include <QCursor>
 #include <QStringList>
 #include "shopsignwidget.h"
+#include "deckselectwidget.h"
 #include "scoreeffectsoverlays.h"   // FlameTile（底框+离屏火焰）
 #include <QParallelAnimationGroup>
 #include <QGraphicsOpacityEffect>
@@ -2193,6 +2194,8 @@ void MainWindow::startNewRunFromOptions()
     // 上一局可能升过 Flush 到 Lv.5；新局 startGame 清空 mHandLevels，但 mPrevHandLevels 还留着旧值。
     // 不重置的话，新局第一次买木星升 Flush=Lv.2 对比"旧 Lv.5"算成 0 个升级，侧栏演出被吞。
     mPrevHandLevels.clear();
+    // 把所选游戏牌组注入模型（局内"新的一局"路径复用上次选择）。
+    mGameState->setGameDeck(createGameDeck(mSelectedGameDeckId));
     mGameState->startGame();
     updateSortButtonsForDeck();
     mPrevHandLevels = mGameState->handLevels();
@@ -4289,8 +4292,7 @@ void MainWindow::showMainMenuOverlay()
     auto *btnPlay = makeBtn("开始游戏", "#009dff", "#0077c2", "#2bb0ff",
                             bigW, bigH, uiPx(22), true);
     connect(btnPlay, &QPushButton::clicked, this, [this]() {
-        hideMainMenuOverlay();
-        startNewRunFromOptions();
+        showDeckSelectOverlay();   // 先选牌组，再开局（主菜单保持在底下）
     });
 
     // 收藏不再单独占主菜单按钮——收进 "选项" 菜单里（与统计/定制牌组同级）。
@@ -4325,6 +4327,29 @@ void MainWindow::showMainMenuOverlay()
     layoutMainMenuContent();
     overlay->raise();
     overlay->show();
+}
+
+void MainWindow::showDeckSelectOverlay()
+{
+    if (mDeckSelectOverlay) {
+        mDeckSelectOverlay->deleteLater();
+        mDeckSelectOverlay = nullptr;
+    }
+    QWidget *host = centralWidget() ? centralWidget() : this;
+    auto *w = new DeckSelectWidget(mCNFont, host);
+    mDeckSelectOverlay = w;
+    connect(w, &DeckSelectWidget::cancelled, this, [this]() {
+        if (mDeckSelectOverlay) { mDeckSelectOverlay->deleteLater(); mDeckSelectOverlay = nullptr; }
+    });
+    connect(w, &DeckSelectWidget::startRequested, this, [this](GameDeckId id) {
+        mSelectedGameDeckId = id;
+        if (mDeckSelectOverlay) { mDeckSelectOverlay->deleteLater(); mDeckSelectOverlay = nullptr; }
+        hideMainMenuOverlay();
+        startNewRunFromOptions();
+    });
+    w->setGeometry(host->rect());
+    w->raise();
+    w->show();
 }
 
 void MainWindow::layoutMainMenuContent()
@@ -6524,6 +6549,8 @@ void MainWindow::resizeEvent(QResizeEvent *event)
         if (mPackOpenWidget)    { mPackOpenWidget   ->setGeometry(lowerOverlayRect()); if (mPackOpenWidget->isVisible())    mPackOpenWidget->raise(); }
         if (mSplashOverlay)     { mSplashOverlay    ->setGeometry(r);                 if (mSplashOverlay->isVisible())     mSplashOverlay->raise(); }
         if (mDeckViewWidget)    { mDeckViewWidget   ->setGeometry(r);                 if (mDeckViewWidget->isVisible())    mDeckViewWidget->raise(); }
+        if (mDeckSelectOverlay && centralWidget())
+            mDeckSelectOverlay->setGeometry(centralWidget()->rect());
     }
     if (mOptionsOverlay && centralWidget()) {
         mOptionsOverlay->setGeometry(centralWidget()->rect());
@@ -8240,6 +8267,8 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev)
         if (mShopWidget)        { mShopWidget       ->setGeometry(shopOverlayRect()); if (mShopWidget->isVisible())        mShopWidget->raise(); }
         if (mPackOpenWidget)    { mPackOpenWidget   ->setGeometry(lowerOverlayRect()); if (mPackOpenWidget->isVisible())    mPackOpenWidget->raise(); }
         if (mDeckViewWidget)    { mDeckViewWidget   ->setGeometry(r);                 if (mDeckViewWidget->isVisible())    mDeckViewWidget->raise(); }
+        if (mDeckSelectOverlay && centralWidget())
+            mDeckSelectOverlay->setGeometry(centralWidget()->rect());
         if (mOptionsOverlay && centralWidget()) {
             mOptionsOverlay->setGeometry(centralWidget()->rect());
             if (mOptionsOverlay->isVisible()) mOptionsOverlay->raise();

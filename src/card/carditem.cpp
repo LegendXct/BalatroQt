@@ -290,6 +290,11 @@ void CardItem::paintBack(QPainter *painter) {
     painter->drawPixmap(dst, *sEnhSheet, backSrc);
 }
 
+QPixmap CardItem::cardBackPixmap() {
+    if (!sEnhSheet || sEnhSheet->isNull()) return QPixmap();
+    return sEnhSheet->copy(0, 0, SRC_W, SRC_H);
+}
+
 void CardItem::setCardData(const CardData &data) {
     const bool wasAnimated = cardNeedsShaderTick(mData);
     // 保留当前的翻面状态——塔罗 / 幻灵牌应用增强期间，UI 会先把目标牌 flip() 翻成背面，
