@@ -1,5 +1,6 @@
 #include "shopwidget.h"
 #include "../card/consumableitem.h"
+#include "../card/deckskin.h"
 #include "../card/jokeritem.h"
 #include "../audio/audiomanager.h"
 #include "cardtooltipformat.h"
@@ -1655,7 +1656,8 @@ QPixmap ShopWidget::playingCardPixmap(const CardData &c) const
 {
     // 在图集原始 142×190 上合成；显示尺寸由 ShopCardButton 的绘制流程缩放。
     constexpr int W = ConsumableItem::SRC_W, H = ConsumableItem::SRC_H;
-    QPixmap deckSheet(":/textures/images/8BitDeck.png");
+    QPixmap deckSheet = DeckSkin::deckSheet();   // 跟随定制牌组换肤
+
     QPixmap enhSheet (":/textures/images/Enhancers.png");
     QPixmap pix(W, H); pix.fill(Qt::transparent);
     QPainter p(&pix);

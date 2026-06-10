@@ -1,5 +1,6 @@
 #include "packopenwidget.h"
 #include "../card/carditem.h"
+#include "../card/deckskin.h"
 #include "../card/jokeritem.h"
 #include "../card/consumableitem.h"
 #include "../utils/shadereffects.h"
@@ -981,7 +982,8 @@ QPixmap PackOpenWidget::renderPlayingCard(const CardData &c, const QSize &size) 
 {
     // 按图集原始 142×190 切取，最后 scaled() 输出实际显示尺寸。
     constexpr int W = ConsumableItem::SRC_W, H = ConsumableItem::SRC_H;
-    QPixmap deckSheet(":/textures/images/8BitDeck.png");
+    QPixmap deckSheet = DeckSkin::deckSheet();   // 跟随定制牌组换肤
+
     QPixmap enhSheet (":/textures/images/Enhancers.png");
     QPixmap pix(W, H); pix.fill(Qt::transparent);
     QPainter p(&pix);

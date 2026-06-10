@@ -23,6 +23,7 @@ qt_add_executable(BalatroQt
     src/game/demoscript.h src/game/demoscript.cpp
     src/card/cardshadow.h src/card/cardshadow.cpp
     src/card/carditem.h src/card/carditem.cpp
+    src/card/deckskin.h src/card/deckskin.cpp
     src/ui/roundendoverlay.h src/ui/roundendoverlay.cpp
     src/card/jokeritem.h src/card/jokeritem.cpp
     src/game/shop.h src/game/shop.cpp
@@ -80,6 +81,10 @@ qt_add_resources(BalatroQt "textures"
         resources/images/balatro.png
         resources/images/ShopSignAnimation.png
         resources/images/Vouchers.png
+        resources/images/deckskin_cs_J.png
+        resources/images/deckskin_cs_Q.png
+        resources/images/deckskin_cs_K.png
+        resources/images/deckskin_cs_A.png
 )
 
 

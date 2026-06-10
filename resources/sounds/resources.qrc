@@ -13,6 +13,10 @@
         <file>images/balatro.png</file>
         <file>images/ShopSignAnimation.png</file>
         <file>images/Vouchers.png</file>
+        <file>images/deckskin_cs_J.png</file>
+        <file>images/deckskin_cs_Q.png</file>
+        <file>images/deckskin_cs_K.png</file>
+        <file>images/deckskin_cs_A.png</file>
     </qresource>
     <qresource prefix="/fonts">
         <file>fonts/m6x11plus.ttf</file>

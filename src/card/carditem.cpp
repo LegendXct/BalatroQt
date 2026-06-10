@@ -22,6 +22,7 @@
 #include "../audio/audiomanager.h"
 #include "../utils/shadereffects.h"
 #include "cardshadow.h"
+#include "deckskin.h"
 #include <QGraphicsScene>
 
 QPixmap *CardItem::sDeckSheet = nullptr;
@@ -222,7 +223,9 @@ void CardItem::paintFront(QPainter *painter)
                       + QString::number(int(mData.edition)) + QLatin1Char('|')
                       + QString::number(int(mData.seal)) + QLatin1Char('|')
                       + QString::number(mData.isDebuffed ? 1 : 0) + QLatin1Char('|')
-                      + QString::number(frame);
+                      + QString::number(frame) + QLatin1Char('|')
+                      // 掺入换肤代数：切换定制牌组后旧缓存条目自然失效，J/Q/K/A 立即换面。
+                      + QString::number(DeckSkin::generation());
 
     static QHash<QString, QPixmap> cache;
     static QStringList order;
@@ -239,7 +242,7 @@ void CardItem::paintFront(QPainter *painter)
             QRect enh = enhanceSrcRect();
             if (!enh.isNull()) bp.drawPixmap(cacheRect, *sEnhSheet, enh);
             if (mData.enhancement != Enhancement::Stone)
-                bp.drawPixmap(cacheRect, *sDeckSheet, deckSrcRect());
+                bp.drawPixmap(cacheRect, DeckSkin::deckSheet(), deckSrcRect());
         }
 
         if (mData.edition != Edition::None)

@@ -52,6 +52,7 @@
 #include "../utils/shadereffects.h"
 #include "../utils/gpueffectsrenderer.h"
 #include "../audio/audiomanager.h"
+#include "../card/deckskin.h"
 #include "../game/demoscript.h"
 #include "balatroinfopanel.h"
 #include "cardtooltipformat.h"
@@ -2156,7 +2157,7 @@ void MainWindow::showOptionsOverlay()
     back->setMinimumHeight(kBtnH);
     connect(back, &QPushButton::clicked, this, [this]() {
         hideOptionsOverlay();
-        resumeGameProcesses();
+        resumeGameIfNotInMenu();
     });
     v->addWidget(back);
 
@@ -2206,14 +2207,28 @@ void MainWindow::startNewRunFromOptions()
     if (mDynamicBg) mDynamicBg->update();
     update();
     hideOptionsOverlay();
+    // 选项菜单可能叠在主菜单上打开（主菜单 "选项" 不再隐藏主菜单），开新局要一并收掉。
+    hideMainMenuOverlay();
+}
+
+QWidget *MainWindow::menuOverlayHost()
+{
+    // 主菜单可见时这些界面要叠在主菜单之上——必须和主菜单同为 centralWidget() 的子级，
+    // raise() 才有效；mPlayPage 的子级永远盖不住挂在 centralWidget() 上的主菜单。
+    if (mMainMenuOverlay && mMainMenuOverlay->isVisible() && centralWidget())
+        return centralWidget();
+    return mPlayPage ? mPlayPage : this;
 }
 
 void MainWindow::showSettingsOverlay()
 {
     // 复用 options 覆盖层模式（in-scene QWidget）：避免在全屏 + QOpenGLWidget 场景里弹原生 QDialog。
-    QWidget *host = mPlayPage ? mPlayPage : this;
+    QWidget *host = menuOverlayHost();
 
     if (mSettingsOverlay) {
+        // 宿主可能在主菜单 / 局内之间切换（见 menuOverlayHost），复用前先挂回正确父级。
+        if (mSettingsOverlay->parentWidget() != host)
+            mSettingsOverlay->setParent(host);
         mSettingsOverlay->setGeometry(host->rect());
         mSettingsOverlay->raise();
         mSettingsOverlay->show();
@@ -2449,7 +2464,17 @@ void MainWindow::showSettingsOverlay()
 void MainWindow::hideSettingsOverlay()
 {
     if (mSettingsOverlay) mSettingsOverlay->hide();
-    resumeGameProcesses();
+    resumeGameIfNotInMenu();
+}
+
+void MainWindow::resumeGameIfNotInMenu()
+{
+    // 局内打开选项时 pauseGameProcesses() 停掉了计分链定时器/计分动画；从选项家族
+    // 任意界面退回对局界面都必须恢复，否则计分动画冻结、计分中的牌停在悬浮态。
+    // 主菜单仍可见 = 还停留在菜单语境：保持暂停（局内进程不能在主菜单背后跑），
+    // 由主菜单的 "继续 / 开始新的一局" 负责恢复或重置。
+    if (!(mMainMenuOverlay && mMainMenuOverlay->isVisible()))
+        resumeGameProcesses();
 }
 
 // ────────────────────────────────────────────────────────────────────────────
@@ -2772,7 +2797,7 @@ QRect collectionSealRect(Seal seal)
 QPixmap collectionPlayingCardPixmap(Enhancement enhancement, Seal seal, Edition edition, const QSize &target)
 {
     QPixmap enh(QStringLiteral(":/textures/images/Enhancers.png"));
-    QPixmap deck(QStringLiteral(":/textures/images/8BitDeck.png"));
+    QPixmap deck = DeckSkin::deckSheet();   // 跟随定制牌组换肤
     if (enh.isNull() || deck.isNull()) return QPixmap();
 
     QPixmap body(CardItem::SRC_W, CardItem::SRC_H);
@@ -2866,7 +2891,7 @@ QVector<CollectionDeckEntry> collectionDeckOrder()
 
 void MainWindow::showStatsOverlay()
 {
-    QWidget *host = mPlayPage ? mPlayPage : this;
+    QWidget *host = menuOverlayHost();
     if (mStatsOverlay) { mStatsOverlay->hide(); mStatsOverlay->deleteLater(); }
     auto p = makeOverlayPanel(host, dp(520), "#4bc292");
     mStatsOverlay = p.first;
@@ -2920,6 +2945,7 @@ void MainWindow::showStatsOverlay()
     );
     connect(back, &QPushButton::clicked, this, [this]() {
         if (mStatsOverlay) { mStatsOverlay->hide(); mStatsOverlay->deleteLater(); }
+        resumeGameIfNotInMenu();
     });
     p.second->addWidget(back);
 
@@ -2929,7 +2955,7 @@ void MainWindow::showStatsOverlay()
 
 void MainWindow::showCollectionOverlay()
 {
-    QWidget *host = mPlayPage ? mPlayPage : this;
+    QWidget *host = menuOverlayHost();
     if (mCollectionOverlay) { mCollectionOverlay->hide(); mCollectionOverlay->deleteLater(); }
     auto p = makeOverlayPanel(host, dp(920), "#a782d1");
     mCollectionOverlay = p.first;
@@ -3028,6 +3054,7 @@ void MainWindow::showCollectionOverlay()
     );
     connect(back, &QPushButton::clicked, this, [this]() {
         if (mCollectionOverlay) { mCollectionOverlay->hide(); mCollectionOverlay->deleteLater(); }
+        resumeGameIfNotInMenu();
     });
     p.second->addWidget(back);
 
@@ -3037,7 +3064,7 @@ void MainWindow::showCollectionOverlay()
 
 void MainWindow::showCollectionJokersOverlay()
 {
-    QWidget *host = mPlayPage ? mPlayPage : this;
+    QWidget *host = menuOverlayHost();
     if (mCollectionOverlay) { mCollectionOverlay->hide(); mCollectionOverlay->deleteLater(); }
     auto p = makeOverlayPanel(host, dp(1040), "#a782d1");
     mCollectionOverlay = p.first;
@@ -3145,7 +3172,7 @@ void MainWindow::showCollectionJokersOverlay()
 
 void MainWindow::showCollectionConsumablesOverlay(ConsumableKind kind)
 {
-    QWidget *host = mPlayPage ? mPlayPage : this;
+    QWidget *host = menuOverlayHost();
     if (mCollectionOverlay) { mCollectionOverlay->hide(); mCollectionOverlay->deleteLater(); }
 
     const QString titleText = collectionConsumableTitle(kind);
@@ -3254,7 +3281,7 @@ void MainWindow::showCollectionConsumablesOverlay(ConsumableKind kind)
 
 void MainWindow::showCollectionVouchersOverlay()
 {
-    QWidget *host = mPlayPage ? mPlayPage : this;
+    QWidget *host = menuOverlayHost();
     if (mCollectionOverlay) { mCollectionOverlay->hide(); mCollectionOverlay->deleteLater(); }
 
     const QVector<VoucherType> order = baseVoucherPool();
@@ -3363,7 +3390,7 @@ void MainWindow::showCollectionVouchersOverlay()
 
 void MainWindow::showCollectionTagsOverlay()
 {
-    QWidget *host = mPlayPage ? mPlayPage : this;
+    QWidget *host = menuOverlayHost();
     if (mCollectionOverlay) { mCollectionOverlay->hide(); mCollectionOverlay->deleteLater(); }
 
     const QVector<TagType> order = collectionTagOrder();
@@ -3452,7 +3479,7 @@ void MainWindow::showCollectionTagsOverlay()
 
 void MainWindow::showCollectionPacksOverlay()
 {
-    QWidget *host = mPlayPage ? mPlayPage : this;
+    QWidget *host = menuOverlayHost();
     if (mCollectionOverlay) { mCollectionOverlay->hide(); mCollectionOverlay->deleteLater(); }
 
     const QVector<CollectionPackEntry> order = collectionPackOrder();
@@ -3562,7 +3589,7 @@ void MainWindow::showCollectionPacksOverlay()
 
 void MainWindow::showCollectionBlindsOverlay()
 {
-    QWidget *host = mPlayPage ? mPlayPage : this;
+    QWidget *host = menuOverlayHost();
     if (mCollectionOverlay) { mCollectionOverlay->hide(); mCollectionOverlay->deleteLater(); }
 
     const QVector<CollectionBlindEntry> order = collectionBlindOrder();
@@ -3712,7 +3739,7 @@ static void addCollectionCardModifierCells(QWidget *content, QGridLayout *grid,
 
 void MainWindow::showCollectionEnhancementsOverlay()
 {
-    QWidget *host = mPlayPage ? mPlayPage : this;
+    QWidget *host = menuOverlayHost();
     if (mCollectionOverlay) { mCollectionOverlay->hide(); mCollectionOverlay->deleteLater(); }
     const QVector<CollectionCardModifierEntry> order = collectionEnhancementOrder();
     auto p = makeOverlayPanel(host, dp(620), "#fe5f55");
@@ -3754,7 +3781,7 @@ void MainWindow::showCollectionEnhancementsOverlay()
 
 void MainWindow::showCollectionSealsOverlay()
 {
-    QWidget *host = mPlayPage ? mPlayPage : this;
+    QWidget *host = menuOverlayHost();
     if (mCollectionOverlay) { mCollectionOverlay->hide(); mCollectionOverlay->deleteLater(); }
     const QVector<CollectionCardModifierEntry> order = collectionSealOrder();
     auto p = makeOverlayPanel(host, dp(620), "#fe5f55");
@@ -3796,7 +3823,7 @@ void MainWindow::showCollectionSealsOverlay()
 
 void MainWindow::showCollectionEditionsOverlay()
 {
-    QWidget *host = mPlayPage ? mPlayPage : this;
+    QWidget *host = menuOverlayHost();
     if (mCollectionOverlay) { mCollectionOverlay->hide(); mCollectionOverlay->deleteLater(); }
     const QVector<CollectionCardModifierEntry> order = collectionEditionOrder();
     auto p = makeOverlayPanel(host, dp(720), "#fe5f55");
@@ -3838,7 +3865,7 @@ void MainWindow::showCollectionEditionsOverlay()
 
 void MainWindow::showCollectionDecksOverlay()
 {
-    QWidget *host = mPlayPage ? mPlayPage : this;
+    QWidget *host = menuOverlayHost();
     if (mCollectionOverlay) { mCollectionOverlay->hide(); mCollectionOverlay->deleteLater(); }
 
     const QVector<CollectionDeckEntry> order = collectionDeckOrder();
@@ -3943,11 +3970,15 @@ void MainWindow::showCollectionDecksOverlay()
 
 void MainWindow::showDeckCustomizeOverlay()
 {
-    QWidget *host = mPlayPage ? mPlayPage : this;
+    // 复刻原版卡面皮肤界面：花色页签 + 人头牌预览 + ‹ 牌组名 › 切换器。
+    // 切换立即生效——只换 8BitDeck 图集贴图（见 DeckSkin），数值与游戏逻辑不变。
+    QWidget *host = menuOverlayHost();
     if (mDeckCustomizeOverlay) { mDeckCustomizeOverlay->hide(); mDeckCustomizeOverlay->deleteLater(); }
-    auto p = makeOverlayPanel(host, dp(460), "#fda200");
+    auto p = makeOverlayPanel(host, dp(760), "#fda200");
     mDeckCustomizeOverlay = p.first;
     mDeckCustomizeOverlay->setGeometry(host->rect());
+    QWidget *overlay = mDeckCustomizeOverlay;
+    overlay->setProperty("suitRow", 3);   // 默认选中黑桃（行 3），与原版演示一致
 
     QFont titleFont = mCNFont; titleFont.setPixelSize(uiPx(28)); titleFont.setBold(true);
     auto *title = new QLabel("定制牌组");
@@ -3955,11 +3986,140 @@ void MainWindow::showDeckCustomizeOverlay()
     title->setStyleSheet("color:#fda200; background:transparent; border:none;");
     p.second->addWidget(title);
 
-    auto *body = new QLabel("敬请期待");
-    QFont bf = mCNFont; bf.setPixelSize(uiPx(28)); bf.setBold(true);
-    body->setFont(bf); body->setAlignment(Qt::AlignCenter);
-    body->setStyleSheet("color:#eaffff; background:transparent; border:none; padding:36px 0;");
-    p.second->addWidget(body);
+    QFont tabFont = mCNFont; tabFont.setPixelSize(uiPx(17)); tabFont.setBold(true);
+
+    // —— 花色页签：黑桃 / 红桃 / 梅花 / 方片（行号对齐 CardItem::deckSrcRect）——
+    auto *tabRow = new QWidget;
+    tabRow->setStyleSheet("background:transparent; border:none;");
+    auto *th = new QHBoxLayout(tabRow);
+    th->setContentsMargins(0, 0, 0, 0);
+    th->setSpacing(dp(12));
+    const QPair<QString, int> suitTabs[] = {
+        { QStringLiteral("黑桃"), 3 }, { QStringLiteral("红桃"), 0 },
+        { QStringLiteral("梅花"), 1 }, { QStringLiteral("方片"), 2 },
+    };
+    QVector<QPushButton*> tabs;
+    for (const auto &st : suitTabs) {
+        auto *b = new QPushButton(st.first, tabRow);
+        b->setFont(tabFont);
+        b->setMinimumHeight(dp(48));
+        b->setCursor(Qt::PointingHandCursor);
+        b->setProperty("suitRow", st.second);
+        tabs.append(b);
+        th->addWidget(b, 1);
+    }
+    p.second->addWidget(tabRow);
+
+    auto styleTabs = [overlay, tabs]() {
+        const int row = overlay->property("suitRow").toInt();
+        for (auto *b : tabs) {
+            const bool on = b->property("suitRow").toInt() == row;
+            b->setStyleSheet(QString(
+                "QPushButton { background:#fe5f55; color:white; border:3px solid %1;"
+                " border-radius:%2px; font-weight:bold; padding:4px 10px; }"
+                "QPushButton:hover { background:#ff7066; }"
+            ).arg(on ? "#eaffff" : "#b8443c").arg(dp(10)));
+        }
+    };
+
+    // —— 卡面预览：深色底板上并排 A K Q J ——
+    auto *previewBox = new QWidget;
+    previewBox->setAttribute(Qt::WA_StyledBackground, true);
+    previewBox->setStyleSheet(QString(
+        "background:#141d20; border:2px solid #0c1315; border-radius:%1px;").arg(dp(12)));
+    auto *ph = new QHBoxLayout(previewBox);
+    ph->setContentsMargins(dp(18), dp(16), dp(18), dp(16));
+    ph->setSpacing(dp(14));
+    const QSize cardSz(dp(140), dp(187));
+    QVector<QLabel*> cardLabels;
+    for (int i = 0; i < 4; ++i) {
+        auto *lbl = new QLabel(previewBox);
+        lbl->setFixedSize(cardSz);
+        lbl->setAlignment(Qt::AlignCenter);
+        lbl->setStyleSheet("background:transparent; border:none;");
+        cardLabels.append(lbl);
+        ph->addWidget(lbl);
+    }
+    p.second->addWidget(previewBox, 0, Qt::AlignHCenter);
+
+    // 白底 + 当前皮肤图集的对应格子，在图集原始 142×190 上合成后再放大。
+    auto cardPixmap = [](int suitRow, int col, const QSize &target) {
+        constexpr int W = CardItem::SRC_W, H = CardItem::SRC_H;
+        static QPixmap enhSheet(QStringLiteral(":/textures/images/Enhancers.png"));
+        QPixmap cell(W, H);
+        cell.fill(Qt::transparent);
+        {
+            QPainter cp(&cell);
+            cp.drawPixmap(QRect(0, 0, W, H), enhSheet, QRect(1 * W, 0, W, H));
+            cp.drawPixmap(QRect(0, 0, W, H), DeckSkin::deckSheet(),
+                          QRect(col * W, suitRow * H, W, H));
+        }
+        return cell.scaled(target, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+    };
+    auto refreshCards = [overlay, cardLabels, cardPixmap, cardSz]() {
+        const int row = overlay->property("suitRow").toInt();
+        const int cols[4] = { 12, 11, 10, 9 };   // A K Q J（列号 = 点数-2）
+        for (int i = 0; i < cardLabels.size(); ++i)
+            cardLabels[i]->setPixmap(cardPixmap(row, cols[i], cardSz));
+    };
+
+    for (auto *b : tabs) {
+        connect(b, &QPushButton::clicked, this, [overlay, b, styleTabs, refreshCards]() {
+            overlay->setProperty("suitRow", b->property("suitRow").toInt());
+            styleTabs();
+            refreshCards();
+        });
+    }
+
+    // —— 牌组切换：‹ 名称 ›，点击箭头立即换肤并刷新预览 ——
+    auto *switchRow = new QWidget;
+    switchRow->setStyleSheet("background:transparent; border:none;");
+    auto *sh = new QHBoxLayout(switchRow);
+    sh->setContentsMargins(0, 0, 0, 0);
+    sh->setSpacing(dp(10));
+    const QString arrowQss = QString(
+        "QPushButton { background:#fe5f55; color:white; border:none;"
+        " border-radius:%1px; font-weight:bold; }"
+        "QPushButton:hover { background:#ff7066; }"
+        "QPushButton:pressed { background:#d94a42; }").arg(dp(10));
+    auto *prevBtn = new QPushButton("‹", switchRow);
+    auto *nextBtn = new QPushButton("›", switchRow);
+    auto *nameLbl = new QLabel(DeckSkin::name(DeckSkin::current()), switchRow);
+    for (auto *b : { prevBtn, nextBtn }) {
+        QFont af = mCNFont; af.setPixelSize(uiPx(24)); af.setBold(true);
+        b->setFont(af);
+        b->setFixedSize(dp(56), dp(52));
+        b->setCursor(Qt::PointingHandCursor);
+        b->setStyleSheet(arrowQss);
+    }
+    QFont nameFont = mCNFont; nameFont.setPixelSize(uiPx(19)); nameFont.setBold(true);
+    nameLbl->setFont(nameFont);
+    nameLbl->setAlignment(Qt::AlignCenter);
+    nameLbl->setMinimumHeight(dp(52));
+    nameLbl->setStyleSheet(QString(
+        "background:#fda200; color:white; border:none; border-radius:%1px;"
+        " padding:0 %2px;").arg(dp(10)).arg(dp(16)));
+    sh->addStretch(1);
+    sh->addWidget(prevBtn);
+    sh->addWidget(nameLbl, 1);
+    sh->addWidget(nextBtn);
+    sh->addStretch(1);
+    p.second->addWidget(switchRow);
+
+    auto cycleSkin = [this, nameLbl, refreshCards](int dir) {
+        const int n = DeckSkin::count();
+        const int idx = (int(DeckSkin::current()) + dir + n) % n;
+        DeckSkin::setCurrent(DeckSkin::Id(idx));
+        nameLbl->setText(DeckSkin::name(DeckSkin::current()));
+        refreshCards();
+        // 局内调出时让手牌/牌堆立刻按新皮肤重绘（CardItem 缓存 key 已掺入换肤代数）。
+        if (mView) mView->viewport()->update();
+    };
+    connect(prevBtn, &QPushButton::clicked, this, [cycleSkin]() { cycleSkin(-1); });
+    connect(nextBtn, &QPushButton::clicked, this, [cycleSkin]() { cycleSkin(+1); });
+
+    styleTabs();
+    refreshCards();
 
     auto *back = new QPushButton("返回");
     QFont btnFont = mCNFont; btnFont.setPixelSize(uiPx(20)); btnFont.setBold(true);
@@ -3972,6 +4132,7 @@ void MainWindow::showDeckCustomizeOverlay()
     );
     connect(back, &QPushButton::clicked, this, [this]() {
         if (mDeckCustomizeOverlay) { mDeckCustomizeOverlay->hide(); mDeckCustomizeOverlay->deleteLater(); }
+        resumeGameIfNotInMenu();
     });
     p.second->addWidget(back);
 
@@ -4079,7 +4240,7 @@ void MainWindow::showMainMenuOverlay()
 
     // ───────── 按钮容器（复刻原版 L_BLACK 圆角容器 + UIBox_button 配色/尺寸）─────────
     const int U = dp(74);                                   // 1 "card unit" ≈ dp(74)（按钮整体缩小）
-    const int bigW = 365 * U / 100, bigH = 155 * U / 100;   // Play/Collection: minw3.65 minh1.55
+    const int bigW = 365 * U / 100, bigH = 155 * U / 100;   // Play/Continue: minw3.65 minh1.55
     const int smW  = 265 * U / 100, smH  = 135 * U / 100;   // Options/Quit:    minw2.65 minh1.35
 
     auto *panel = new QWidget(overlay);
@@ -4123,18 +4284,12 @@ void MainWindow::showMainMenuOverlay()
         startNewRunFromOptions();
     });
 
-    auto *btnCollection = makeBtn("收藏", "#a782d1", "#7a5aa1", "#bc97e8",
-                                  bigW, bigH, uiPx(22), true);
-    connect(btnCollection, &QPushButton::clicked, this, [this]() {
-        hideMainMenuOverlay();
-        showCollectionOverlay();
-    });
-
+    // 收藏不再单独占主菜单按钮——收进 "选项" 菜单里（与统计/定制牌组同级）。
     auto *btnSettings = makeBtn("选项", "#fda200", "#c47d00", "#ffb730",
                                 smW, smH, uiPx(16), true);
     connect(btnSettings, &QPushButton::clicked, this, [this]() {
-        hideMainMenuOverlay();
-        showSettingsOverlay();
+        // 不隐藏主菜单：选项覆盖层直接叠在主菜单之上，停在选项一级菜单（不直跳设置）。
+        showOptionsOverlay();
     });
 
     auto *btnQuit = makeBtn("退出", "#fe5f55", "#c44840", "#ff7066",
@@ -4144,7 +4299,11 @@ void MainWindow::showMainMenuOverlay()
     // 继续当前局：仅当已开过至少一局后可用，启动直进主菜单时禁用（灰掉）。
     auto *btnContinue = makeBtn("继续", "#56a887", "#3f7e64", "#67c39e",
                                 bigW, bigH, uiPx(20), mHasOngoingRun);
-    connect(btnContinue, &QPushButton::clicked, this, &MainWindow::hideMainMenuOverlay);
+    connect(btnContinue, &QPushButton::clicked, this, [this]() {
+        hideMainMenuOverlay();
+        // 局内经 选项→主菜单 进来时游戏处于暂停（pauseGameProcesses），回局内要恢复。
+        resumeGameProcesses();
+    });
 
     panel->adjustSize();
     mMenuButtonPanel = panel;
