@@ -389,12 +389,14 @@ static auto suitComp = [](const CardData &a, const CardData &b) {
 };
 
 void GameState::sortHandByRank() {
+    if (!mGameDeck->allowHandSort()) return;   // 队列牌组：禁止整理手牌
     mSortMode = HandSortMode::ByRank;
     std::sort(mHand.begin(), mHand.end(), rankComp);
     emit handChanged();
 }
 
 void GameState::sortHandBySuit() {
+    if (!mGameDeck->allowHandSort()) return;   // 队列牌组：禁止整理手牌
     mSortMode = HandSortMode::BySuit;
     std::sort(mHand.begin(), mHand.end(), suitComp);
     emit handChanged();
@@ -591,8 +593,10 @@ void GameState::playCards(const QVector<int> &indices) {
 
     QVector<int> sorted = indices;
     std::sort(sorted.begin(), sorted.end());
+    const int playWin = mGameDeck->selectionWindow();
     for (int i : sorted) {
         if (i < 0 || i >= mHand.size()) return;
+        if (i >= playWin) { qWarning("playCards: 队列窗口外的牌 idx=%d", i); return; }
     }
 
     // 取出 played，评分动画期间暂时不补牌；补牌要等所有计分动画和收牌动画结束后再做。
@@ -1323,6 +1327,12 @@ void GameState::discardCards(const QVector<int> &indices)
     if (indices.isEmpty()) return;
     if (mDiscardLeft <= 0) return;
 
+    const int discardWin = mGameDeck->selectionWindow();
+    for (int i : indices) {
+        if (i < 0 || i >= mHand.size()) return;
+        if (i >= discardWin) { qWarning("discardCards: 队列窗口外的牌 idx=%d", i); return; }
+    }
+
     QVector<CardData> discarded;
     for (int i : indices) discarded.append(mHand[i]);
 
@@ -1680,6 +1690,7 @@ bool GameState::moveConsumable(int from, int to) {
 }
 
 bool GameState::moveHandCard(int from, int to) {
+    if (!mGameDeck->allowHandSort()) return false;   // 队列牌组：禁止拖拽重排
     if (from < 0 || from >= mHand.size() || to < 0 || to >= mHand.size()) return false;
     if (from == to) return true;
     mHand.move(from, to);
@@ -2912,7 +2923,8 @@ void GameState::startGame()
     mBossRerollsUsedThisAnte = 0;
     mBossMouthHasHand = false;
     mBossEyePlayedHands.clear();
-    mSortMode = HandSortMode::ByRank;
+    mSortMode = mGameDeck->allowHandSort() ? HandSortMode::ByRank
+                                           : HandSortMode::Manual;  // 队列牌组锁定抽牌序
     mCainoXMult = 1.0;
     mYorickXMult = 1.0;
     mYorickDiscardsRemaining = 23;
@@ -3031,7 +3043,8 @@ void GameState::startBlind(BlindType type)
     int handsJokerDelta = 0;
     for (const Joker &j : mJokers)
         if (!j.isDebuffed && j.type == JokerType::Troubadour) handsJokerDelta -= 1;
-    mHandsLeft = qMax(1, Constants::INITIAL_HANDS + mExtraHandsPerRound + handsJokerDelta);
+    mHandsLeft = qMax(1, Constants::INITIAL_HANDS + mExtraHandsPerRound
+                             + mGameDeck->extraHands() + handsJokerDelta);
     mBlindStartingHands = mHandsLeft;
     mHandTypesPlayedThisRound.clear();   // 锋利卡牌：新回合清空已打牌型
     // 城堡/邮件/偶像/古老 的每回合随机化移到下面 mDeck.reset() 之后，按真实牌组抽样。
@@ -3048,7 +3061,8 @@ void GameState::startBlind(BlindType type)
         if (j.type == JokerType::Drunkard)  discardJokerDelta += 1;
         if (j.type == JokerType::MerryAndy) discardJokerDelta += 3;
     }
-    mDiscardLeft = qMax(0, Constants::INITIAL_DISCARDS + mExtraDiscardsPerRound + discardJokerDelta);
+    mDiscardLeft = qMax(0, Constants::INITIAL_DISCARDS + mExtraDiscardsPerRound
+                               + mGameDeck->extraDiscards() + discardJokerDelta);
     mBlindStartingDiscards = mDiscardLeft;   // 延迟满足：判断本回合是否用过弃牌
 
     mCrimsonHeartDisabled = -1;
@@ -3244,7 +3258,9 @@ void GameState::refreshCeruleanForced()
     for (const CardData &c : mHand)
         if (c.uid == mCeruleanForcedUid) return;
     if (mHand.isEmpty()) { mCeruleanForcedUid = -1; return; }
-    mCeruleanForcedUid = mHand[QRandomGenerator::global()->bounded(mHand.size())].uid;
+    // 队列牌组：锁定目标限定在队首窗口内，避免与"窗口外不可选"冲突。
+    const int pickRange = qMin(mHand.size(), mGameDeck->selectionWindow());
+    mCeruleanForcedUid = mHand[QRandomGenerator::global()->bounded(pickRange)].uid;
 }
 
 void GameState::nextBlind()

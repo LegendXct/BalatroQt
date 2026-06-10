@@ -5,6 +5,8 @@
 #include <QVector>
 #include <QHash>
 #include <QSet>
+#include <memory>
+#include "gamedeck.h"
 #include "deck.h"
 #include "handevaluator.h"
 #include "../card/carddata.h"
@@ -74,7 +76,7 @@ public:
     int spendableGold() const { return mGold + (hasJokerType(JokerType::CreditCard) ? 20 : 0); }
     // 商店侧栏"预览下一回合"用：暴露当前的修正值（不含 Boss 影响——Boss 还没选）。
     int extraHandsPerRoundPreview() const {
-        int delta = mExtraHandsPerRound;
+        int delta = mExtraHandsPerRound + mGameDeck->extraHands();
         for (const Joker &j : mJokers) {
             if (j.isDebuffed) continue;
             if (j.type == JokerType::Troubadour) delta -= 1;
@@ -86,7 +88,7 @@ public:
     int totalHandsPlayedThisRun() const { return mTotalHandsPlayedThisRun; }
     int unusedDiscardsThisRun() const { return mUnusedDiscardsThisRun; }
     int extraDiscardsPerRoundPreview() const {
-        int delta = mExtraDiscardsPerRound;
+        int delta = mExtraDiscardsPerRound + mGameDeck->extraDiscards();
         for (const Joker &j : mJokers) {
             if (j.isDebuffed) continue;
             if (j.type == JokerType::Drunkard)  delta += 1;
@@ -111,6 +113,9 @@ public:
     double targetScore() const {return mTargetScore;}
     int ante() const {return mAnte;}
     int jokerSlots() const;
+    // 游戏牌组（基础/队列…）：仅开局前注入；任何时刻 mGameDeck 非空。
+    void setGameDeck(std::unique_ptr<GameDeckType> deck) { if (deck) mGameDeck = std::move(deck); }
+    const GameDeckType &gameDeck() const { return *mGameDeck; }
     int currentBlindStartingHands() const { return mBlindStartingHands; }
     BlindType blindType() const {return mBlindType;}
     GamePhase phase() const {return mPhase;}
@@ -261,6 +266,8 @@ signals:
 
 private:
     Deck mDeck;
+    // 游戏牌组（多态）：规则修正集中在 GameDeckType 派生类，开局前由 UI 注入。
+    std::unique_ptr<GameDeckType> mGameDeck = std::make_unique<BaseGameDeck>();
     QVector<CardData> mHand;
     QVector<Joker> mJokers;
     // Default initializers prevent uninitialized reads before startBlind().
