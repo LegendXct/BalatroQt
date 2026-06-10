@@ -52,6 +52,11 @@ namespace Constants {
     constexpr int BASE_FLUSH_HOUSE_CHIPS = 140; constexpr int BASE_FLUSH_HOUSE_MULT = 14;
     // 同花五条
     constexpr int BASE_FLUSH_FIVE_CHIPS  = 160; constexpr int BASE_FLUSH_FIVE_MULT  = 16;
+
+    // 队列牌组（游戏牌组体系，见 src/game/gamedeck.h）
+    constexpr int QUEUE_DECK_WINDOW = 6;         // 队首窗口：仅最前 6 张手牌可选
+    constexpr int QUEUE_DECK_EXTRA_HANDS = 1;    // 每回合出牌次数补偿
+    constexpr int QUEUE_DECK_EXTRA_DISCARDS = 1; // 每回合弃牌次数补偿
 }
 
 #endif // CONSTANTS_H

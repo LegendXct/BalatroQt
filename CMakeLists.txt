@@ -20,6 +20,7 @@ qt_add_executable(BalatroQt
     src/game/deck.h src/game/deck.cpp
     src/game/handevaluator.h src/game/handevaluator.cpp
     src/game/gamestate.h src/game/gamestate.cpp
+    src/game/gamedeck.h src/game/gamedeck.cpp
     src/game/demoscript.h src/game/demoscript.cpp
     src/card/cardshadow.h src/card/cardshadow.cpp
     src/card/carditem.h src/card/carditem.cpp
