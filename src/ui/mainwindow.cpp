@@ -4942,7 +4942,11 @@ void MainWindow::refreshHand() {
 
 void MainWindow::layoutHandCards() {
     int n = mHandCards.size();
-    if (n == 0) return;
+    if (n == 0) {
+        // 手牌清空（回合结束进商店等）时同步藏掉队首/栈顶标记，否则它会残留在牌桌上。
+        if (mQueueHeadLabel) mQueueHeadLabel->setVisible(false);
+        return;
+    }
 
     int areaW = mSceneW - HAND_RIGHT_RESERVE;       // 手牌可用宽度
     int available = areaW - 80;
