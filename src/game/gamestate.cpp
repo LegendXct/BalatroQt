@@ -2220,7 +2220,8 @@ double GameState::simulatePlayScore(const QVector<int> &orderedIndices)
 
 QVector<int> GameState::findBestPlay()
 {
-    const int n = qMin(mHand.size(), 16);   // 防御性上限，正常手牌远小于此
+    // 队列牌组：只在队首窗口内搜索（窗口外的牌本来就不可选）。
+    const int n = qMin(qMin(mHand.size(), 16), mGameDeck->selectionWindow());   // 防御性上限，正常手牌远小于此
     if (n == 0) return {};
     const int maxI = qMin(5, n);
     int minI = 1;
@@ -2298,6 +2299,7 @@ QVector<int> GameState::findBestPlay()
 
 void GameState::bringHandCardsToFront(const QVector<int> &indices)
 {
+    if (!mGameDeck->allowHandSort()) return;   // 队列牌组：禁止重排
     if (indices.isEmpty()) return;
     QSet<int> sel(indices.begin(), indices.end());
     QVector<CardData> front, rest;
@@ -2313,6 +2315,7 @@ void GameState::bringHandCardsToFront(const QVector<int> &indices)
 
 void GameState::reorderHandByUids(const QVector<int> &uidOrder)
 {
+    if (!mGameDeck->allowHandSort()) return;   // 队列牌组：禁止重排
     if (uidOrder.isEmpty()) return;
     QHash<int, CardData> byUid;
     for (const CardData &c : mHand) byUid.insert(c.uid, c);

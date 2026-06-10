@@ -6392,22 +6392,34 @@ void MainWindow::onBestPlayHint() {
     QApplication::restoreOverrideCursor();
     if (best.isEmpty()) return;
 
-    const int k = best.size();
-    // 在动手改顺序之前，记下当前手牌的 uid 顺序——第二次点击时按 uid 回放。
-    mBestPlayHintHandOrder.clear();
-    for (const CardData &c : mGameState->hand())
-        mBestPlayHintHandOrder.append(c.uid);
-    // 把最佳出牌按最优顺序移到手牌最前；handChanged 会同步重建 mHandCards。
-    mGameState->bringHandCardsToFront(best);
     mBestPlayHintActive = true;
     AudioManager::instance()->play(QStringLiteral("cardSlide1"), audioPitchJitter(0.03), 0.55);
 
-    // 重建后最佳出牌就在最前面，选中前 k 张。
-    mSelected.clear();
-    for (int i = 0; i < mHandCards.size(); ++i) {
-        const bool sel = (i < k);
-        mHandCards[i]->setCardSelected(sel);
-        if (sel) mSelected.append(i);
+    if (mGameState->gameDeck().allowHandSort()) {
+        const int k = best.size();
+        // 在动手改顺序之前，记下当前手牌的 uid 顺序——第二次点击时按 uid 回放。
+        mBestPlayHintHandOrder.clear();
+        for (const CardData &c : mGameState->hand())
+            mBestPlayHintHandOrder.append(c.uid);
+        // 把最佳出牌按最优顺序移到手牌最前；handChanged 会同步重建 mHandCards。
+        mGameState->bringHandCardsToFront(best);
+        // 重建后最佳出牌就在最前面，选中前 k 张。
+        mSelected.clear();
+        for (int i = 0; i < mHandCards.size(); ++i) {
+            const bool sel = (i < k);
+            mHandCards[i]->setCardSelected(sel);
+            if (sel) mSelected.append(i);
+        }
+    } else {
+        // 队列牌组：禁止重排——手牌原地不动，直接选中推荐组合
+        // （findBestPlay 已限定在队首窗口内搜索）。
+        mBestPlayHintHandOrder.clear();
+        mSelected.clear();
+        for (int i = 0; i < mHandCards.size(); ++i) {
+            const bool sel = best.contains(i);
+            mHandCards[i]->setCardSelected(sel);
+            if (sel) mSelected.append(i);
+        }
     }
 
     layoutHandCards();
