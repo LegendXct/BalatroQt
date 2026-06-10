@@ -2194,6 +2194,7 @@ void MainWindow::startNewRunFromOptions()
     // 不重置的话，新局第一次买木星升 Flush=Lv.2 对比"旧 Lv.5"算成 0 个升级，侧栏演出被吞。
     mPrevHandLevels.clear();
     mGameState->startGame();
+    updateSortButtonsForDeck();
     mPrevHandLevels = mGameState->handLevels();
     mHasOngoingRun = true;   // 一旦开过新局,主菜单里 "继续当前局" 就该亮起
     refreshHand();
@@ -2209,6 +2210,14 @@ void MainWindow::startNewRunFromOptions()
     hideOptionsOverlay();
     // 选项菜单可能叠在主菜单上打开（主菜单 "选项" 不再隐藏主菜单），开新局要一并收掉。
     hideMainMenuOverlay();
+}
+
+void MainWindow::updateSortButtonsForDeck()
+{
+    // 队列牌组禁止整理手牌——"点数/花色"按钮整局置灰。
+    const bool allow = mGameState->gameDeck().allowHandSort();
+    if (mBtnSortNum)  mBtnSortNum->setEnabled(allow);
+    if (mBtnSortSuit) mBtnSortSuit->setEnabled(allow);
 }
 
 QWidget *MainWindow::menuOverlayHost()
@@ -4954,6 +4963,23 @@ void MainWindow::layoutHandCards() {
         mHandCards[i]->setZValue(i);
         // 200ms 选中弹起 / 折回。之前 140ms 显得过于"snap"，恢复到放大卡牌之前 220ms 附近的手感。
         mHandCards[i]->moveTo(QPointF(x, y), 200);
+        // 队列牌组：窗口外的牌压暗表示"排队中"。基础牌组 win 极大，恒为 1.0。
+        mHandCards[i]->setOpacity(i < mGameState->gameDeck().selectionWindow() ? 1.0 : 0.55);
+    }
+
+    // 队首标记：仅队列牌组显示，挂在第一张手牌上方。
+    const bool queueDeck = mGameState->gameDeck().selectionWindow() < (1 << 30);
+    if (queueDeck && !mQueueHeadLabel) {
+        mQueueHeadLabel = mScene->addText(QStringLiteral("队首 →"));
+        QFont qf = mCNFont; qf.setPixelSize(18); qf.setBold(true);
+        mQueueHeadLabel->setFont(qf);
+        mQueueHeadLabel->setDefaultTextColor(QColor("#c8d8d8"));
+        mQueueHeadLabel->setZValue(300);
+    }
+    if (mQueueHeadLabel) {
+        mQueueHeadLabel->setVisible(queueDeck && n > 0);
+        if (queueDeck && n > 0)
+            mQueueHeadLabel->setPos(startX, mHandY - 30);
     }
 }
 
@@ -5437,6 +5463,12 @@ void MainWindow::onCardClicked(CardItem *card) {
         mSelected.removeAll(idx);
         card->setCardSelected(false);
     } else {
+        // 队列牌组：窗口外的"排队中"手牌不可选，给拒绝反馈。
+        if (idx >= mGameState->gameDeck().selectionWindow()) {
+            card->juiceUp(0.92, 140);
+            AudioManager::instance()->play(QStringLiteral("cardSlide2"), 0.8, 0.4);
+            return;
+        }
         if (mSelected.size() < 5) {
             mSelected.append(idx);
             card->setCardSelected(true);
@@ -5950,6 +5982,7 @@ void MainWindow::hideHoverTooltip()
 
 void MainWindow::onHandCardDragMoved(CardItem *card, QPointF scenePos)
 {
+    if (!mGameState->gameDeck().allowHandSort()) return;   // 队列牌组：禁止重排
     hideHoverTooltip();   // 拖动/点击时不显示悬停描述
     int from = mHandCards.indexOf(card);
     if (from < 0) return;
@@ -6000,6 +6033,12 @@ void MainWindow::onHandCardDragMoved(CardItem *card, QPointF scenePos)
 void MainWindow::onHandCardDragReleased(CardItem *card, QPointF scenePos)
 {
     mLastHandCardDragTo = -1;
+    if (!mGameState->gameDeck().allowHandSort()) {   // 队列牌组：松手弹回原位
+        layoutHandCards();
+        refreshCounters();
+        updateHandPreview();
+        return;
+    }
     int from = mHandCards.indexOf(card);
     if (from < 0) { layoutHandCards(); return; }
 
