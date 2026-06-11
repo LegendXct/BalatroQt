@@ -101,6 +101,7 @@ private:
     QVector<CardItem *> mHandCards; // 手牌
     QVector<CardItem *> mPlayedCards; // 出牌区
     QSet<int> mShatteredPlayedIndices;
+    QSet<int> mShatteredHandUids;
     QVector <int> mSelected; // 选中的手牌下标
     bool mBestPlayHintActive = false; // 第二次点击最佳出牌时恢复原点数/花色顺序
     QVector<int> mBestPlayHintHandOrder;

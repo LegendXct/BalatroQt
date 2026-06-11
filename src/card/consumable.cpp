@@ -2,6 +2,7 @@
 #include "../game/gamestate.h"
 #include "../game/handevaluator.h"
 #include <QRandomGenerator>
+#include <QSet>
 #include <algorithm>
 
 ConsumableKind kindOf(ConsumableType t) {
@@ -79,14 +80,30 @@ static CardData makeRandomCard(Rank rank, bool fixedRank)
     return c;
 }
 
+static int destroyHandUids(GameState &state, QVector<CardData> &hand, const QSet<int> &initialUids)
+{
+    QSet<int> uids = initialUids;
+    for (int uid : initialUids) {
+        const int linkedUid = state.shallowLinkedUid(uid);
+        if (linkedUid > 0) uids.insert(linkedUid);
+    }
+    int destroyed = 0;
+    for (int i = hand.size() - 1; i >= 0; --i) {
+        if (!uids.contains(hand[i].uid)) continue;
+        state.notifyPlayingCardDestroyed(hand[i]);
+        hand.removeAt(i);
+        ++destroyed;
+    }
+    return destroyed;
+}
+
 static void destroyRandomAndCreateCards(UseContext &ctx, int createCount, const QVector<Rank> &rankPool)
 {
     auto *rng = QRandomGenerator::global();
     auto &hand = ctx.state.handMutable();
     if (!hand.isEmpty()) {
         int victim = rng->bounded(hand.size());
-        ctx.state.notifyPlayingCardDestroyed(hand[victim]);
-        hand.removeAt(victim);
+        destroyHandUids(ctx.state, hand, QSet<int>{hand[victim].uid});
     }
     for (int i = 0; i < createCount; ++i) {
         Rank r = rankPool[rng->bounded(rankPool.size())];
@@ -132,17 +149,15 @@ static void copySelectedCardTwice(UseContext &ctx)
 
 static void destroySelectedGainGold(UseContext &ctx, int maxN, int goldGain) {
     auto &hand = ctx.state.handMutable();
-    QVector<int> sel = ctx.selectedHandIdx;
-    std::sort(sel.begin(), sel.end(), std::greater<int>());
-
-    int destroyed = 0;
-    for (int idx : sel) {
-        if (destroyed >= maxN) break;
+    QSet<int> selectedUids;
+    int selectedCount = 0;
+    for (int idx : ctx.selectedHandIdx) {
+        if (selectedCount >= maxN) break;
         if (idx < 0 || idx >= hand.size()) continue;
-        ctx.state.notifyPlayingCardDestroyed(hand[idx]);
-        hand.removeAt(idx);      // 幻灵牌 Immolate 是“摧毁”，不进弃牌堆
-        destroyed++;
+        selectedUids.insert(hand[idx].uid);
+        ++selectedCount;
     }
+    const int destroyed = destroyHandUids(ctx.state, hand, selectedUids);
     if (destroyed > 0) ctx.state.addGold(goldGain);
     ctx.state.notifyHandChanged();
 }

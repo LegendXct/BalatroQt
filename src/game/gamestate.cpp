@@ -806,6 +806,10 @@ void GameState::playCards(const QVector<int> &indices) {
     }
 
     QVector<bool> shattered(played.size(), false);
+    mLuckyTriggerOrdinalByUid.clear();
+    mShallowLuckyRolls.clear();
+    mShallowGlassRolls.clear();
+    mShallowGlassEventGroups.clear();
 
     const int sockRetriggers = countResolvedJokersOfType(mJokers, JokerType::SockAndBuskin);
     const int chadRetriggers = 2 * countResolvedJokersOfType(mJokers, JokerType::HangingChad);
@@ -901,10 +905,26 @@ void GameState::playCards(const QVector<int> &indices) {
             mJokers[vampireGrowIndex].counter += 1;   // 每移除 1 张强化只成长 1 次
         }
 
-        if (card.enhancement == Enhancement::Glass && chanceIn(4)) {
+        bool glassShattered = false;
+        int glassGroupUid = card.uid;
+        if (card.enhancement == Enhancement::Glass) {
+            const int linkedUid = shallowLinkedUid(card.uid);
+            if (linkedUid > 0) glassGroupUid = qMin(card.uid, linkedUid);
+            auto glassIt = mShallowGlassRolls.constFind(glassGroupUid);
+            if (glassIt == mShallowGlassRolls.constEnd()) {
+                glassShattered = chanceIn(4);
+                mShallowGlassRolls.insert(glassGroupUid, glassShattered);
+            } else {
+                glassShattered = glassIt.value();
+            }
+        }
+        if (card.enhancement == Enhancement::Glass && glassShattered) {
             shattered[playedIdx] = true;
             // 破碎发生在这张玻璃牌完成所有计分/重触发之后，和原版 shatter 队列一致。
-            result.events.append({ ScoreEventKind::GlassShatter, playedIdx, -1, -1, 0, 1.0 });
+            if (!mShallowGlassEventGroups.contains(glassGroupUid)) {
+                result.events.append({ ScoreEventKind::GlassShatter, playedIdx, -1, -1, 0, 1.0 });
+                mShallowGlassEventGroups.insert(glassGroupUid);
+            }
             // Batch 2：玻璃小丑——每张玻璃牌破碎 +X0.75 倍率
             for (Joker &gj : mJokers)
                 if (!gj.isDebuffed && gj.type == JokerType::GlassJoker) gj.counter += 1;
@@ -1105,8 +1125,12 @@ void GameState::playCards(const QVector<int> &indices) {
     emit handPlayed();
 }
 
-CardData *GameState::findCardByUidAnywhere(int uid)
+CardData *GameState::findCardByUidAnywhere(int uid, QVector<CardData> *externalCards)
 {
+    if (externalCards) {
+        for (CardData &c : *externalCards)
+            if (c.uid == uid) return &c;
+    }
     for (CardData &c : mHand)
         if (c.uid == uid) return &c;
     return mDeck.findByUid(uid);
@@ -1130,12 +1154,47 @@ void GameState::registerShallowLink(int uidA, int uidB)
     mShallowLinks.append(link);
 }
 
+void GameState::registerShallowLink(const CardData &a, const CardData &b)
+{
+    if (a.uid == b.uid) return;
+    for (int i = mShallowLinks.size() - 1; i >= 0; --i) {
+        const ShallowLink &l = mShallowLinks[i];
+        if (l.uidA == a.uid || l.uidB == a.uid || l.uidA == b.uid || l.uidB == b.uid)
+            mShallowLinks.removeAt(i);
+    }
+    ShallowLink link;
+    link.uidA = a.uid;
+    link.uidB = b.uid;
+    link.snapA = a;
+    link.snapB = b;
+    mShallowLinks.append(link);
+}
+
+int GameState::shallowLinkedUid(int uid) const
+{
+    for (const ShallowLink &l : mShallowLinks) {
+        if (l.uidA == uid) return l.uidB;
+        if (l.uidB == uid) return l.uidA;
+    }
+    return -1;
+}
+
 void GameState::syncShallowLinks()
+{
+    syncShallowLinksImpl(nullptr);
+}
+
+void GameState::syncShallowLinks(QVector<CardData> &externalCards)
+{
+    syncShallowLinksImpl(&externalCards);
+}
+
+void GameState::syncShallowLinksImpl(QVector<CardData> *externalCards)
 {
     for (int i = mShallowLinks.size() - 1; i >= 0; --i) {
         ShallowLink &l = mShallowLinks[i];
-        CardData *a = findCardByUidAnywhere(l.uidA);
-        CardData *b = findCardByUidAnywhere(l.uidB);
+        CardData *a = findCardByUidAnywhere(l.uidA, externalCards);
+        CardData *b = findCardByUidAnywhere(l.uidB, externalCards);
         if (!a || !b) { mShallowLinks.removeAt(i); continue; }   // 任一侧被摧毁 → 解除链接
         const bool aChanged = !shallowStateEqual(*a, l.snapA);
         const bool bChanged = !shallowStateEqual(*b, l.snapB);
@@ -1224,6 +1283,17 @@ void GameState::finalizePlayedHand()
         if (!j.isDebuffed && j.type == JokerType::Seltzer) j.counter -= 1;
     cleanupDepletedJokers();
 
+    QSet<int> linkedDestroyedUids;
+    for (int playedIdx = 0; playedIdx < mPendingShattered.size(); ++playedIdx) {
+        if (!mPendingShattered[playedIdx] || playedIdx >= mPendingPlayedIndices.size()) continue;
+        const int handIdx = mPendingPlayedIndices[playedIdx];
+        if (handIdx < 0 || handIdx >= mHand.size()) continue;
+        const int uid = mHand[handIdx].uid;
+        linkedDestroyedUids.insert(uid);
+        const int linkedUid = shallowLinkedUid(uid);
+        if (linkedUid > 0) linkedDestroyedUids.insert(linkedUid);
+    }
+
     QVector<QPair<int,int>> idxPairs;
     for (int pidx = 0; pidx < mPendingPlayedIndices.size(); ++pidx)
         idxPairs.append({ mPendingPlayedIndices[pidx], pidx });
@@ -1232,8 +1302,9 @@ void GameState::finalizePlayedHand()
 
     for (const auto &pr : idxPairs) {
         if (pr.first < 0 || pr.first >= mHand.size()) continue;
-        bool broken = pr.second >= 0 && pr.second < mPendingShattered.size()
-                      && mPendingShattered[pr.second];
+        bool broken = (pr.second >= 0 && pr.second < mPendingShattered.size()
+                       && mPendingShattered[pr.second])
+                      || linkedDestroyedUids.contains(mHand[pr.first].uid);
         if (broken) {
             notifyPlayingCardDestroyed(mHand[pr.first]);
         } else {
@@ -1243,6 +1314,17 @@ void GameState::finalizePlayedHand()
             mDeck.discard(mHand[pr.first]);
         }
         mHand.removeAt(pr.first);
+    }
+    // 链接牌只打出了一侧时，另一侧仍留在手牌或牌堆中；玻璃碎裂属于共享对象的销毁，
+    // 因此必须把另一引用指向的牌一并移除，而不是仅解除浅拷贝链接。
+    for (int i = mHand.size() - 1; i >= 0; --i) {
+        if (!linkedDestroyedUids.contains(mHand[i].uid)) continue;
+        notifyPlayingCardDestroyed(mHand[i]);
+        mHand.removeAt(i);
+    }
+    for (int uid : linkedDestroyedUids) {
+        CardData removed;
+        if (mDeck.removeByUid(uid, &removed)) notifyPlayingCardDestroyed(removed);
     }
     // 打出的牌点数可能变化（迭代器）/被摧毁（玻璃）——同步浅拷贝链接的另一侧。
     syncShallowLinks();
@@ -1595,15 +1677,30 @@ void GameState::discardCards(const QVector<int> &indices)
         }
     }
 
-    QVector<int> sorted = indices;
-    std::sort(sorted.begin(), sorted.end(), std::greater<int>());
-    for (int i : sorted) {
-        mHand[i].faceUp = true;   // 背面朝下的牌被弃掉时翻回正面
-        if (tradingDestroysDiscard) notifyPlayingCardDestroyed(mHand[i]);
-        else mDeck.discard(mHand[i]);
-        mHand.removeAt(i);
+    if (tradingDestroysDiscard) {
+        QSet<int> destroyUids;
+        for (int i : indices) {
+            if (i < 0 || i >= mHand.size()) continue;
+            destroyUids.insert(mHand[i].uid);
+            const int linkedUid = shallowLinkedUid(mHand[i].uid);
+            if (linkedUid > 0) destroyUids.insert(linkedUid);
+        }
+        for (int i = mHand.size() - 1; i >= 0; --i) {
+            if (!destroyUids.contains(mHand[i].uid)) continue;
+            notifyPlayingCardDestroyed(mHand[i]);
+            mHand.removeAt(i);
+        }
+    } else {
+        QVector<int> sorted = indices;
+        std::sort(sorted.begin(), sorted.end(), std::greater<int>());
+        for (int i : sorted) {
+            mHand[i].faceUp = true;   // 背面朝下的牌被弃掉时翻回正面
+            mDeck.discard(mHand[i]);
+            mHand.removeAt(i);
+        }
     }
 
+    syncShallowLinks();
     mDiscardLeft--;
     dealCards(DrawContext::AfterDiscard);
     applyBossDebuffs();
@@ -2589,13 +2686,35 @@ void GameState::scoreCard(const CardData &card, HandResult &result, int playedId
         result.events.append({ ScoreEventKind::ScoringCardChip, playedIdx, -1, -1, 50, 1.0 });
         break;
     case Enhancement::Lucky: {
+        bool multTriggered = false;
+        bool moneyTriggered = false;
+        const int linkedUid = shallowLinkedUid(card.uid);
+        if (linkedUid > 0) {
+            const int ordinal = mLuckyTriggerOrdinalByUid.value(card.uid, 0);
+            mLuckyTriggerOrdinalByUid.insert(card.uid, ordinal + 1);
+            const int groupUid = qMin(card.uid, linkedUid);
+            const quint64 key = (quint64(quint32(groupUid)) << 32) | quint32(ordinal);
+            auto it = mShallowLuckyRolls.constFind(key);
+            if (it == mShallowLuckyRolls.constEnd()) {
+                const QPair<bool, bool> rolls{chanceIn(5), chanceIn(15)};
+                mShallowLuckyRolls.insert(key, rolls);
+                multTriggered = rolls.first;
+                moneyTriggered = rolls.second;
+            } else {
+                multTriggered = it.value().first;
+                moneyTriggered = it.value().second;
+            }
+        } else {
+            multTriggered = chanceIn(5);
+            moneyTriggered = chanceIn(15);
+        }
         bool luckyTriggered = false;
-        if (chanceIn(5)) {
+        if (multTriggered) {
             result.mult += 20;
             result.events.append({ ScoreEventKind::EnhancementMult, playedIdx, -1, -1, 20, 1.0 });
             luckyTriggered = true;
         }
-        if (chanceIn(15)) {
+        if (moneyTriggered) {
             addGold(20);
             result.events.append({ ScoreEventKind::DollarGain, playedIdx, -1, -1, 20, 1.0 });
             luckyTriggered = true;
@@ -2814,6 +2933,21 @@ static bool applyConsumableTypeToPackHand(GameState &state,
             else             packHand[idx].edition = Edition::Polychrome;
         }
     };
+    auto destroyPackUids = [&](const QSet<int> &initialUids) {
+        QSet<int> uids = initialUids;
+        for (int uid : initialUids) {
+            const int linkedUid = state.shallowLinkedUid(uid);
+            if (linkedUid > 0) uids.insert(linkedUid);
+        }
+        int destroyed = 0;
+        for (int i = packHand.size() - 1; i >= 0; --i) {
+            if (!uids.contains(packHand[i].uid)) continue;
+            state.notifyPlayingCardDestroyed(packHand[i]);
+            packHand.removeAt(i);
+            ++destroyed;
+        }
+        return destroyed;
+    };
     auto destroyRandomPackCards = [&](int count, int goldGain) {
         QVector<int> idx;
         for (int i = 0; i < packHand.size(); ++i) idx.append(i);
@@ -2823,13 +2957,12 @@ static bool applyConsumableTypeToPackHand(GameState &state,
         }
         int n = qMin(count, idx.size());
         idx = idx.mid(0, n);
-        std::sort(idx.begin(), idx.end(), std::greater<int>());
+        QSet<int> uids;
         for (int i : idx) {
             if (i < 0 || i >= packHand.size()) continue;
-            state.notifyPlayingCardDestroyed(packHand[i]);
-            packHand.removeAt(i);
+            uids.insert(packHand[i].uid);
         }
-        if (n > 0) state.addGold(goldGain);
+        if (destroyPackUids(uids) > 0) state.addGold(goldGain);
     };
     auto copySelectedPackCardTwice = [&]() {
         if (sel.size() != 1) return false;
@@ -2876,7 +3009,19 @@ static bool applyConsumableTypeToPackHand(GameState &state,
         if (sel.size() != 2) return false;
         int a = sel[0], b = sel[1];
         if (a < 0 || a >= packHand.size() || b < 0 || b >= packHand.size() || a == b) return false;
+        const int aUid = packHand[a].uid;
         packHand[a] = packHand[b];
+        packHand[a].uid = aUid;
+        return true;
+    };
+    auto shallowCopyPack = [&]() -> bool {
+        if (sel.size() != 2) return false;
+        int a = sel[0], b = sel[1];
+        if (a < 0 || a >= packHand.size() || b < 0 || b >= packHand.size() || a == b) return false;
+        const int aUid = packHand[a].uid;
+        packHand[a] = packHand[b];
+        packHand[a].uid = aUid;
+        state.registerShallowLink(packHand[a], packHand[b]);
         return true;
     };
 
@@ -2897,12 +3042,12 @@ static bool applyConsumableTypeToPackHand(GameState &state,
     case ConsumableType::Tarot_Tower:      enhance(Enhancement::Stone, 1); break;
     case ConsumableType::Tarot_HangedMan: {
         QVector<int> use = normalizedSelection(sel, packHand.size(), 2);
-        std::sort(use.begin(), use.end(), std::greater<int>());
+        QSet<int> uids;
         for (int idx : use) {
             if (idx < 0 || idx >= packHand.size()) continue;
-            state.notifyPlayingCardDestroyed(packHand[idx]);
-            packHand.removeAt(idx);
+            uids.insert(packHand[idx].uid);
         }
+        destroyPackUids(uids);
         break;
     }
     case ConsumableType::Tarot_Hermit: {
@@ -2917,7 +3062,9 @@ static bool applyConsumableTypeToPackHand(GameState &state,
         }
         break;
     case ConsumableType::Tarot_Strength:   rankUpPack(2); break;
-    case ConsumableType::Tarot_Death:      return deathPack();
+    case ConsumableType::Tarot_Death:
+        if (!deathPack()) return false;
+        break;
     case ConsumableType::Tarot_Temperance: {
         int total = 0;
         for (const Joker &j : state.jokers()) total += qMax(1, j.sellValue);
@@ -2930,6 +3077,10 @@ static bool applyConsumableTypeToPackHand(GameState &state,
     case ConsumableType::Tarot_Sun:        suitPack(Suit::Hearts, 3); break;
     case ConsumableType::Tarot_Judgement:  state.addRandomRareJoker(); break;
     case ConsumableType::Tarot_World:      suitPack(Suit::Spades, 3); break;
+    case ConsumableType::Tarot_Iterator:   enhance(Enhancement::Iterator, 2); break;
+    case ConsumableType::Tarot_ShallowCopy:
+        if (!shallowCopyPack()) return false;
+        break;
 
     case ConsumableType::Planet_Pluto:     state.levelUpHand(HandType::HighCard); break;
     case ConsumableType::Planet_Mercury:   state.levelUpHand(HandType::Pair); break;
@@ -2947,8 +3098,7 @@ static bool applyConsumableTypeToPackHand(GameState &state,
     case ConsumableType::Spectral_Familiar: {
         if (!packHand.isEmpty()) {
             int victim = QRandomGenerator::global()->bounded(packHand.size());
-            state.notifyPlayingCardDestroyed(packHand[victim]);
-            packHand.removeAt(victim);
+            destroyPackUids(QSet<int>{packHand[victim].uid});
         }
         for (int i = 0; i < 3; ++i) {
             CardData c; c.suit = static_cast<Suit>(QRandomGenerator::global()->bounded(4));
@@ -2964,8 +3114,7 @@ static bool applyConsumableTypeToPackHand(GameState &state,
     case ConsumableType::Spectral_Grim: {
         if (!packHand.isEmpty()) {
             int victim = QRandomGenerator::global()->bounded(packHand.size());
-            state.notifyPlayingCardDestroyed(packHand[victim]);
-            packHand.removeAt(victim);
+            destroyPackUids(QSet<int>{packHand[victim].uid});
         }
         for (int i = 0; i < 2; ++i) {
             CardData c; c.suit = static_cast<Suit>(QRandomGenerator::global()->bounded(4));
@@ -2979,8 +3128,7 @@ static bool applyConsumableTypeToPackHand(GameState &state,
     case ConsumableType::Spectral_Incantation: {
         if (!packHand.isEmpty()) {
             int victim = QRandomGenerator::global()->bounded(packHand.size());
-            state.notifyPlayingCardDestroyed(packHand[victim]);
-            packHand.removeAt(victim);
+            destroyPackUids(QSet<int>{packHand[victim].uid});
         }
         for (int i = 0; i < 4; ++i) {
             CardData c; c.suit = static_cast<Suit>(QRandomGenerator::global()->bounded(4));
@@ -3018,6 +3166,7 @@ static bool applyConsumableTypeToPackHand(GameState &state,
         state.levelUpAllHands(1);
         break;
     }
+    state.syncShallowLinks(packHand);
     return true;
 }
 
@@ -3969,9 +4118,15 @@ void GameState::immolateRandomHandCards(int destroyCount, int goldGain)
     }
     int n = qMin(destroyCount, idx.size());
     idx = idx.mid(0, n);
-    std::sort(idx.begin(), idx.end(), std::greater<int>());
+    QSet<int> destroyUids;
     for (int i : idx) {
         if (i < 0 || i >= mHand.size()) continue;
+        destroyUids.insert(mHand[i].uid);
+        const int linkedUid = shallowLinkedUid(mHand[i].uid);
+        if (linkedUid > 0) destroyUids.insert(linkedUid);
+    }
+    for (int i = mHand.size() - 1; i >= 0; --i) {
+        if (!destroyUids.contains(mHand[i].uid)) continue;
         notifyPlayingCardDestroyed(mHand[i]);
         mHand.removeAt(i);
     }

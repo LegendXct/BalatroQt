@@ -28,6 +28,7 @@ public:
     QVector<CardData> allKnownCards() const;
     // 浅拷贝塔罗的状态同步：按 uid 在摸牌/弃牌堆中找牌（可变指针；找不到返回 nullptr）。
     CardData *findByUid(int uid);
+    bool removeByUid(int uid, CardData *removed = nullptr);
 };
 
 #endif // DECK_H

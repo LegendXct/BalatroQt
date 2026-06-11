@@ -177,7 +177,10 @@ public:
 
     // ── 浅拷贝塔罗：两张牌共享状态（点数/花色/增强/版本/蜡封/debuff/永久加筹） ──
     void registerShallowLink(int uidA, int uidB);
+    void registerShallowLink(const CardData &a, const CardData &b);
     void syncShallowLinks();
+    void syncShallowLinks(QVector<CardData> &externalCards);
+    int shallowLinkedUid(int uid) const;
     // UI 用：当前所有链接对（uidA, uidB），给两侧牌面画共享地址角标。
     QVector<QPair<int,int>> shallowLinkPairs() const {
         QVector<QPair<int,int>> out;
@@ -321,7 +324,8 @@ private:
         CardData snapA, snapB;             // 只比较/拷贝状态字段，uid 无意义
     };
     QVector<ShallowLink> mShallowLinks;
-    CardData *findCardByUidAnywhere(int uid);   // 手牌 → 摸牌堆 → 弃牌堆
+    CardData *findCardByUidAnywhere(int uid, QVector<CardData> *externalCards = nullptr);
+    void syncShallowLinksImpl(QVector<CardData> *externalCards);
 
     // ── 函数重载小丑（程设扩展）：事件流筹码/倍率互换 ──
     void applyOperatorOverloadIfHeld(HandResult &result);
@@ -335,6 +339,10 @@ private:
     double mPendingHandScore = 0.0;
     QVector<int> mPendingPlayedIndices;
     QVector<bool> mPendingShattered;
+    QHash<int, int> mLuckyTriggerOrdinalByUid;
+    QHash<quint64, QPair<bool, bool>> mShallowLuckyRolls;
+    QHash<int, bool> mShallowGlassRolls;
+    QSet<int> mShallowGlassEventGroups;
     bool mPendingBossTriggeredForMatador = false;  // 斗牛士：本手是否触发了 Boss 盲注能力
     int mPendingRoundPayout = 0; // 胜利结算先暂存，点击“提现”后再真正加到金币
     bool mSuppressGoldSignal = false; // 回合末临时计算提现金额时，避免提前刷新左侧金币

@@ -101,3 +101,17 @@ CardData *Deck::findByUid(int uid)
     for (CardData &c : mDiscardPile) if (c.uid == uid) return &c;
     return nullptr;
 }
+
+bool Deck::removeByUid(int uid, CardData *removed)
+{
+    auto removeFrom = [uid, removed](QVector<CardData> &cards) {
+        for (int i = 0; i < cards.size(); ++i) {
+            if (cards[i].uid != uid) continue;
+            if (removed) *removed = cards[i];
+            cards.removeAt(i);
+            return true;
+        }
+        return false;
+    };
+    return removeFrom(mDrawPile) || removeFrom(mDiscardPile);
+}

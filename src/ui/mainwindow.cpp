@@ -173,6 +173,34 @@ static bool usesOriginalTarotFlip(ConsumableType type)
     }
 }
 
+static QVector<int> expandedShallowFlipUids(const GameState *state,
+                                            const QVector<CardData> &cards,
+                                            const QVector<int> &selected)
+{
+    QSet<int> uids;
+    for (int idx : selected)
+        if (idx >= 0 && idx < cards.size()) uids.insert(cards[idx].uid);
+    if (state) {
+        bool changed = true;
+        while (changed) {
+            changed = false;
+            for (const auto &link : state->shallowLinkPairs()) {
+                if (uids.contains(link.first) && !uids.contains(link.second)) {
+                    uids.insert(link.second);
+                    changed = true;
+                } else if (uids.contains(link.second) && !uids.contains(link.first)) {
+                    uids.insert(link.first);
+                    changed = true;
+                }
+            }
+        }
+    }
+    QVector<int> ordered;
+    for (const CardData &card : cards)
+        if (uids.contains(card.uid)) ordered.append(card.uid);
+    return ordered;
+}
+
 static double originalRandomPitch(double base, double range)
 {
     return base + QRandomGenerator::global()->generateDouble() * range;
@@ -964,6 +992,8 @@ MainWindow::MainWindow(QWidget *parent)
             this, &MainWindow::onPackChoiceMade);
     connect(mPackOpenWidget, &PackOpenWidget::inventoryConsumableRequested,
             this, &MainWindow::onInventoryConsumableUseRequested);
+    connect(mPackOpenWidget, &PackOpenWidget::handSelectionChanged,
+            this, &MainWindow::refreshConsumableUseButtonState);
     connect(mPackOpenWidget, &PackOpenWidget::packFinished,
             this, &MainWindow::onPackFinished);
 
@@ -6302,6 +6332,7 @@ void MainWindow::onHandPlayed()
 {
     const HandResult &r = mGameState->lastResult();
     mShatteredPlayedIndices.clear();
+    mShatteredHandUids.clear();
     const bool handNameChanged = mLblHandName && (mLblHandName->text() != r.name);
 
     if (r.name.contains(QStringLiteral("Boss"))) {
@@ -7198,7 +7229,11 @@ void MainWindow::showConsumableAction(int idx)
             int idx = mSelectedConsumableIdx;
             if (idx < 0 || idx >= mGameState->consumables().size()) return;
 
-            QVector<int> sel = mSelected;
+            const bool usingOnPackHand = mPackOpenWidget && mPackOpenWidget->isVisible()
+                                         && !mPendingPackHand.isEmpty();
+            QVector<int> sel = usingOnPackHand
+                ? mPackOpenWidget->selectedHandIndices()
+                : mSelected;
             std::sort(sel.begin(), sel.end());
             sel.erase(std::unique(sel.begin(), sel.end()), sel.end());
 
@@ -7206,13 +7241,22 @@ void MainWindow::showConsumableAction(int idx)
             const ConsumableType type = c.type;
             const QString useSound = soundForConsumable(c.type);
             if ((c.needsSelection > 0 && sel.size() < c.needsSelection) ||
+                (c.maxSelection > 0 && sel.size() > c.maxSelection) ||
                 (c.type == ConsumableType::Tarot_Fool && !mGameState->canUseFool())) {
                 AudioManager::instance()->play(QStringLiteral("cancel"), 1.0, 0.65);
                 flashConsumableActionError();
                 return;
             }
 
-            animateConsumableUseThen(idx, [this, idx, sel, type, useSound]() {
+            animateConsumableUseThen(idx, [this, idx, sel, type, useSound, usingOnPackHand]() {
+                if (usingOnPackHand) {
+                    mPackOpenWidget->forceNextHandFlipUids(
+                        expandedShallowFlipUids(mGameState, mPendingPackHand, sel));
+                    onInventoryConsumableUseRequested(idx, sel);
+                    mSelectedConsumableIdx = -1;
+                    hideConsumableAction();
+                    return;
+                }
                 // 对齐原版 card.lua:1106-1149 —— 当塔罗 / 幻灵牌作用到选中手牌时：
                 //   1) 选中的牌先 flip 到背面（240ms 动画 + 0.15s 间隔）
                 //   2) 应用增强/花色/点数变化
@@ -7270,9 +7314,11 @@ void MainWindow::showConsumableAction(int idx)
 
                 // 记录受影响的 CardItem 指针（按当前手牌索引）。
                 QVector<QPointer<CardItem>> targets;
-                for (int i : sel) {
-                    if (i >= 0 && i < mHandCards.size())
-                        targets.append(QPointer<CardItem>(mHandCards[i]));
+                const QVector<int> targetUids = expandedShallowFlipUids(
+                    mGameState, mGameState->hand(), sel);
+                for (CardItem *item : mHandCards) {
+                    if (item && targetUids.contains(item->cardData().uid))
+                        targets.append(QPointer<CardItem>(item));
                 }
 
                 // 翻面序列期间禁止 refreshHand 里的“房屋 Boss 翻正”逻辑，
@@ -7377,7 +7423,11 @@ void MainWindow::refreshConsumableUseButtonState()
         return;
     }
     const Consumable &c = cs[idx];
-    QVector<int> sel = mSelected;
+    const bool usingOnPackHand = mPackOpenWidget && mPackOpenWidget->isVisible()
+                                 && !mPendingPackHand.isEmpty();
+    QVector<int> sel = usingOnPackHand
+        ? mPackOpenWidget->selectedHandIndices()
+        : mSelected;
     std::sort(sel.begin(), sel.end());
     sel.erase(std::unique(sel.begin(), sel.end()), sel.end());
 
@@ -7864,46 +7914,6 @@ void MainWindow::onConsumablePressed(ConsumableItem *item, Qt::MouseButton btn)
         return;
     }
 
-    if (mPackOpenWidget && mPackOpenWidget->isVisible() && !mPendingPackHand.isEmpty()) {
-        QVector<int> packSel = mPackOpenWidget->selectedHandIndices();
-        const ConsumableType type = mGameState->consumables()[idx].type;
-        const QString useSound = soundForConsumable(type);
-        animateConsumableUseThen(idx, [this, idx, packSel, type, useSound]() {
-            const QVector<CardData> packBefore = mPendingPackHand;
-            const QVector<Joker> jokersBefore = mGameState->jokers();
-            const QVector<Consumable> consumablesBefore = mGameState->consumables();
-            const int goldBefore = mGameState->gold();
-            if (mGameState->useConsumableOnPackHand(idx, packSel, mPendingPackHand)) {
-                const bool handled = playOriginalConsumableAudio(
-                    this,
-                    type,
-                    packSel,
-                    packBefore,
-                    mPendingPackHand,
-                    jokersBefore,
-                    mGameState->jokers(),
-                    consumablesBefore,
-                    mGameState->consumables(),
-                    goldBefore,
-                    mGameState->gold(),
-                    true);
-                if (!handled && !useSound.isEmpty())
-                    AudioManager::instance()->play(useSound, 1.0, 1.0);
-                mPackOpenWidget->setPackHand(mPendingPackHand);
-                mPackOpenWidget->setInventoryConsumables(mGameState->consumables());
-                refreshConsumableSlots();
-                refreshGold();
-                refreshCounters();
-                if (mShopWidget && mShopWidget->isVisible()) mShopWidget->refresh();
-            } else {
-                AudioManager::instance()->play(QStringLiteral("cancel"), 1.0, 0.65);
-                flashConsumableActionError();
-                refreshConsumableSlots();
-            }
-        });
-        return;
-    }
-
     if (btn == Qt::LeftButton) {
         // 再次点击已选中的消耗牌 → 取消选中（与手牌选中行为一致）。
         if (idx == mSelectedConsumableIdx) {
@@ -8007,6 +8017,11 @@ void MainWindow::onPackChoiceMade(int chosenIdx, QVector<int> selectedPackHandId
         const QVector<Consumable> consumablesBefore = mGameState->consumables();
         const int goldBefore = mGameState->gold();
 
+        if (consumableChoice && usesOriginalTarotFlip(usedType)) {
+            mPackOpenWidget->forceNextHandFlipUids(
+                expandedShallowFlipUids(mGameState, mPendingPackHand, selectedPackHandIdx));
+        }
+
         const bool ok = mGameState->applyPackChoice(mPendingPack, chosenIdx,
                                                     selectedPackHandIdx, mPendingPackHand);
         if (ok) {
@@ -8062,6 +8077,10 @@ void MainWindow::onInventoryConsumableUseRequested(int inventoryIdx, QVector<int
     const QVector<Joker> jokersBefore = mGameState->jokers();
     const QVector<Consumable> consumablesBefore = mGameState->consumables();
     const int goldBefore = mGameState->gold();
+    if (hasConsumable && usesOriginalTarotFlip(type)) {
+        mPackOpenWidget->forceNextHandFlipUids(
+            expandedShallowFlipUids(mGameState, mPendingPackHand, selectedPackHandIdx));
+    }
     if (mGameState->useConsumableOnPackHand(inventoryIdx, selectedPackHandIdx, mPendingPackHand)) {
         const bool handled = playOriginalConsumableAudio(
             this,
@@ -8080,10 +8099,12 @@ void MainWindow::onInventoryConsumableUseRequested(int inventoryIdx, QVector<int
             AudioManager::instance()->play(useSound, 1.0, 1.0);
         mPackOpenWidget->setPackHand(mPendingPackHand);
         mPackOpenWidget->setInventoryConsumables(mGameState->consumables());
+        mPackOpenWidget->clearHandSelection();
         refreshConsumableSlots();
         refreshGold();
         refreshCounters();
     } else {
+        mPackOpenWidget->forceNextHandFlipUids({});
         AudioManager::instance()->play(QStringLiteral("cancel"), 1.0, 0.65);
     }
 }
@@ -8752,6 +8773,7 @@ void MainWindow::resetTransientOverlaysForNewRun()
     clearPlayedCards();
     mSelected.clear();
     mShatteredPlayedIndices.clear();
+    mShatteredHandUids.clear();
     mGameOverHandled = false;
     mScoringInProgress = false;
     mEndRoundAnimationDelay = 260;
@@ -9175,42 +9197,50 @@ void MainWindow::animateScoreTotalThenFinalize(double gained, int /*delayAfterEv
         // 数据层的真正 +1 在 finalizePlayedHand（flyOut 内）执行，这里只改显示副本。
         // 节拍用固定时长 singleShot（与塔罗翻面流程一致）：flip() 本身 240ms 固定，
         // 若走 scheduleGame 的倍速缩放，高倍速下"改点数"会跑到翻面中点前头穿帮。
-        QVector<int> iterIdx;
+        QVector<QPointer<CardItem>> iterTargets;
         for (int i = 0; i < mPlayedCards.size(); ++i) {
             CardItem *c = mPlayedCards[i];
             if (c && c->cardData().enhancement == Enhancement::Iterator
-                && !mShatteredPlayedIndices.contains(i))
-                iterIdx.append(i);
+                && !mShatteredPlayedIndices.contains(i)) {
+                if (!iterTargets.contains(QPointer<CardItem>(c)))
+                    iterTargets.append(QPointer<CardItem>(c));
+                const int linkedUid = mGameState->shallowLinkedUid(c->cardData().uid);
+                if (linkedUid > 0) {
+                    auto appendLinked = [&iterTargets, linkedUid](const QVector<CardItem*> &items) {
+                        for (CardItem *item : items) {
+                            if (item && item->cardData().uid == linkedUid
+                                && !iterTargets.contains(QPointer<CardItem>(item)))
+                                iterTargets.append(QPointer<CardItem>(item));
+                        }
+                    };
+                    appendLinked(mPlayedCards);
+                    appendLinked(mHandCards);
+                }
+            }
         }
-        if (iterIdx.isEmpty()) { flyOut(); return; }
+        if (iterTargets.isEmpty()) { flyOut(); return; }
 
-        for (int k = 0; k < iterIdx.size(); ++k) {
-            const int idx = iterIdx[k];
+        for (int k = 0; k < iterTargets.size(); ++k) {
+            const QPointer<CardItem> target = iterTargets[k];
             const int t0 = 150 * (k + 1);
-            QTimer::singleShot(t0, this, [this, idx]() {          // 翻向背面
-                if (idx < 0 || idx >= mPlayedCards.size()) return;
-                CardItem *c = mPlayedCards[idx];
-                if (!c) return;
-                c->flip();
+            QTimer::singleShot(t0, this, [target]() {             // 翻向背面
+                if (!target) return;
+                target->flip();
                 AudioManager::instance()->play(QStringLiteral("card1"), 1.0, 1.0);
             });
-            QTimer::singleShot(t0 + 130, this, [this, idx]() {    // 翻面中点已过，背面期间改显示点数
-                if (idx < 0 || idx >= mPlayedCards.size()) return;
-                CardItem *c = mPlayedCards[idx];
-                if (!c) return;
-                CardData d = c->cardData();
+            QTimer::singleShot(t0 + 130, this, [target]() {       // 翻面中点已过，背面期间改显示点数
+                if (!target) return;
+                CardData d = target->cardData();
                 d.rank = iterNextRank(d.rank);
-                c->setCardData(d);   // setCardData 保留 faceUp=false，不打断翻面
+                target->setCardData(d);   // setCardData 保留 faceUp=false，不打断翻面
             });
-            QTimer::singleShot(t0 + 320, this, [this, idx]() {    // 翻回正面，新点数亮出来
-                if (idx < 0 || idx >= mPlayedCards.size()) return;
-                CardItem *c = mPlayedCards[idx];
-                if (!c) return;
-                c->flip();
+            QTimer::singleShot(t0 + 320, this, [target]() {       // 翻回正面，新点数亮出来
+                if (!target) return;
+                target->flip();
                 AudioManager::instance()->play(QStringLiteral("tarot2"), 1.0, 0.6);
             });
         }
-        QTimer::singleShot(150 * int(iterIdx.size()) + 700, this, flyOut);
+        QTimer::singleShot(150 * int(iterTargets.size()) + 700, this, flyOut);
     });
     anim->start(QAbstractAnimation::DeleteWhenStopped);
 }
@@ -9220,6 +9250,21 @@ void MainWindow::animatePlayedCardsToDiscardThen(std::function<void()> after)
     QVector<CardItem*> cards = mPlayedCards;
     QPointF deckPos(mSceneW - CARD_W - 60, mHandYScoring);
     int duration = cards.isEmpty() ? 0 : 420;
+    for (CardItem *c : mHandCards) {
+        if (!c || !mShatteredHandUids.contains(c->cardData().uid)) continue;
+        auto *scale = new QPropertyAnimation(c, "scale", this);
+        scale->setDuration(duration);
+        scale->setStartValue(c->scale());
+        scale->setEndValue(0.65);
+        scale->setEasingCurve(QEasingCurve::InBack);
+        scale->start(QAbstractAnimation::DeleteWhenStopped);
+        auto *fade = new QPropertyAnimation(c, "opacity", this);
+        fade->setDuration(duration);
+        fade->setStartValue(c->opacity());
+        fade->setEndValue(0.0);
+        fade->setEasingCurve(QEasingCurve::InQuad);
+        fade->start(QAbstractAnimation::DeleteWhenStopped);
+    }
     for (int i = 0; i < cards.size(); ++i) {
         CardItem *c = cards[i];
         if (!c) continue;
@@ -9255,6 +9300,7 @@ void MainWindow::animatePlayedCardsToDiscardThen(std::function<void()> after)
     scheduleGame(duration + 40, [this, after]() {
         clearPlayedCards();
         mShatteredPlayedIndices.clear();
+        mShatteredHandUids.clear();
         if (after) after();
     });
 }
@@ -9776,6 +9822,22 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev, double percent)
     if (ev.sourceJokerIdx >= 0 && ev.sourceJokerIdx < mJokerItems.size())
         sourceJoker = mJokerItems[ev.sourceJokerIdx];
 
+    QVector<CardItem*> sourceCards;
+    if (sourceCard) {
+        sourceCards.append(sourceCard);
+        const int linkedUid = mGameState->shallowLinkedUid(sourceCard->cardData().uid);
+        if (linkedUid > 0) {
+            auto appendLinked = [&sourceCards, linkedUid](const QVector<CardItem*> &items) {
+                for (CardItem *item : items) {
+                    if (item && item->cardData().uid == linkedUid && !sourceCards.contains(item))
+                        sourceCards.append(item);
+                }
+            };
+            appendLinked(mPlayedCards);
+            appendLinked(mHandCards);
+        }
+    }
+
     QPointF anchorPos;
     if (sourceCard) anchorPos = sourceCard->pos();
     else if (sourceJoker) anchorPos = sourceJoker->pos();
@@ -9912,6 +9974,12 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev, double percent)
         color = QColor("#9ee7ff");
         text = QStringLiteral("碎裂");
         if (ev.sourceCardIdx >= 0) mShatteredPlayedIndices.insert(ev.sourceCardIdx);
+        for (CardItem *linkedCard : sourceCards) {
+            const int linkedPlayedIdx = mPlayedCards.indexOf(linkedCard);
+            if (linkedPlayedIdx >= 0) mShatteredPlayedIndices.insert(linkedPlayedIdx);
+            if (mHandCards.contains(linkedCard))
+                mShatteredHandUids.insert(linkedCard->cardData().uid);
+        }
         break;
 
     case ScoreEventKind::BlueSealPlanet:
@@ -9922,31 +9990,33 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev, double percent)
         break;
     }
 
-    if (sourceCard) {
+    if (!sourceCards.isEmpty()) {
         if (ev.kind == ScoreEventKind::GlassShatter) {
-            // 玻璃牌碎裂:水平 shake (原版 card_eval_status_text 内部 + glass 特殊处理)
-            sourceCard->juiceUp(1.28, 260);
-            auto *shake = new QSequentialAnimationGroup(sourceCard);
-            QPointF base = sourceCard->pos();
-            for (int i = 0; i < 4; ++i) {
-                auto *a = new QPropertyAnimation(sourceCard, "pos");
-                a->setDuration(28);
-                a->setStartValue(i == 0 ? base : base + QPointF((i % 2 ? -1 : 1) * 5, 0));
-                a->setEndValue(base + QPointF((i % 2 ? 1 : -1) * 5, 0));
-                shake->addAnimation(a);
-                a->setParent(shake);
+            for (CardItem *animatedCard : sourceCards) {
+                animatedCard->juiceUp(1.28, 260);
+                auto *shake = new QSequentialAnimationGroup(animatedCard);
+                QPointF base = animatedCard->pos();
+                for (int i = 0; i < 4; ++i) {
+                    auto *a = new QPropertyAnimation(animatedCard, "pos");
+                    a->setDuration(28);
+                    a->setStartValue(i == 0 ? base : base + QPointF((i % 2 ? -1 : 1) * 5, 0));
+                    a->setEndValue(base + QPointF((i % 2 ? 1 : -1) * 5, 0));
+                    shake->addAnimation(a);
+                    a->setParent(shake);
+                }
+                auto *back = new QPropertyAnimation(animatedCard, "pos");
+                back->setDuration(40);
+                back->setStartValue(base + QPointF(5, 0));
+                back->setEndValue(base);
+                shake->addAnimation(back);
+                back->setParent(shake);
+                shake->start(QAbstractAnimation::DeleteWhenStopped);
             }
-            auto *back = new QPropertyAnimation(sourceCard, "pos");
-            back->setDuration(40);
-            back->setStartValue(base + QPointF(5, 0));
-            back->setEndValue(base);
-            shake->addAnimation(back);
-            back->setParent(shake);
-            shake->start(QAbstractAnimation::DeleteWhenStopped);
         } else {
             // 原版 card_eval_status_text 内对源卡只做 card:juice_up(0.6, 0.1) 缩放脉冲,
             // 不做位置上下蹦动。卡片在 onHandPlayed 阶段已 highlight 升起并保持。
-            sourceCard->juiceUp(1.18, 210);
+            for (CardItem *animatedCard : sourceCards)
+                animatedCard->juiceUp(1.18, 210);
         }
     }
     if (sourceJoker) {

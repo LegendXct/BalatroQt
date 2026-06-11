@@ -183,13 +183,17 @@ QPixmap JokerItem::customCardPixmap(JokerType t)
     QPixmap cell(SRC_W, SRC_H);
     cell.fill(Qt::transparent);
     const QPixmap card{QString::fromLatin1(res)};
-    if (!card.isNull() && sSheet && !sSheet->isNull()) {
+    if (!card.isNull()) {
         QPainter p(&cell);
         p.setRenderHint(QPainter::SmoothPixmapTransform, true);
         p.drawPixmap(QRect(0, 0, SRC_W, SRC_H), card);
-        // 用图集 (0,0) 基础小丑格的 alpha 当圆角剪影，轮廓与其它小丑完全一致。
+        // 专属素材是一整张不透明卡面，不能借用 Jokers.png 某个小丑内容层的 alpha，
+        // 否则内容层顶部/底部的透明区会把素材自带白边一起裁掉。这里只裁整卡四角。
         p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
-        p.drawPixmap(QRect(0, 0, SRC_W, SRC_H), *sSheet, QRect(0, 0, SRC_W, SRC_H));
+        p.setRenderHint(QPainter::Antialiasing, true);
+        QPainterPath cardShape;
+        cardShape.addRoundedRect(QRectF(0, 0, SRC_W, SRC_H), 5, 5);
+        p.fillPath(cardShape, Qt::white);
     }
     cache.insert(int(t), cell);
     return cell;

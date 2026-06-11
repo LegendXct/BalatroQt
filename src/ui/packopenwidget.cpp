@@ -313,6 +313,8 @@ void PackOpenWidget::open(const PackContent &content,
     mChoicesUsed = 0;
     mChosenOptions.clear();
     mSelectedHand.clear();
+    mForcedFlipUids.clear();
+    mHandFlipAnimatingUids.clear();
     mFinishing = false;
     mLastDragTo = -1;
     if (mFocusedOptIdx >= 0) {
@@ -343,6 +345,23 @@ void PackOpenWidget::setPackHand(const QVector<CardData> &packHand)
     if (mFinishing && (mContent.kind == PackKind::Buffoon || mContent.kind == PackKind::Standard))
         return;
     refreshAll();
+}
+
+void PackOpenWidget::forceNextHandFlipUids(const QVector<int> &uids)
+{
+    mForcedFlipUids.clear();
+    for (int uid : uids)
+        if (uid > 0) mForcedFlipUids.insert(uid);
+}
+
+void PackOpenWidget::clearHandSelection()
+{
+    if (mSelectedHand.isEmpty()) return;
+    mSelectedHand.clear();
+    layoutPackHand();
+    refreshOptionUi();
+    refreshInventoryUi();
+    emit handSelectionChanged();
 }
 
 void PackOpenWidget::setInventoryConsumables(const QVector<Consumable> &inv)
@@ -425,9 +444,11 @@ void PackOpenWidget::refreshHandUi()
                                     || (oc.rank        != nc.rank)
                                     || (oc.isDebuffed  != nc.isDebuffed)
                                     || (oc.permanentBonusChips != nc.permanentBonusChips);
-            if (visualChanged) {
+            if ((visualChanged || mForcedFlipUids.contains(nc.uid))
+                && !mHandFlipAnimatingUids.contains(nc.uid)) {
                 toFlip.append(item);
                 flipNewData.append(nc);
+                mHandFlipAnimatingUids.insert(nc.uid);
             }
             reordered.append(item);
         } else {
@@ -451,6 +472,7 @@ void PackOpenWidget::refreshHandUi()
         it.value()->deleteLater();
     }
     mPackHandItems = reordered;
+    mForcedFlipUids.clear();
 
     // 触发"翻到背面 → 换数据 → 翻回正面"的双段翻面，对齐 mainwindow.cpp
     // 的塔罗/幻灵节奏：单次 flip() 只是 1→0→1 的 240ms 收缩+扩张，并且在中点
@@ -459,6 +481,7 @@ void PackOpenWidget::refreshHandUi()
     for (int k = 0; k < toFlip.size(); ++k) {
         CardItem *target = toFlip[k];
         const CardData newData = flipNewData[k];
+        const int uid = newData.uid;
         target->flip();
         QPointer<CardItem> guard(target);
         // 1) 翻到背面的中点（≈120ms）切换数据，setCardData 保留 faceUp=false。
@@ -468,6 +491,9 @@ void PackOpenWidget::refreshHandUi()
         // 2) 等首次 flip 整段（240ms）+ 短暂停顿后再翻回正面。
         QTimer::singleShot(300, this, [guard]() {
             if (guard) guard->flip();
+        });
+        QTimer::singleShot(560, this, [this, uid]() {
+            mHandFlipAnimatingUids.remove(uid);
         });
     }
 
@@ -790,6 +816,7 @@ void PackOpenWidget::onPackCardClicked(CardItem *card)
     layoutPackHand();
     refreshOptionUi();
     refreshInventoryUi();
+    emit handSelectionChanged();
 }
 
 void PackOpenWidget::onPackCardDragMoved(CardItem *card, QPointF scenePos)
