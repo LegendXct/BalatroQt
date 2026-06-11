@@ -2828,13 +2828,13 @@ QPixmap collectionPlayingCardPixmap(Enhancement enhancement, Seal seal, Edition 
         p.setRenderHint(QPainter::SmoothPixmapTransform, false);
         p.drawPixmap(QRect(0, 0, CardItem::SRC_W, CardItem::SRC_H), enh, collectionEnhancerRect(enhancement));
         if (enhancement != Enhancement::Stone) {
-            // 图鉴样例固定用第 12 列的 A——程设皮肤下也是整卡人像，需同样叠化。
-            const qreal fo = DeckSkin::faceOpacity(Rank::Ace, enhancement);
-            if (fo < 1.0) p.setOpacity(fo);
             p.drawPixmap(QRect(0, 0, CardItem::SRC_W, CardItem::SRC_H),
                          deck, QRect(12 * CardItem::SRC_W, 0, CardItem::SRC_W, CardItem::SRC_H));
-            if (fo < 1.0) p.setOpacity(1.0);
         }
+        // 图鉴样例是第 12 列的红心 A——程设皮肤下增强边框同样叠在人像之上。
+        if (DeckSkin::enhancementOverArt(Rank::Ace, enhancement))
+            DeckSkin::drawEnhancementOverArt(&p, enh, collectionEnhancerRect(enhancement),
+                                             Rank::Ace, Suit::Hearts, enhancement);
         if (enhancement == Enhancement::Iterator)
             CardItem::drawIteratorOverlay(&p, QRectF(0, 0, CardItem::SRC_W, CardItem::SRC_H));
     }

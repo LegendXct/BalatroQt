@@ -1691,12 +1691,12 @@ QPixmap ShopWidget::playingCardPixmap(const CardData &c) const
         case Suit::Diamonds: row = 2; break;
         case Suit::Spades: row = 3; break;
         }
-        // 程设整卡人像 × 背景式增强：半透明叠化（与 CardItem::paintFront 一致）。
-        const qreal fo = DeckSkin::faceOpacity(c.rank, c.enhancement);
-        if (fo < 1.0) p.setOpacity(fo);
         p.drawPixmap(QRect(0, 0, W, H), deckSheet, QRect(col*W, row*H, W, H));
-        if (fo < 1.0) p.setOpacity(1.0);
     }
+    // 程设整卡人像：背景式增强以不透明"边框"叠在人像上（玻璃整张叠加），角标回贴。
+    if (!enhSheet.isNull() && DeckSkin::enhancementOverArt(c.rank, c.enhancement))
+        DeckSkin::drawEnhancementOverArt(&p, enhSheet, QRect(eCol*W, eRow*H, W, H),
+                                         c.rank, c.suit, c.enhancement);
     if (c.enhancement == Enhancement::Iterator)
         CardItem::drawIteratorOverlay(&p, QRectF(0, 0, W, H));
     p.end();

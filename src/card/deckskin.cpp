@@ -1,6 +1,7 @@
 #include "deckskin.h"
 
 #include <QPainter>
+#include <QPainterPath>
 
 DeckSkin::Id DeckSkin::sCurrent = DeckSkin::Default;
 int DeckSkin::sGeneration = 0;
@@ -30,15 +31,20 @@ QString DeckSkin::name(Id id)
     return QStringLiteral("默认牌组");
 }
 
-const QPixmap &DeckSkin::deckSheet()
+const QPixmap &DeckSkin::baseSheet()
 {
     static QPixmap base(QStringLiteral(":/textures/images/8BitDeck.png"));
+    return base;
+}
+
+const QPixmap &DeckSkin::deckSheet()
+{
     static QPixmap chengshe;
     if (sCurrent == ChengShe) {
-        if (chengshe.isNull()) chengshe = buildChengSheSheet(base);
+        if (chengshe.isNull()) chengshe = buildChengSheSheet(baseSheet());
         if (!chengshe.isNull()) return chengshe;
     }
-    return base;
+    return baseSheet();
 }
 
 QPixmap DeckSkin::buildChengSheSheet(const QPixmap &base)
@@ -101,11 +107,54 @@ QPixmap DeckSkin::buildChengSheSheet(const QPixmap &base)
     return sheet;
 }
 
-qreal DeckSkin::faceOpacity(Rank rank, Enhancement enh)
+bool DeckSkin::enhancementOverArt(Rank rank, Enhancement enh)
 {
     const bool fullArt = sCurrent == ChengShe && rank >= Rank::Jack;
     const bool bgEnhance = enh != Enhancement::None
                         && enh != Enhancement::Stone      // 石头不画卡面
-                        && enh != Enhancement::Iterator;  // 迭代器底图是白底，无需叠化
-    return (fullArt && bgEnhance) ? 0.70 : 1.0;
+                        && enh != Enhancement::Iterator;  // 迭代器有自己的装饰框
+    return fullArt && bgEnhance;
+}
+
+void DeckSkin::drawEnhancementOverArt(QPainter *p,
+                                      const QPixmap &enhSheet, const QRect &enhSrc,
+                                      Rank rank, Suit suit, Enhancement enh)
+{
+    if (enhSheet.isNull() || enhSrc.isNull()) return;
+
+    // 增强层：玻璃贴图自带半透明，整张直接叠加；其余增强不透明，
+    // 中心开圆角窗只留"增强边框"，人像从窗口完整透出（双层都不再加额外透明度）。
+    QPixmap overlay(CW, CH);
+    overlay.fill(Qt::transparent);
+    {
+        QPainter op(&overlay);
+        op.drawPixmap(QRect(0, 0, CW, CH), enhSheet, enhSrc);
+        if (enh != Enhancement::Glass) {
+            op.setCompositionMode(QPainter::CompositionMode_DestinationOut);
+            QPainterPath window;
+            window.addRoundedRect(QRectF(20, 24, CW - 40, CH - 48), 12, 12);
+            op.fillPath(window, Qt::black);
+        }
+    }
+    p->drawPixmap(QRect(0, 0, CW, CH), overlay);
+
+    // 角标（点数字母+小花色）原位回贴：增强边框盖住了角标区域，从原版图集把
+    // 透明底的 glyph 重新印到最上层——与默认牌"卡面在增强之上"的可读性一致。
+    const int col = static_cast<int>(rank) - 2;
+    int row = 0;
+    switch (suit) {
+    case Suit::Hearts:   row = 0; break;
+    case Suit::Clubs:    row = 1; break;
+    case Suit::Diamonds: row = 2; break;
+    case Suit::Spades:   row = 3; break;
+    }
+    const QPixmap corner = baseSheet().copy(col * CW + kCornerSrc.x(),
+                                            row * CH + kCornerSrc.y(),
+                                            kCornerSrc.width(), kCornerSrc.height());
+    p->drawPixmap(kCornerSrc.x(), kCornerSrc.y(), corner);
+    p->save();
+    p->translate(CW, CH);
+    p->rotate(180);
+    p->drawPixmap(kCornerSrc.x(), kCornerSrc.y(), corner);
+    p->restore();
 }
