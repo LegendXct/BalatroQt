@@ -1655,7 +1655,7 @@ Joker createJoker(JokerType type) {
         break;
 
     case JokerType::OperatorOverload:
-        j.name = "运算符重载";
+        j.name = "函数重载";
         j.description = "计分时所有{C:chips}筹码{}与{C:mult}倍率{}的\n"
                         "增减与倍乘{C:attention}互换{}\n"
                         "{C:inactive}swap(mult, chips);";

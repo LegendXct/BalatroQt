@@ -23,7 +23,7 @@ public:
 
     static void loadResources();                  // main.cpp 里调一次
     static QPoint spritePos(JokerType type);      // 在 Jokers.png 里的(列,行)
-    // 程设扩展小丑（运算符重载/类模板）的专属整卡贴图（142×190，已按图集小丑
+    // 程设扩展小丑（函数重载/类模板）的专属整卡贴图（142×190，已按图集小丑
     // 轮廓裁圆角）；非扩展类型返回空 pixmap，调用方回退到 Jokers.png 图集采样。
     static QPixmap customCardPixmap(JokerType type);
 

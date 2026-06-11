@@ -25,7 +25,7 @@ int templateHandCards(HandType t)
     }
 }
 
-// 运算符重载：事件 kind 的筹码/倍率互换表（×倍率 → ×筹码用新 kind ChipsXBoost）。
+// 函数重载：事件 kind 的筹码/倍率互换表（×倍率 → ×筹码用新 kind ChipsXBoost）。
 ScoreEventKind overloadSwappedKind(ScoreEventKind k)
 {
     switch (k) {
@@ -1084,7 +1084,7 @@ void GameState::playCards(const QVector<int> &indices) {
         }
     }
 
-    // 运算符重载（程设扩展）：全部事件生成完毕后统一交换筹码/倍率贡献并重算。
+    // 函数重载（程设扩展）：全部事件生成完毕后统一交换筹码/倍率贡献并重算。
     applyOperatorOverloadIfHeld(result);
 
     mPendingHandScore = result.chips * result.mult * result.xmult;
@@ -1464,7 +1464,7 @@ void GameState::finishWinningRound()
     if (refreshAnteVoucher) mVoucherRolledAnte = mAnte;
     for (int i = 0; i < extraVouchersFromTag; ++i) mShop.appendVoucherOffer();
     if (mFirstShop && !DemoScript::active()) {
-        // 演示模式下不能进这个分支：脚本已在 scriptedBoosterOffers 里放了 Mega Arcana + 陪衬包，
+        // 演示模式下不能进这个分支：脚本已在 scriptedBoosterOffers 里放了普通塔罗包 + 游戏卡包，
         // 一旦走这里会被 setBoosterOfferPack 覆盖回 Buffoon Normal。
         auto &b = mShop.boosterOffersMutable();
         if (b.size() >= 1) {
@@ -2403,7 +2403,7 @@ double GameState::simulatePlayScore(const QVector<int> &orderedIndices)
     }
 
     // 类模板（程设扩展）干跑近似：未实例化时任何牌型都会被实例化并立即吃倍率（D2），
-    // 已实例化只对匹配牌型生效。运算符重载的交换不进干跑——干跑没有完整事件流，
+    // 已实例化只对匹配牌型生效。函数重载的交换不进干跑——干跑没有完整事件流，
     // "最佳出牌"按未交换分数排序，是可接受的近似。
     for (const Joker &j : mJokers) {
         if (j.type != JokerType::ClassTemplate || j.isDebuffed) continue;
@@ -2716,10 +2716,30 @@ QVector<CardData> GameState::drawPackHand()
 {
     QVector<CardData> out;
     int n = handSize();
-    for (int i = 0; i < n; ++i) {
-        if (mDeck.isEmpty()) mDeck.reset();
-        if (mDeck.isEmpty()) break;
-        out.append(mDeck.draw());
+    if (DemoScript::active() && DemoScript::shopVisit() == 1) {
+        // 路演首店塔罗包：临时手牌必须至少展示一张 J/Q/K/A。
+        // 先合并完整牌组，再从真实卡牌中选出目标点数；未选中的牌原样放回摸牌堆。
+        mDeck.reset();
+        QVector<CardData> pool;
+        while (!mDeck.isEmpty()) pool.append(mDeck.draw());
+
+        const Rank showcaseRanks[] = {Rank::Jack, Rank::Queen, Rank::King, Rank::Ace};
+        for (Rank rank : showcaseRanks) {
+            auto it = std::find_if(pool.begin(), pool.end(), [rank](const CardData &c) {
+                return c.rank == rank;
+            });
+            if (it == pool.end()) continue;
+            out.append(*it);
+            pool.erase(it);
+        }
+        while (out.size() < n && !pool.isEmpty()) out.append(pool.takeFirst());
+        mDeck.returnCards(pool);
+    } else {
+        for (int i = 0; i < n; ++i) {
+            if (mDeck.isEmpty()) mDeck.reset();
+            if (mDeck.isEmpty()) break;
+            out.append(mDeck.draw());
+        }
     }
     // 塔罗 / 幻灵包打开时，临时手牌也要遵循玩家当前的理牌方式——
     // 否则随机抽出的顺序看起来"乱"。Manual 模式不动顺序（玩家自己拖过的当前手牌的次序与抽出的随机序无关，

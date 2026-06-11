@@ -11,14 +11,14 @@
 struct ShopOffer;
 
 // 路演演示模式：开启时按 V2 固定剧本演出。
-// 小盲 → 第一商店（运算符重载/类模板，重掷后迭代器/浅拷贝，塔罗包含灵魂）
+// 小盲 → 第一商店（函数重载/迭代器，扩容补闪箔蓝图，重掷后类模板/浅拷贝，塔罗包含灵魂）
 // → 大盲（浅拷贝 + 迭代器同花）→ 第二商店木星 → Boss 大墙。
 //
 // 实现哲学：用静态状态机替代 RNG，hook 点尽量少——
 //   Deck::reset()        → reorderDeckForNextBlind 按抽牌顺序重排起手与补牌
 //   Shop::rerollShopOnly → scriptedShopOffers 替换主货架
 //   Shop::roll()         → scriptedVoucherOffers / scriptedBoosterOffers 替换 voucher/包
-//   generatePackContent  → scriptedPackContent 固定超级塔罗包内容
+//   generatePackContent  → scriptedPackContent 固定普通塔罗包与游戏卡包内容
 //   randomBossEffect     → 第一 Ante 直接返回 TheWall
 class DemoScript {
 public:
@@ -51,7 +51,7 @@ public:
     // 返回 BossEffect::None 表示不干预，由原 RNG 决定。
     static BossEffect scriptedBoss(int ante);
 
-    // V1 兼容：若外部流程购买 Overstock 扩槽，第一商店额外补木星。
+    // 第一商店购买 Overstock 扩槽后，新增货架格固定补闪箔蓝图。
     static bool scriptedExtraShopOffer(ShopOffer &out);
 
     // Soul 塔罗 → 生成传奇小丑；演示模式固定特里布莱。返回 None 时由原 RNG 决定。

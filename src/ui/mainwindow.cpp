@@ -9878,7 +9878,7 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev, double percent)
         break;
 
     case ScoreEventKind::ChipsXBoost:
-        // 运算符重载交换出的 ×筹码：蓝色 ×N 演出，乘到筹码计数上。
+        // 函数重载交换出的 ×筹码：蓝色 ×N 演出，乘到筹码计数上。
         AudioManager::instance()->play(QStringLiteral("multhit2"), statusPitch, 0.7);
         color = QColor("#009dff");
         text = QStringLiteral("×%1").arg(QString::number(ev.xmultValue, 'g', 3));

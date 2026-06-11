@@ -392,7 +392,7 @@ void Shop::rerollShopOnly() {
 void Shop::ensureShopOfferCount()
 {
     while (mShopOffers.size() < mShopSlots) {
-        // 演示模式：Overstock 买完扩槽 1，新槽由 demoscript 指定（演示里是木星）。
+        // 演示模式：Overstock 买完扩槽 1，新槽由 demoscript 指定（当前剧本为闪箔蓝图）。
         ShopOffer demoExtra;
         if (DemoScript::active() && DemoScript::scriptedExtraShopOffer(demoExtra))
             mShopOffers.append(demoExtra);

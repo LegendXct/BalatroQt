@@ -67,7 +67,7 @@ enum class JokerType {
     // Batch 10：补充小丑
     SixthSense, RedCard, BaseballCard, TradingCard, Matador, Astronomer,
     // 程设扩展：C++ 概念小丑（专属卡面见 joker_cs_*.png）
-    OperatorOverload,   // 运算符重载：计分事件流里筹码/倍率贡献互换
+    OperatorOverload,   // 函数重载：计分事件流里筹码/倍率贡献互换
     ClassTemplate,      // 类模板：每底注第一种牌型实例化，该牌型 ×构成张数
 };
 

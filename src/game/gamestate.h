@@ -323,7 +323,7 @@ private:
     QVector<ShallowLink> mShallowLinks;
     CardData *findCardByUidAnywhere(int uid);   // 手牌 → 摸牌堆 → 弃牌堆
 
-    // ── 运算符重载小丑（程设扩展）：事件流筹码/倍率互换 ──
+    // ── 函数重载小丑（程设扩展）：事件流筹码/倍率互换 ──
     void applyOperatorOverloadIfHeld(HandResult &result);
     BlindState mBlindStates[3] = {
         BlindState::Current, BlindState::Upcoming, BlindState::Upcoming

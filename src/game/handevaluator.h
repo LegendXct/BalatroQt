@@ -40,7 +40,7 @@ enum class ScoreEventKind {
     JokerRetrigger,     // 哑剧/袜子等小丑提供重新触发提示（只负责动画，不改数值）
     GlassShatter,       // 玻璃牌破碎动画
     BlueSealPlanet,     // 蓝色蜡封生成星球牌提示
-    ChipsXBoost,        // 运算符重载交换出的 ×筹码（蓝色 ×N 打在筹码计数上）
+    ChipsXBoost,        // 函数重载交换出的 ×筹码（蓝色 ×N 打在筹码计数上）
 };
 
 struct ScoreEvent {

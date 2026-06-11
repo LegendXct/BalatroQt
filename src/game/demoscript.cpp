@@ -52,14 +52,14 @@ static QVector<ScriptedCardSpec> scriptedDrawsForBlind(int blindNo)
                  {R::King,  S::Clubs},    {R::Four,  S::Spades},
                  {R::Two,   S::Hearts} };
     case 2:
-        return { {R::Ten,   S::Hearts}, {R::Three, S::Diamonds},
-                 {R::Nine,  S::Hearts}, {R::Eight, S::Hearts},
+        return { {R::Queen, S::Hearts}, {R::Three, S::Diamonds},
+                 {R::Jack,  S::Hearts}, {R::Eight, S::Hearts},
                  {R::Six,   S::Hearts}, {R::Two,   S::Spades},
                  {R::Queen, S::Spades}, {R::Four,  S::Clubs} };
     case 3:
-        // 两张迭代器牌必须匹配增强状态，不能误取牌组里的天然红心 10。
-        return { {R::Ace,   S::Hearts},      {R::Ten,   S::Hearts, true},
-                 {R::Ten,   S::Hearts, true},{R::Eight, S::Hearts},
+        // 两张迭代器牌必须匹配增强状态，不能误取牌组里的天然红心 Q。
+        return { {R::Ace,   S::Hearts},        {R::Queen, S::Hearts, true},
+                 {R::Queen, S::Hearts, true},  {R::Eight, S::Hearts},
                  {R::Five,  S::Hearts},      {R::Three, S::Spades},
                  {R::Seven, S::Clubs},       {R::Two,   S::Diamonds} };
     default: return {};
@@ -74,7 +74,7 @@ void DemoScript::reorderDeckForNextBlind(QVector<CardData> &pile)
 
     int frontPos = 0;
     for (const auto &w : want) {
-        // 在 [frontPos, end) 中找目标卡；Boss 的两个红心 10 还必须是迭代器增强。
+        // 在 [frontPos, end) 中找目标卡；Boss 的两个红心 Q 还必须是迭代器增强。
         auto it = std::find_if(pile.begin() + frontPos, pile.end(),
                                [&w](const CardData &c) {
                                    return c.rank == w.rank && c.suit == w.suit
@@ -110,13 +110,14 @@ void DemoScript::scriptedShopOffers(QVector<ShopOffer> &out, int slotCount)
 {
     out.clear();
     if (sShopVisit == 1 && sShopRerolls == 0) {
-        // 第一商店初始货架：两张课程设计小丑。
+        // 第一商店初始货架：函数重载小丑 + 迭代器塔罗。
         out.append(makeJokerOffer(JokerType::OperatorOverload));
-        out.append(makeJokerOffer(JokerType::ClassTemplate));
-    } else if (sShopVisit == 1) {
-        // 第一次及后续重掷：固定刷出两张课程设计塔罗，各 $3。
         out.append(makeConsumableOffer(OfferKind::Tarot, ConsumableType::Tarot_Iterator));
+    } else if (sShopVisit == 1) {
+        // 重掷后：类模板小丑 + 浅拷贝塔罗；扩容后的第三格放普通陪衬小丑。
+        out.append(makeJokerOffer(JokerType::ClassTemplate));
         out.append(makeConsumableOffer(OfferKind::Tarot, ConsumableType::Tarot_ShallowCopy));
+        if (slotCount >= 3) out.append(makeJokerOffer(JokerType::JollyJoker));
     } else if (sShopVisit == 2) {
         // 第二商店：木星 + 两张普通陪衬小丑，剧本只购买木星。
         out.append(makeConsumableOffer(OfferKind::Planet, ConsumableType::Planet_Jupiter));
@@ -132,8 +133,7 @@ void DemoScript::scriptedShopOffers(QVector<ShopOffer> &out, int slotCount)
         out.append(makeJokerOffer(JokerType::LustyJoker));
         out.append(makeJokerOffer(JokerType::WrathfulJoker));
     }
-    // 脚本可以有意提供超过基础槽位的固定商品（第二商店的木星 + 两张陪衬小丑）。
-    // 这里只补不足，不裁掉已经写入的剧本商品。
+    // 第二商店固定写入木星 + 两张陪衬小丑；其它阶段按实际槽位补足。
     while (out.size() < slotCount) {
         ShopOffer extra;
         if (scriptedExtraShopOffer(extra)) out.append(extra);
@@ -143,12 +143,9 @@ void DemoScript::scriptedShopOffers(QVector<ShopOffer> &out, int slotCount)
 
 bool DemoScript::scriptedExtraShopOffer(ShopOffer &out)
 {
-    // V1 兼容钩子：若外部仍通过 Overstock 扩充第一商店，补一张木星。
-    if (sShopVisit != 1) return false;
-    out = ShopOffer{};
-    out.kind = OfferKind::Planet;
-    out.consumable = ConsumableType::Planet_Jupiter;
-    out.cost = 3;   // 原版行星价 $3
+    // 第一商店购买扩容后新增第三格，固定补一张闪箔蓝图。
+    if (sShopVisit != 1 || sShopRerolls != 0) return false;
+    out = makeJokerOffer(JokerType::Blueprint, Edition::Foil);
     return true;
 }
 
@@ -161,8 +158,14 @@ JokerType DemoScript::scriptedLegendaryJoker()
 
 void DemoScript::scriptedVoucherOffers(QVector<ShopOffer> &out)
 {
-    // V2 不固定优惠券；第一商店必须通过一次 $5 重掷进入双程设塔罗货架。
     out.clear();
+    if (sShopVisit == 1) {
+        ShopOffer o;
+        o.kind = OfferKind::Voucher;
+        o.voucher = VoucherType::Overstock;
+        o.cost = voucherData(VoucherType::Overstock).cost;
+        out.append(o);
+    }
 }
 
 void DemoScript::scriptedBoosterOffers(QVector<ShopOffer> &out)
@@ -178,8 +181,8 @@ void DemoScript::scriptedBoosterOffers(QVector<ShopOffer> &out)
         return o;
     };
     if (sShopVisit == 1) {
-        // 超级塔罗包固定包含灵魂；旁边放一个不参与剧本的普通游戏卡包。
-        out.append(makePack(PackKind::Arcana,   PackSize::Mega,   6));
+        // 普通塔罗包固定包含灵魂；普通游戏卡包展示指定增强/蜡封/版本组合。
+        out.append(makePack(PackKind::Arcana,   PackSize::Normal, 4));
         out.append(makePack(PackKind::Standard, PackSize::Normal, 4));
     } else if (sShopVisit == 2) {
         // 第二商店不再出现塔罗包，避免和第一商店的固定路线冲突。
@@ -223,6 +226,22 @@ bool DemoScript::scriptedPackContent(PackKind kind, PackSize size, PackContent &
         };
         return true;
     }
+    if (sShopVisit == 1 && kind == PackKind::Standard && size == PackSize::Normal) {
+        // 普通游戏卡包：红蜡封普通 K、钢铁蓝蜡封 10、镭射倍率 9。
+        fillBase(3, 1);
+        auto mk = [](Rank r, Suit s, Enhancement e, Edition ed, Seal sl) {
+            CardData c; c.rank = r; c.suit = s; c.enhancement = e; c.edition = ed; c.seal = sl;
+            c.assignNewUid();
+            return c;
+        };
+        using R = Rank; using S = Suit; using E = Enhancement; using ED = Edition; using SL = Seal;
+        out.standardCards = {
+            mk(R::King, S::Spades, E::None,  ED::None,        SL::Red),
+            mk(R::Ten,  S::Hearts, E::Steel, ED::None,        SL::Blue),
+            mk(R::Nine, S::Clubs,  E::Mult,  ED::Holographic, SL::None),
+        };
+        return true;
+    }
     if (kind == PackKind::Standard && size == PackSize::Mega) {
         // 超级游戏卡包：5 选 2。展示蜡封 + 增强组合，覆盖红/蓝/金/紫四种蜡封 + 幸运/钢铁/万能三种增强。
         fillBase(5, 2);
@@ -242,7 +261,7 @@ bool DemoScript::scriptedPackContent(PackKind kind, PackSize size, PackContent &
         return true;
     }
     if (kind == PackKind::Arcana && size == PackSize::Mega) {
-        // 第一商店超级塔罗包：灵魂置于首位；两张课程设计塔罗改由主货架重掷刷出。
+        // V1 兼容：其它入口若生成超级塔罗包，仍固定把灵魂放在首位。
         fillBase(5, 2);
         out.consumables = {
             ConsumableType::Spectral_Soul,
@@ -253,8 +272,8 @@ bool DemoScript::scriptedPackContent(PackKind kind, PackSize size, PackContent &
         };
         return true;
     }
-    if (kind == PackKind::Arcana) {
-        // V1 兼容钩子：若其它演示入口生成普通塔罗包，仍固定提供灵魂并开出特里布莱。
+    if (sShopVisit == 1 && kind == PackKind::Arcana) {
+        // 第一商店普通塔罗包：灵魂 + 两张不重复的陪衬塔罗，3 选 1。
         fillBase(3, 1);
         out.consumables = {
             ConsumableType::Spectral_Soul,
