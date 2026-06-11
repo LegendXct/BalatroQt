@@ -3,6 +3,7 @@
 
 #include <QPixmap>
 #include <QString>
+#include "carddata.h"
 
 // 定制牌组（卡面换肤）。原理：只替换 8BitDeck 图集里 J/Q/K/A 的格子贴图，
 // CardData / HandEvaluator / GameState 完全不感知皮肤——数值与游戏逻辑不变。
@@ -23,6 +24,11 @@ public:
 
     // 换肤代数：CardItem 卡面缓存 key 掺入该值，切换皮肤后旧缓存条目自动失效。
     static int generation() { return sGeneration; }
+
+    // 背景式增强（奖励/倍率/万能/幸运/玻璃/钢铁/黄金）画在卡面之下；程设皮肤的
+    // J/Q/K/A 整卡人像不透明、会盖死增强底色，此时人像以 70% 不透明度叠化让底色
+    // 透出（倍率泛红/钢铁泛灰/玻璃整卡半透明）。所有卡面合成路径统一经这里取值。
+    static qreal faceOpacity(Rank rank, Enhancement enh);
 
 private:
     static QPixmap buildChengSheSheet(const QPixmap &base);

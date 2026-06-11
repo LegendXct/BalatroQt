@@ -100,3 +100,12 @@ QPixmap DeckSkin::buildChengSheSheet(const QPixmap &base)
     }
     return sheet;
 }
+
+qreal DeckSkin::faceOpacity(Rank rank, Enhancement enh)
+{
+    const bool fullArt = sCurrent == ChengShe && rank >= Rank::Jack;
+    const bool bgEnhance = enh != Enhancement::None
+                        && enh != Enhancement::Stone      // 石头不画卡面
+                        && enh != Enhancement::Iterator;  // 迭代器底图是白底，无需叠化
+    return (fullArt && bgEnhance) ? 0.70 : 1.0;
+}

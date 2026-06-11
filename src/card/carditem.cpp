@@ -251,8 +251,13 @@ void CardItem::paintFront(QPainter *painter)
             bp.setRenderHint(QPainter::SmoothPixmapTransform, false);
             QRect enh = enhanceSrcRect();
             if (!enh.isNull()) bp.drawPixmap(cacheRect, *sEnhSheet, enh);
-            if (mData.enhancement != Enhancement::Stone)
+            if (mData.enhancement != Enhancement::Stone) {
+                // 程设整卡人像会盖死底下的背景式增强，按需半透明叠化。
+                const qreal fo = DeckSkin::faceOpacity(mData.rank, mData.enhancement);
+                if (fo < 1.0) bp.setOpacity(fo);
                 bp.drawPixmap(cacheRect, DeckSkin::deckSheet(), deckSrcRect());
+                if (fo < 1.0) bp.setOpacity(1.0);
+            }
             // 迭代器增强：画在 body 里，让版本 shader / debuff 滤镜一并作用于装饰框。
             if (mData.enhancement == Enhancement::Iterator)
                 drawIteratorOverlay(&bp, QRectF(cacheRect));
