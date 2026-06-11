@@ -903,6 +903,7 @@ MainWindow::MainWindow(QWidget *parent)
                        << "scene =" << QString("%1x%2").arg(mSceneW).arg(mSceneH);
 
     loadFonts();
+    CardItem::setLinkTagFont(mPixelFont);   // 浅拷贝地址角标用像素字体
 
     menuBar()->hide();
     statusBar()->hide();
@@ -4952,6 +4953,19 @@ void MainWindow::refreshHand() {
             mSelected.append(top);
         }
     }
+
+    // 浅拷贝链接：两侧牌面挂同一"共享地址"角标（隐喻两个指针指向同一块数据）；
+    // 链接解除（一侧被摧毁/新开一局）后 uid 查不到，角标自动清空。
+    QHash<int, QString> linkTags;
+    for (const auto &pr : mGameState->shallowLinkPairs()) {
+        const QString addr = QStringLiteral("0x%1")
+            .arg(QString::number(qMin(pr.first, pr.second), 16).toUpper());
+        linkTags.insert(pr.first, addr);
+        linkTags.insert(pr.second, addr);
+    }
+    for (auto *c : mHandCards) c->setLinkTag(linkTags.value(c->cardData().uid));
+    for (auto *c : mPlayedCards)
+        if (c) c->setLinkTag(linkTags.value(c->cardData().uid));
 
     layoutHandCards();
     refreshCounters();
