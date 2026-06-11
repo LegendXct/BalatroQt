@@ -22,7 +22,7 @@ BossInfo bossInfo(BossEffect e) {
     case BossEffect::TheEye:     return {"眼",     "本盲注不能重复出同一种牌型"};
     case BossEffect::TheOx:      return {"公牛",   "打出最常用牌型时金币归零"};
     case BossEffect::TheHouse:   return {"房屋",   "第一手牌背面朝下发出"};
-    case BossEffect::TheWheel:   return {"车轮",   "每张牌有 1/7 概率背面朝下发出"};
+    case BossEffect::TheWheel:   return {"车轮",   "1/7概率牌背朝上"};
     case BossEffect::TheFish:    return {"鱼",     "每次出牌后补的牌背面朝下"};
     case BossEffect::TheMark:    return {"标记",   "所有人头牌背面朝下发出"};
     case BossEffect::ThePillar:  return {"支柱",   "本 Ante 之前打出过的牌被禁用"};
