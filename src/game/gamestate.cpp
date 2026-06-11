@@ -1464,7 +1464,7 @@ void GameState::finishWinningRound()
     if (refreshAnteVoucher) mVoucherRolledAnte = mAnte;
     for (int i = 0; i < extraVouchersFromTag; ++i) mShop.appendVoucherOffer();
     if (mFirstShop && !DemoScript::active()) {
-        // 演示模式下不能进这个分支：脚本已在 scriptedBoosterOffers 里放了 Mega Buffoon + Arcana，
+        // 演示模式下不能进这个分支：脚本已在 scriptedBoosterOffers 里放了 Mega Arcana + 陪衬包，
         // 一旦走这里会被 setBoosterOfferPack 覆盖回 Buffoon Normal。
         auto &b = mShop.boosterOffersMutable();
         if (b.size() >= 1) {

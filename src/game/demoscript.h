@@ -10,16 +10,16 @@
 
 struct ShopOffer;
 
-// 路演演示模式：游戏设置里勾选后开关启用。开启时每次"开始新的一局"按下面这个固定剧本
-// 演出：小盲注 → 第一商店（蓝图/头脑风暴/DNA/特里布莱+ Grabber + 天体包木星 + 奥秘包正义）
-//   → 大盲注（人头同花 + 对子 + 玻璃 ♠7）→ 第二商店（不买东西）→ Boss 支柱（同花顺含玻璃 ♠7）。
+// 路演演示模式：开启时按 V2 固定剧本演出。
+// 小盲 → 第一商店（运算符重载/类模板，重掷后迭代器/浅拷贝，塔罗包含灵魂）
+// → 大盲（浅拷贝 + 迭代器同花）→ 第二商店木星 → Boss 大墙。
 //
 // 实现哲学：用静态状态机替代 RNG，hook 点尽量少——
-//   Deck::reset()        → reorderDeckForNextBlind 把脚本规定的 8 张卡换到顶
+//   Deck::reset()        → reorderDeckForNextBlind 按抽牌顺序重排起手与补牌
 //   Shop::rerollShopOnly → scriptedShopOffers 替换主货架
 //   Shop::roll()         → scriptedVoucherOffers / scriptedBoosterOffers 替换 voucher/包
-//   generatePackContent  → scriptedPackContent 替换奥秘/天体包内容
-//   randomBossEffect     → 第一 Ante 直接返回 ThePillar
+//   generatePackContent  → scriptedPackContent 固定超级塔罗包内容
+//   randomBossEffect     → 第一 Ante 直接返回 TheWall
 class DemoScript {
 public:
     static bool active() { return sActive; }
@@ -35,7 +35,7 @@ public:
     static int rerollCount() { return sShopRerolls; }
     static int blindEntered(){ return sBlindEntered; }
 
-    // 把 pile 重排：脚本指定的 8 张卡放到最前，其它顺序不动。Deck::reset() 里调用。
+    // 把 pile 重排：脚本指定的抽牌序放到最前，其它顺序不动。Deck::reset() 里调用。
     static void reorderDeckForNextBlind(QVector<CardData> &pile);
 
     // 主货架/voucher/包：调用方先 clear 再调用。out 容量由 caller 控制。
@@ -47,12 +47,11 @@ public:
     // 包内容覆盖：返回 true 表示已写入 out，调用方跳过默认随机生成。
     static bool scriptedPackContent(PackKind kind, PackSize size, PackContent &out);
 
-    // 第一 Ante Boss 固定为符号(TheMark)；其它 Ante 不干预（路演 4 分钟内打不到）。
+    // 第一 Ante Boss 固定为大墙(TheWall)；其它 Ante 不干预。
     // 返回 BossEffect::None 表示不干预，由原 RNG 决定。
     static BossEffect scriptedBoss(int ante);
 
-    // 买 Overstock 后 shop 槽位 +1，ensureShopOfferCount 会调这个补一张；演示固定塞木星。
-    // 返回 true = 已写入 out；false = 不接管。
+    // V1 兼容：若外部流程购买 Overstock 扩槽，第一商店额外补木星。
     static bool scriptedExtraShopOffer(ShopOffer &out);
 
     // Soul 塔罗 → 生成传奇小丑；演示模式固定特里布莱。返回 None 时由原 RNG 决定。

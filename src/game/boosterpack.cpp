@@ -329,7 +329,7 @@ PackContent generatePackContent(PackKind k, PackSize s, bool omenGlobe,
     pc.optionsToShow = optionsFor(k, s);
     pc.choicesAllowed = choicesFor(s);
 
-    // 演示模式：天体包必含 Jupiter、奥秘包必含 Justice。其它种类不干预。
+    // 演示模式：礼包内容由 DemoScript 按当前路演剧本固定生成。
     if (DemoScript::active() && DemoScript::scriptedPackContent(k, s, pc))
         return pc;
 
