@@ -10,11 +10,7 @@
 
 // ─────────────────── 程设扩展：C++ 概念道具的机制 helpers ───────────────────
 namespace {
-// 迭代器增强：每次打出后点数 +1，K→A→2 回绕（区别于"力量"塔罗的 nextRank：那个 A 封顶）。
-Rank iterNextRank(Rank r)
-{
-    return (r == Rank::Ace) ? Rank::Two : static_cast<Rank>(static_cast<int>(r) + 1);
-}
+// （迭代器点数递推 iterNextRank 已迁入 carddata.h，模型与 UI 共用。）
 
 // 类模板：牌型 → 构成张数（高牌1 对子2 三条3 两对/四条4 其余5）。
 int templateHandCards(HandType t)

@@ -5,6 +5,7 @@
 #include <QVector>
 #include <QHash>
 #include <QSet>
+#include <QPair>
 #include <memory>
 #include "gamedeck.h"
 #include "deck.h"
@@ -177,6 +178,13 @@ public:
     // ── 浅拷贝塔罗：两张牌共享状态（点数/花色/增强/版本/蜡封/debuff/永久加筹） ──
     void registerShallowLink(int uidA, int uidB);
     void syncShallowLinks();
+    // UI 用：当前所有链接对（uidA, uidB），给两侧牌面画共享地址角标。
+    QVector<QPair<int,int>> shallowLinkPairs() const {
+        QVector<QPair<int,int>> out;
+        out.reserve(mShallowLinks.size());
+        for (const auto &l : mShallowLinks) out.append({l.uidA, l.uidB});
+        return out;
+    }
 
     // 消耗品接口
     const QVector<Consumable> &consumables() const { return mConsumables; }
