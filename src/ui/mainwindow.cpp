@@ -9151,6 +9151,7 @@ void MainWindow::animateScoreTotalThenFinalize(double gained, int /*delayAfterEv
         // 火焰目标在 900ms 后归零(spring ease 自然熄灭)
         scheduleGame(900, [this]() { resetScoreFlame(); });
 
+        auto flyOut = [this]() {
         animatePlayedCardsToDiscardThen([this]() {
             mGameState->finalizePlayedHand();
             mScoringInProgress = false;
@@ -9168,6 +9169,48 @@ void MainWindow::animateScoreTotalThenFinalize(double gained, int /*delayAfterEv
                 updateHandPreview();   // 主动重算一次，让侧栏 chips/mult 立刻回到默认/选牌 preview。
             }
         });
+        };
+
+        // 迭代器增强：总分计完、牌飞向弃牌堆之前，把"点数 +1"翻给玩家看。
+        // 数据层的真正 +1 在 finalizePlayedHand（flyOut 内）执行，这里只改显示副本。
+        // 节拍用固定时长 singleShot（与塔罗翻面流程一致）：flip() 本身 240ms 固定，
+        // 若走 scheduleGame 的倍速缩放，高倍速下"改点数"会跑到翻面中点前头穿帮。
+        QVector<int> iterIdx;
+        for (int i = 0; i < mPlayedCards.size(); ++i) {
+            CardItem *c = mPlayedCards[i];
+            if (c && c->cardData().enhancement == Enhancement::Iterator
+                && !mShatteredPlayedIndices.contains(i))
+                iterIdx.append(i);
+        }
+        if (iterIdx.isEmpty()) { flyOut(); return; }
+
+        for (int k = 0; k < iterIdx.size(); ++k) {
+            const int idx = iterIdx[k];
+            const int t0 = 150 * (k + 1);
+            QTimer::singleShot(t0, this, [this, idx]() {          // 翻向背面
+                if (idx < 0 || idx >= mPlayedCards.size()) return;
+                CardItem *c = mPlayedCards[idx];
+                if (!c) return;
+                c->flip();
+                AudioManager::instance()->play(QStringLiteral("card1"), 1.0, 1.0);
+            });
+            QTimer::singleShot(t0 + 130, this, [this, idx]() {    // 翻面中点已过，背面期间改显示点数
+                if (idx < 0 || idx >= mPlayedCards.size()) return;
+                CardItem *c = mPlayedCards[idx];
+                if (!c) return;
+                CardData d = c->cardData();
+                d.rank = iterNextRank(d.rank);
+                c->setCardData(d);   // setCardData 保留 faceUp=false，不打断翻面
+            });
+            QTimer::singleShot(t0 + 320, this, [this, idx]() {    // 翻回正面，新点数亮出来
+                if (idx < 0 || idx >= mPlayedCards.size()) return;
+                CardItem *c = mPlayedCards[idx];
+                if (!c) return;
+                c->flip();
+                AudioManager::instance()->play(QStringLiteral("tarot2"), 1.0, 0.6);
+            });
+        }
+        QTimer::singleShot(150 * int(iterIdx.size()) + 700, this, flyOut);
     });
     anim->start(QAbstractAnimation::DeleteWhenStopped);
 }
