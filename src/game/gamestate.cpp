@@ -582,9 +582,18 @@ void GameState::dealCards(DrawContext ctx) {
         CardData c = mDeck.draw();
         if (!chicot) {
             bool faceDown = false;
-            // 轮子(The Wheel)：1/7 概率背面朝下。
-            if (mBossEffect == BossEffect::TheWheel
-                && QRandomGenerator::global()->bounded(7) == 0) faceDown = true;
+            // 车轮(The Wheel)：普通游戏按 1/7 随机翻面；路演 Boss 固定只翻 ♠3 和 ♦2。
+            if (mBossEffect == BossEffect::TheWheel) {
+                const bool scriptedWheel = DemoScript::active()
+                    && mBlindType == BlindType::Boss
+                    && DemoScript::blindEntered() == 3;
+                if (scriptedWheel) {
+                    faceDown = (c.suit == Suit::Spades && c.rank == Rank::Three)
+                        || (c.suit == Suit::Diamonds && c.rank == Rank::Two);
+                } else if (QRandomGenerator::global()->bounded(7) == 0) {
+                    faceDown = true;
+                }
+            }
             // 标记(The Mark)：人头牌背面朝下。
             if (mBossEffect == BossEffect::TheMark
                 && (c.rank == Rank::Jack || c.rank == Rank::Queen || c.rank == Rank::King))

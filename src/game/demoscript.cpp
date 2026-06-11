@@ -287,7 +287,7 @@ bool DemoScript::scriptedPackContent(PackKind kind, PackSize size, PackContent &
 
 BossEffect DemoScript::scriptedBoss(int ante)
 {
-    // 第一 Ante 固定为墙壁：只提高目标分数，不干扰固定手牌与扩展牌演示。
-    if (ante == 1) return BossEffect::TheWall;
+    // 第一 Ante 固定为车轮；演示局的具体背面牌由 GameState::dealCards 确定。
+    if (ante == 1) return BossEffect::TheWheel;
     return BossEffect::None;
 }

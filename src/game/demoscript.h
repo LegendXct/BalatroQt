@@ -12,14 +12,14 @@ struct ShopOffer;
 
 // 路演演示模式：开启时按 V2 固定剧本演出。
 // 小盲 → 第一商店（函数重载/迭代器，扩容补闪箔蓝图，重掷后类模板/浅拷贝，塔罗包含灵魂）
-// → 大盲（浅拷贝 + 迭代器同花）→ 第二商店木星 → Boss 大墙。
+// → 大盲（浅拷贝 + 迭代器同花）→ 第二商店木星 → Boss 车轮。
 //
 // 实现哲学：用静态状态机替代 RNG，hook 点尽量少——
 //   Deck::reset()        → reorderDeckForNextBlind 按抽牌顺序重排起手与补牌
 //   Shop::rerollShopOnly → scriptedShopOffers 替换主货架
 //   Shop::roll()         → scriptedVoucherOffers / scriptedBoosterOffers 替换 voucher/包
 //   generatePackContent  → scriptedPackContent 固定普通塔罗包与游戏卡包内容
-//   randomBossEffect     → 第一 Ante 直接返回 TheWall
+//   randomBossEffect     → 第一 Ante 直接返回 TheWheel
 class DemoScript {
 public:
     static bool active() { return sActive; }
@@ -47,7 +47,7 @@ public:
     // 包内容覆盖：返回 true 表示已写入 out，调用方跳过默认随机生成。
     static bool scriptedPackContent(PackKind kind, PackSize size, PackContent &out);
 
-    // 第一 Ante Boss 固定为大墙(TheWall)；其它 Ante 不干预。
+    // 第一 Ante Boss 固定为车轮(TheWheel)；其它 Ante 不干预。
     // 返回 BossEffect::None 表示不干预，由原 RNG 决定。
     static BossEffect scriptedBoss(int ante);
 
