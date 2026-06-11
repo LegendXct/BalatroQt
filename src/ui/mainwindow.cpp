@@ -164,6 +164,9 @@ static bool usesOriginalTarotFlip(ConsumableType type)
     case ConsumableType::Tarot_Moon:
     case ConsumableType::Tarot_Sun:
     case ConsumableType::Tarot_World:
+    // 程设扩展塔罗：迭代器(上增强)/浅拷贝(左牌变右牌副本)也走"翻背→改→翻回"。
+    case ConsumableType::Tarot_Iterator:
+    case ConsumableType::Tarot_ShallowCopy:
         return true;
     default:
         return false;
