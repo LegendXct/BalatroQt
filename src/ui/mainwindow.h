@@ -76,6 +76,7 @@ private:
     QLabel *mLblTarget = nullptr; // 目标分数
     QLabel *mLblReward = nullptr;
     QLabel *mLblScore = nullptr; // 回合分数
+    QLabel *mStakeChip = nullptr; // 当前赌注筹码
     QProgressBar *mScoreProgressBar = nullptr; // 回合分数 / 目标分数进度条
     QGraphicsDropShadowEffect *mScoreProgressGlow = nullptr; // 进度条发光效果
     QPropertyAnimation *mScoreProgressAnim = nullptr; // 进度条平滑过渡
@@ -475,7 +476,8 @@ private:
     void updateSortButtonsForDeck();
     // 开局牌组选择层：主菜单"开始游戏"→ 选牌组 → 开局；局内"新的一局"复用上次选择。
     QPointer<DeckSelectWidget> mDeckSelectOverlay;
-    GameDeckId mSelectedGameDeckId = GameDeckId::Base;
+    GameDeckId mSelectedGameDeckId = GameDeckId::Red;
+    int mSelectedStake = 1;
     void showDeckSelectOverlay();
     // 主菜单红蓝漩涡背景：用离屏 FBO 渲成 QPixmap 贴到普通 QLabel 上，再用定时器逐帧刷新。
     // 不用嵌套 QOpenGLWidget——后者在部分驱动上无法盖住底层 GL 场景，漩涡根本不显示。
@@ -506,6 +508,7 @@ private:
     void showCollectionSealsOverlay();
     void showCollectionEditionsOverlay();
     void showCollectionDecksOverlay();
+    void clearCollectionOverlay();
     void showDeckCustomizeOverlay();
     QPointer<QWidget> mStatsOverlay;
     QPointer<QWidget> mCollectionOverlay;

@@ -21,6 +21,7 @@ public:
     int totalKnown() const; // 摸牌堆 + 弃牌堆
     void discard(const CardData &card); // 弃牌
     void addCard(const CardData &card);
+    void setCards(const QVector<CardData> &cards, bool shuffleCards = true);
     void returnCards(const QVector<CardData> &cards); // 把当前手牌/临时手牌归还进牌组
 
     const QVector<CardData> &drawPile() const { return mDrawPile; }

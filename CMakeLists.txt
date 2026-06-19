@@ -77,6 +77,9 @@ qt_add_resources(BalatroQt "textures"
         resources/images/boosters.png
         resources/images/BlindChips.png
         resources/images/chips.png
+        resources/images/deck_queue.png
+        resources/images/deck_stack.png
+        resources/images/stickers.png
         resources/images/tags.png
         resources/images/ui_assets.png
         resources/images/icons.png

@@ -2,7 +2,7 @@
 #include "shop.h"
 #include <algorithm>
 
-bool DemoScript::sActive       = true;
+bool DemoScript::sActive       = false;
 int  DemoScript::sShopVisit    = 0;
 int  DemoScript::sShopRerolls  = 0;
 int  DemoScript::sBlindEntered = 0;

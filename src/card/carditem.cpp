@@ -29,6 +29,8 @@ QPixmap *CardItem::sDeckSheet = nullptr;
 QPixmap *CardItem::sEnhSheet = nullptr;
 QPixmap *CardItem::sJokerSheet = nullptr;
 QFont CardItem::sLinkTagFont;
+QPoint CardItem::sBackSpritePos = {0, 0};
+QPixmap *CardItem::sCustomBackPixmap = nullptr;
 
 namespace {
 QSet<CardItem*> sAnimatedCards;
@@ -307,14 +309,41 @@ void CardItem::paintFront(QPainter *painter)
 
 void CardItem::paintBack(QPainter *painter) {
     QRectF dst(0, 0, WIDTH, HEIGHT);
-    QRect backSrc(0 * SRC_W, 0 * SRC_H, SRC_W, SRC_H);
     painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
+    if (sCustomBackPixmap && !sCustomBackPixmap->isNull()) {
+        painter->drawPixmap(dst, *sCustomBackPixmap,
+                            QRectF(0, 0,
+                                   sCustomBackPixmap->width(),
+                                   sCustomBackPixmap->height()));
+        return;
+    }
+    QRect backSrc(sBackSpritePos.x() * SRC_W, sBackSpritePos.y() * SRC_H, SRC_W, SRC_H);
     painter->drawPixmap(dst, *sEnhSheet, backSrc);
 }
 
 QPixmap CardItem::cardBackPixmap() {
+    if (sCustomBackPixmap && !sCustomBackPixmap->isNull()) return *sCustomBackPixmap;
     if (!sEnhSheet || sEnhSheet->isNull()) return QPixmap();
-    return sEnhSheet->copy(0, 0, SRC_W, SRC_H);
+    return sEnhSheet->copy(sBackSpritePos.x() * SRC_W,
+                           sBackSpritePos.y() * SRC_H,
+                           SRC_W,
+                           SRC_H);
+}
+
+void CardItem::setCardBackSpritePos(const QPoint &pos)
+{
+    sBackSpritePos = pos;
+    delete sCustomBackPixmap;
+    sCustomBackPixmap = nullptr;
+}
+
+void CardItem::setCustomCardBackPixmap(const QPixmap &pixmap)
+{
+    if (!sCustomBackPixmap) {
+        sCustomBackPixmap = new QPixmap(pixmap);
+    } else {
+        *sCustomBackPixmap = pixmap;
+    }
 }
 
 void CardItem::setLinkTagFont(const QFont &f)

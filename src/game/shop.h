@@ -81,6 +81,9 @@ struct ShopOffer {
     int packVariant = 0;
     VoucherType voucher = VoucherType::Overstock;
     Edition jokerEdition = Edition::None;
+    bool jokerEternal = false;
+    bool jokerPerishable = false;
+    bool jokerRental = false;
     int cost = 0;
     bool sold = false;
     bool freeByTag = false;
@@ -145,6 +148,11 @@ public:
     void setSpectralRate(double v) { mRates.spectral = v; }
     void setDiscountPercent(int v) { mDiscountPercent = v; }
     void setJokerEditionRate(double rate) { mJokerEditionRate = qMax(0.0, rate); }
+    void setStakeStickerRules(bool eternal, bool perishable, bool rental) {
+        mEnableEternalJokers = eternal;
+        mEnablePerishableJokers = perishable;
+        mEnableRentalJokers = rental;
+    }
     void addPendingEditionJoker(Edition e);
     void addPendingRarityJoker(JokerRarity rarity);
     bool canCreateRarityJoker(JokerRarity rarity) const;
@@ -187,6 +195,9 @@ private:
     bool mNextShopFree = false;
     bool mNextShopRerollStartsFree = false;
     double mJokerEditionRate = 1.0;
+    bool mEnableEternalJokers = false;
+    bool mEnablePerishableJokers = false;
+    bool mEnableRentalJokers = false;
     QVector<Edition> mPendingEditionJokers;
     QVector<JokerRarity> mPendingRarityJokers;
     bool mGrosMichelExtinct = false;
@@ -202,6 +213,7 @@ private:
     JokerType randomJokerType(const QVector<JokerType> &alreadyRolled = {}) const;
     JokerType randomJokerTypeByRarity(JokerRarity rarity, const QVector<JokerType> &alreadyRolled = {}) const;
     Edition randomJokerEdition() const;
+    void applyStakeStickerRules(ShopOffer &o) const;
     int costFor(JokerType t, Edition e = Edition::None) const;
     int rawCostFor(const ShopOffer &o) const;
     int applyDiscount(int rawCost) const;

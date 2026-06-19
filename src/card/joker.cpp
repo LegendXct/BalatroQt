@@ -226,6 +226,53 @@ int jokerBaseCost(JokerType t)
     return 4;
 }
 
+bool jokerEternalCompatible(JokerType t)
+{
+    switch (t) {
+    case JokerType::GrosMichel:
+    case JokerType::IceCream:
+    case JokerType::Cavendish:
+    case JokerType::Luchador:
+    case JokerType::TurtleBean:
+    case JokerType::DietCola:
+    case JokerType::Popcorn:
+    case JokerType::Ramen:
+    case JokerType::Seltzer:
+    case JokerType::MrBones:
+    case JokerType::InvisibleJoker:
+        return false;
+    default:
+        return true;
+    }
+}
+
+bool jokerPerishableCompatible(JokerType t)
+{
+    switch (t) {
+    case JokerType::CeremonialDagger:
+    case JokerType::RideTheBus:
+    case JokerType::Runner:
+    case JokerType::Constellation:
+    case JokerType::GreenJoker:
+    case JokerType::RedCard:
+    case JokerType::Madness:
+    case JokerType::SquareJoker:
+    case JokerType::Vampire:
+    case JokerType::Hologram:
+    case JokerType::Rocket:
+    case JokerType::Obelisk:
+    case JokerType::LuckyCat:
+    case JokerType::FlashCard:
+    case JokerType::SpareTrousers:
+    case JokerType::Castle:
+    case JokerType::GlassJoker:
+    case JokerType::WeeJoker:
+        return false;
+    default:
+        return true;
+    }
+}
+
 // 每张小丑的 spawn 池档位（原版 game.lua 里的 rarity 字段，1/2/3/4 = 普通/罕见/稀有/传奇）。
 // 影响商店概率、价格基数、info 浮窗底部 pill 配色。未列出的类型默认 Common（rarity=1）。
 JokerRarity jokerRarity(JokerType t) {

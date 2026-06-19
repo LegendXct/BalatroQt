@@ -163,41 +163,41 @@ VoucherData voucherData(VoucherType t) {
     case VoucherType::Overstock:
         v.name = "库存过剩"; v.description = "商店上半区永久多 1 个商品槽"; v.spritePos = {0, 0}; break;
     case VoucherType::OverstockPlus:
-        v.name = "库存过剩+"; v.description = "商店上半区再多 1 个商品槽"; v.spritePos = {0, 1}; break;
+        v.name = "库存过剩加强版"; v.description = "商店内卡牌槽位 +1"; v.spritePos = {0, 1}; break;
     case VoucherType::ClearanceSale:
-        v.name = "清仓特卖"; v.description = "商店商品永久 25% 折扣"; v.spritePos = {3, 0}; break;
+        v.name = "清仓特卖"; v.description = "所有卡牌、补充包和优惠券在店内均可享受 25% 折扣"; v.spritePos = {3, 0}; break;
     case VoucherType::Liquidation:
-        v.name = "大甩卖"; v.description = "商店商品永久 50% 折扣"; v.spritePos = {3, 1}; break;
+        v.name = "清算"; v.description = "所有卡牌、补充包和优惠券在店内均可享受 50% 折扣"; v.spritePos = {3, 1}; break;
     case VoucherType::Hone:
-        v.name = "磨练"; v.description = "提高版本牌出现概率"; v.spritePos = {4, 0}; break;
+        v.name = "打磨"; v.description = "提高版本牌出现概率"; v.spritePos = {4, 0}; break;
     case VoucherType::GlowUp:
         v.name = "焕彩"; v.description = "进一步提高版本牌出现概率"; v.spritePos = {4, 1}; break;
     case VoucherType::RerollSurplus:
-        v.name = "重抽盈余"; v.description = "每次商店重抽便宜 $2"; v.spritePos = {0, 2}; break;
+        v.name = "多次重掷"; v.description = "重掷费用减少 $2"; v.spritePos = {0, 2}; break;
     case VoucherType::RerollGlut:
-        v.name = "重抽过剩"; v.description = "重抽费用再便宜 $2"; v.spritePos = {0, 3}; break;
+        v.name = "重掷加强版"; v.description = "重掷费用减少 $2"; v.spritePos = {0, 3}; break;
     case VoucherType::CrystalBall:
         v.name = "水晶球"; v.description = "消耗牌槽位 +1"; v.spritePos = {2, 2}; break;
     case VoucherType::OmenGlobe:
-        v.name = "预兆球"; v.description = "奥秘包中可能出现幻灵牌"; v.spritePos = {2, 3}; break;
+        v.name = "预兆球"; v.description = "幻灵牌可能会在任何秘术包中出现"; v.spritePos = {2, 3}; break;
     case VoucherType::Telescope:
         v.name = "望远镜"; v.description = "天体包第一张更偏向常用牌型"; v.spritePos = {3, 2}; break;
     case VoucherType::Observatory:
-        v.name = "天文台"; v.description = "持有星球牌时会增强对应牌型（后续细化）"; v.spritePos = {3, 3}; break;
+        v.name = "天文台"; v.description = "消耗牌栏位中的星球牌会使对应牌型给予 X1.5 倍率"; v.spritePos = {3, 3}; break;
     case VoucherType::Grabber:
-        v.name = "抓钩"; v.description = "每回合出牌次数 +1"; v.spritePos = {5, 0}; break;
+        v.name = "抓手"; v.description = "每回合出牌次数 +1"; v.spritePos = {5, 0}; break;
     case VoucherType::NachoTong:
-        v.name = "玉米片钳"; v.description = "每回合出牌次数再 +1"; v.spritePos = {5, 1}; break;
+        v.name = "玉米片夹"; v.description = "每回合出牌次数 +1"; v.spritePos = {5, 1}; break;
     case VoucherType::Wasteful:
-        v.name = "浪费"; v.description = "每回合弃牌次数 +1"; v.spritePos = {6, 0}; break;
+        v.name = "常弃常新"; v.description = "每回合弃牌次数 +1"; v.spritePos = {6, 0}; break;
     case VoucherType::Recyclomancy:
-        v.name = "回收术"; v.description = "每回合弃牌次数再 +1"; v.spritePos = {6, 1}; break;
+        v.name = "回收魔法"; v.description = "每回合弃牌次数 +1"; v.spritePos = {6, 1}; break;
     case VoucherType::TarotMerchant:
-        v.name = "塔罗商人"; v.description = "商店塔罗权重从 4 提高到 9.6"; v.spritePos = {1, 0}; break;
+        v.name = "塔罗牌商人"; v.description = "商店塔罗牌出现频率提高"; v.spritePos = {1, 0}; break;
     case VoucherType::TarotTycoon:
         v.name = "塔罗大亨"; v.description = "商店塔罗权重提高到 32"; v.spritePos = {1, 1}; break;
     case VoucherType::PlanetMerchant:
-        v.name = "星球商人"; v.description = "商店星球权重从 4 提高到 9.6"; v.spritePos = {2, 0}; break;
+        v.name = "星球牌商人"; v.description = "商店星球牌出现频率提高"; v.spritePos = {2, 0}; break;
     case VoucherType::PlanetTycoon:
         v.name = "星球大亨"; v.description = "商店星球权重提高到 32"; v.spritePos = {2, 1}; break;
     case VoucherType::SeedMoney:
@@ -209,9 +209,9 @@ VoucherData voucherData(VoucherType t) {
     case VoucherType::Antimatter:
         v.name = "反物质"; v.description = "小丑槽位 +1"; v.spritePos = {7, 1}; break;
     case VoucherType::MagicTrick:
-        v.name = "魔术把戏"; v.description = "商店上半区可刷普通游戏牌，权重为 4"; v.spritePos = {4, 2}; break;
+        v.name = "魔术"; v.description = "商店里面有游戏牌可供选购"; v.spritePos = {4, 2}; break;
     case VoucherType::Illusion:
-        v.name = "幻觉"; v.description = "商店游戏牌可能带增强、版本或印章"; v.spritePos = {4, 3}; break;
+        v.name = "幻象"; v.description = "商店内的游戏牌可以是增强卡牌、不同版本和/或蜡封"; v.spritePos = {4, 3}; break;
     case VoucherType::Hieroglyph:
         v.name = "象形文字"; v.description = "底注 -1，每回合出牌次数 -1"; v.spritePos = {5, 2}; break;
     case VoucherType::Petroglyph:
@@ -219,9 +219,9 @@ VoucherData voucherData(VoucherType t) {
     case VoucherType::DirectorsCut:
         v.name = "导演剪辑版"; v.description = "允许花钱重掷 Boss 盲注"; v.spritePos = {6, 2}; break;
     case VoucherType::Retcon:
-        v.name = "追溯修改"; v.description = "可多次重掷 Boss 盲注"; v.spritePos = {6, 3}; break;
+        v.name = "重构"; v.description = "重掷 Boss 盲注不限次数"; v.spritePos = {6, 3}; break;
     case VoucherType::PaintBrush:
-        v.name = "画笔"; v.description = "手牌上限 +1"; v.spritePos = {7, 2}; break;
+        v.name = "油漆刷"; v.description = "手牌上限 +1"; v.spritePos = {7, 2}; break;
     case VoucherType::Palette:
         v.name = "调色板"; v.description = "手牌上限再 +1"; v.spritePos = {7, 3}; break;
     }
@@ -277,36 +277,36 @@ VoucherType prerequisiteVoucherFor(VoucherType t)
 QVector<VoucherType> baseVoucherPool() {
     return {
         VoucherType::Overstock,
-        VoucherType::ClearanceSale,
-        VoucherType::Hone,
-        VoucherType::RerollSurplus,
-        VoucherType::CrystalBall,
-        VoucherType::Telescope,
-        VoucherType::Grabber,
-        VoucherType::Wasteful,
-        VoucherType::TarotMerchant,
-        VoucherType::PlanetMerchant,
-        VoucherType::SeedMoney,
-        VoucherType::Blank,
-        VoucherType::MagicTrick,
-        VoucherType::Hieroglyph,
-        VoucherType::DirectorsCut,
-        VoucherType::PaintBrush,
         VoucherType::OverstockPlus,
+        VoucherType::ClearanceSale,
         VoucherType::Liquidation,
+        VoucherType::Hone,
         VoucherType::GlowUp,
+        VoucherType::RerollSurplus,
         VoucherType::RerollGlut,
+        VoucherType::CrystalBall,
         VoucherType::OmenGlobe,
+        VoucherType::Telescope,
         VoucherType::Observatory,
+        VoucherType::Grabber,
         VoucherType::NachoTong,
+        VoucherType::Wasteful,
         VoucherType::Recyclomancy,
+        VoucherType::TarotMerchant,
         VoucherType::TarotTycoon,
+        VoucherType::PlanetMerchant,
         VoucherType::PlanetTycoon,
+        VoucherType::SeedMoney,
         VoucherType::MoneyTree,
+        VoucherType::Blank,
         VoucherType::Antimatter,
+        VoucherType::MagicTrick,
         VoucherType::Illusion,
+        VoucherType::Hieroglyph,
         VoucherType::Petroglyph,
+        VoucherType::DirectorsCut,
         VoucherType::Retcon,
+        VoucherType::PaintBrush,
         VoucherType::Palette,
     };
 }
@@ -575,6 +575,9 @@ int Shop::rawCostFor(const ShopOffer &o) const
 {
     switch (o.kind) {
     case OfferKind::Joker: {
+        // 原版 Card:set_cost(): if self.ability.rental then self.cost = 1 end。
+        // Coupon/Tag 免费在 refreshCurrentOfferCosts/randomShopOffer 外层先处理，仍可覆盖为 $0。
+        if (o.jokerRental) return 1;
         int raw = rawJokerCostForType(o.joker);
         switch (o.jokerEdition) {
         case Edition::Foil:        raw += 2; break;
@@ -652,6 +655,7 @@ ShopOffer Shop::makeEditionJokerOffer(Edition e, const QVector<ShopOffer> &alrea
     o.kind = OfferKind::Joker;
     o.joker = randomJokerType(rolled);
     o.jokerEdition = e;
+    applyStakeStickerRules(o);
     o.cost = 0;
     o.freeByTag = true;
     return o;
@@ -667,9 +671,24 @@ ShopOffer Shop::makeRarityJokerOffer(JokerRarity rarity, const QVector<ShopOffer
     o.kind = OfferKind::Joker;
     o.joker = randomJokerTypeByRarity(rarity, rolled);
     o.jokerEdition = Edition::None;
+    applyStakeStickerRules(o);
     o.cost = 0;
     o.freeByTag = true;
     return o;
+}
+
+void Shop::applyStakeStickerRules(ShopOffer &o) const
+{
+    if (o.kind != OfferKind::Joker) return;
+    const double eternalPerishablePoll = QRandomGenerator::global()->generateDouble();
+    if (mEnableEternalJokers && eternalPerishablePoll > 0.7) {
+        // card.lua:set_eternal 会检查 center.eternal_compat；不兼容时不会落入 elseif。
+        o.jokerEternal = jokerEternalCompatible(o.joker);
+    } else if (mEnablePerishableJokers && eternalPerishablePoll > 0.4 && eternalPerishablePoll <= 0.7) {
+        o.jokerPerishable = jokerPerishableCompatible(o.joker);
+    }
+    if (mEnableRentalJokers && QRandomGenerator::global()->generateDouble() > 0.7)
+        o.jokerRental = true;
 }
 
 Edition Shop::randomJokerEdition() const
@@ -701,7 +720,8 @@ ShopOffer Shop::randomShopOffer(const QVector<ShopOffer> &alreadyRolled) const {
                 if (e.kind == OfferKind::Joker) rolled.append(e.joker);
             o.joker = randomJokerType(rolled);
             o.jokerEdition = randomJokerEdition();
-            o.cost = mNextShopFree ? 0 : costFor(o.joker, o.jokerEdition);
+            applyStakeStickerRules(o);
+            o.cost = mNextShopFree ? 0 : applyDiscount(rawCostFor(o));
             if (!duplicatesOffer(o, alreadyRolled)) return o;
             continue;
         }

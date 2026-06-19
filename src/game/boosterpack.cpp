@@ -10,12 +10,12 @@ QString packDisplayName(PackKind k) {
 
 QString packDisplayName(PackKind k, PackSize s) {
     QString prefix;
-    if (s == PackSize::Jumbo) prefix = "超级";
-    if (s == PackSize::Mega)  prefix = "巨型";
+    if (s == PackSize::Jumbo) prefix = "巨型";
+    if (s == PackSize::Mega)  prefix = "超级";
 
     switch (k) {
     case PackKind::Standard:  return prefix + "标准包";
-    case PackKind::Arcana:    return prefix + "塔罗包";
+    case PackKind::Arcana:    return prefix + "秘术包";
     case PackKind::Celestial: return prefix + "天体包";
     case PackKind::Buffoon:   return prefix + "小丑包";
     case PackKind::Spectral:  return prefix + "幻灵包";

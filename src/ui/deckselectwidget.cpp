@@ -1,146 +1,26 @@
 #include "deckselectwidget.h"
 #include "../card/carditem.h"
+#include <QHBoxLayout>
 #include <QLabel>
+#include <QPainter>
 #include <QPushButton>
 #include <QVBoxLayout>
-#include <QHBoxLayout>
-#include <QMouseEvent>
-#include <functional>
+#include <QGraphicsDropShadowEffect>
+#include <cmath>
 
 namespace {
-// 选项卡片（卡背 + 牌组名），整块可点。
-class DeckOptionFrame : public QWidget
+static int cardW(int u) { return int(std::round((2.4 * 35.0 / 41.0) * u)); }
+static int cardH(int u) { return int(std::round((2.4 * 47.0 / 41.0) * u)); }
+
+QVector<GameDeckId> selectableDeckOrder()
 {
-public:
-    DeckOptionFrame(const QPixmap &back, const QString &name,
-                    const QFont &cnFont, std::function<void()> onClick,
-                    QWidget *parent)
-        : QWidget(parent), mOnClick(std::move(onClick))
-    {
-        setAttribute(Qt::WA_StyledBackground, true);
-        setCursor(Qt::PointingHandCursor);
-        auto *v = new QVBoxLayout(this);
-        v->setContentsMargins(14, 14, 14, 10);
-        v->setSpacing(8);
-        auto *img = new QLabel(this);
-        img->setPixmap(back.scaled(142, 190, Qt::KeepAspectRatio,
-                                   Qt::FastTransformation));   // 像素风：最近邻放大
-        img->setAlignment(Qt::AlignCenter);
-        img->setStyleSheet("background:transparent; border:none;");
-        v->addWidget(img);
-        auto *nameLab = new QLabel(name, this);
-        QFont f = cnFont; f.setPixelSize(20); f.setBold(true);
-        nameLab->setFont(f);
-        nameLab->setStyleSheet("color:white; background:transparent; border:none;");
-        nameLab->setAlignment(Qt::AlignCenter);
-        v->addWidget(nameLab);
-        setSelected(false);
-    }
-    void setSelected(bool on)
-    {
-        setStyleSheet(QString("background:#3a4a4d; border-radius:12px;"
-                              " border:3px solid %1;")
-                          .arg(on ? "#fda200" : "transparent"));
-    }
-protected:
-    void mousePressEvent(QMouseEvent *e) override
-    {
-        if (e->button() == Qt::LeftButton) mOnClick();
-        QWidget::mousePressEvent(e);
-    }
-private:
-    std::function<void()> mOnClick;
-};
-} // namespace
-
-DeckSelectWidget::DeckSelectWidget(const QFont &cnFont, QWidget *parent)
-    : QWidget(parent)
-{
-    setAttribute(Qt::WA_StyledBackground, true);
-    setStyleSheet("background:rgba(10,12,14,200);");   // 半透明压暗主菜单
-
-    auto *outer = new QVBoxLayout(this);
-    outer->setAlignment(Qt::AlignCenter);
-
-    auto *panel = new QWidget(this);
-    panel->setAttribute(Qt::WA_StyledBackground, true);
-    panel->setStyleSheet("background:#4f6367; border-radius:16px;");
-    panel->setFixedWidth(640);   // 三张牌组卡背并排
-    auto *pv = new QVBoxLayout(panel);
-    pv->setContentsMargins(24, 20, 24, 20);
-    pv->setSpacing(14);
-
-    auto *title = new QLabel(QStringLiteral("选择牌组"), panel);
-    QFont tf = cnFont; tf.setPixelSize(26); tf.setBold(true);
-    title->setFont(tf);
-    title->setStyleSheet("color:white; background:transparent;");
-    title->setAlignment(Qt::AlignCenter);
-    pv->addWidget(title);
-
-    // —— 牌组选项行：经工厂取多态实例读名称/描述，新增牌组只需扩 GameDeckId ——
-    const QPixmap back = CardItem::cardBackPixmap();
-    const QVector<QPair<GameDeckId, QPixmap>> options = {
-        { GameDeckId::Base,  back },
-        { GameDeckId::Queue, hueShifted(back, 150) },   // 队列牌组卡背：色相偏移区分
-        { GameDeckId::Stack, hueShifted(back, 280) },   // 栈牌组卡背：再偏一个角度
-    };
-    auto *row = new QHBoxLayout();
-    row->setSpacing(18);
-    for (int i = 0; i < options.size(); ++i) {
-        const auto deck = createGameDeck(options[i].first);
-        auto *frame = new DeckOptionFrame(options[i].second, deck->name(), cnFont,
-                                          [this, i]() { select(i); }, panel);
-        mOptionFrames.append(frame);
-        row->addWidget(frame);
-    }
-    pv->addLayout(row);
-
-    mDescLabel = new QLabel(panel);
-    QFont df = cnFont; df.setPixelSize(16);
-    mDescLabel->setFont(df);
-    mDescLabel->setStyleSheet("color:#d8e4e6; background:transparent;");
-    mDescLabel->setWordWrap(true);
-    mDescLabel->setAlignment(Qt::AlignCenter);
-    mDescLabel->setMinimumHeight(64);
-    pv->addWidget(mDescLabel);
-
-    auto *btnRow = new QHBoxLayout();
-    btnRow->setSpacing(14);
-    auto makeBtn = [&](const QString &text, const QString &bg, const QString &dark) {
-        auto *b = new QPushButton(text, panel);
-        QFont f = cnFont; f.setPixelSize(20); f.setBold(true);
-        b->setFont(f);
-        b->setMinimumHeight(52);
-        b->setCursor(Qt::PointingHandCursor);
-        b->setStyleSheet(QString(
-            "QPushButton { background:%1; color:white; border:none;"
-            " border-radius:10px; border-bottom:5px solid %2; }"
-            "QPushButton:pressed { border-bottom:2px solid %2; margin-top:3px; }")
-                             .arg(bg, dark));
-        btnRow->addWidget(b);
-        return b;
-    };
-    auto *btnBack  = makeBtn(QStringLiteral("返回"),     "#fe5f55", "#c44840");
-    auto *btnStart = makeBtn(QStringLiteral("开始游戏"), "#009dff", "#0077c2");
-    connect(btnBack,  &QPushButton::clicked, this, [this]() { emit cancelled(); });
-    connect(btnStart, &QPushButton::clicked, this,
-            [this]() { emit startRequested(mSelected); });
-    pv->addLayout(btnRow);
-
-    outer->addWidget(panel);
-    select(0);
+    QVector<GameDeckId> ids = originalGameDeckOrder();
+    ids.append(GameDeckId::Queue);
+    ids.append(GameDeckId::Stack);
+    return ids;
 }
 
-void DeckSelectWidget::select(int idx)
-{
-    mSelected = static_cast<GameDeckId>(idx);
-    for (int i = 0; i < mOptionFrames.size(); ++i)
-        static_cast<DeckOptionFrame*>(mOptionFrames[i])->setSelected(i == idx);
-    const auto deck = createGameDeck(mSelected);
-    mDescLabel->setText(deck->description());
-}
-
-QPixmap DeckSelectWidget::hueShifted(const QPixmap &src, int dh)
+QPixmap hueShifted(const QPixmap &src, int dh)
 {
     QImage img = src.toImage().convertToFormat(QImage::Format_ARGB32);
     for (int y = 0; y < img.height(); ++y) {
@@ -149,11 +29,504 @@ QPixmap DeckSelectWidget::hueShifted(const QPixmap &src, int dh)
             const QColor c = QColor::fromRgba(line[x]);
             int h, s, v;
             c.getHsv(&h, &s, &v);
-            if (h < 0) continue;   // 无色相（灰阶）像素不动
+            if (h < 0) continue;
             QColor shifted;
             shifted.setHsv((h + dh) % 360, s, v, c.alpha());
             line[x] = shifted.rgba();
         }
     }
     return QPixmap::fromImage(img);
+}
+
+QColor stakeColour(int stake)
+{
+    switch (stake) {
+    case 1: return QColor("#f0f3f2");
+    case 2: return QColor("#ff4a4a");
+    case 3: return QColor("#35c66d");
+    case 4: return QColor("#191919");
+    case 5: return QColor("#3f84f7");
+    case 6: return QColor("#8847f4");
+    case 7: return QColor("#ff9b2a");
+    case 8: return QColor("#ffd34d");
+    default: return QColor("#f0f3f2");
+    }
+}
+
+QPoint stakeSpritePos(int stake)
+{
+    switch (stake) {
+    case 1: return {0, 0};
+    case 2: return {1, 0};
+    case 3: return {2, 0};
+    case 4: return {4, 0};
+    case 5: return {3, 0};
+    case 6: return {0, 1};
+    case 7: return {1, 1};
+    case 8: return {2, 1};
+    default: return {0, 0};
+    }
+}
+
+QPixmap stakeChipPixmap(int stake, int size)
+{
+    static QPixmap sheet(QStringLiteral(":/textures/images/chips.png"));
+    if (sheet.isNull()) return QPixmap();
+    constexpr int frame = 58;
+    const QPoint pos = stakeSpritePos(stake);
+    return sheet.copy(pos.x() * frame, pos.y() * frame, frame, frame)
+        .scaled(size, size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
+}
+
+QString panelStyle(const QString &bg, int radius, const QString &border = QStringLiteral("#dbe7e7"))
+{
+    return QString(
+        "background:%1; border:2px solid %2; border-radius:%3px;"
+        "border-top-color:rgba(255,255,255,150); border-left-color:rgba(255,255,255,120);"
+        "border-right-color:rgba(14,18,19,210); border-bottom:5px solid rgba(14,18,19,230);")
+        .arg(bg, border)
+        .arg(radius);
+}
+
+QString buttonStyle(const QString &bg, int radius)
+{
+    const QColor c(bg);
+    return QString(
+        "QPushButton {"
+        " background:%1;"
+        " color:#fffaf0; border:1px solid %4; border-radius:%5px;"
+        " border-bottom:5px solid %6; font-weight:bold; padding:0 10px;"
+        "}"
+        "QPushButton:hover { background:%7; }"
+        "QPushButton:pressed { padding-top:3px; border-bottom:2px solid %6; }"
+        "QPushButton:disabled { background:#111719; color:#53676b; border-color:#111719; }")
+        .arg(c.name(), c.name(), c.darker(118).name(), c.lighter(132).name())
+        .arg(radius)
+        .arg(c.darker(165).name(), c.lighter(128).name());
+}
+
+void addBalatroShadow(QWidget *w, int blur, int x, int y)
+{
+    auto *shadow = new QGraphicsDropShadowEffect(w);
+    shadow->setBlurRadius(blur);
+    shadow->setOffset(x, y);
+    shadow->setColor(QColor(0, 0, 0, 175));
+    w->setGraphicsEffect(shadow);
+}
+
+QWidget *makePanel(QWidget *parent, const QString &bg, int radius, const QString &border = QStringLiteral("#dbe7e7"))
+{
+    auto *panel = new QWidget(parent);
+    panel->setAttribute(Qt::WA_StyledBackground, true);
+    panel->setStyleSheet(panelStyle(bg, radius, border));
+    return panel;
+}
+
+QPushButton *makeButton(const QString &text, const QFont &font, QWidget *parent, const QString &bg, int radius)
+{
+    auto *button = new QPushButton(text, parent);
+    button->setFont(font);
+    button->setFocusPolicy(Qt::NoFocus);
+    button->setCursor(Qt::PointingHandCursor);
+    button->setStyleSheet(buttonStyle(bg, radius));
+    return button;
+}
+
+QWidget *makePip(QWidget *parent, int u)
+{
+    auto *pip = new QWidget(parent);
+    const int s = qMax(5, int(0.080 * u));
+    pip->setFixedSize(s, s);
+    return pip;
+}
+
+QWidget *makeStakeMark(QWidget *parent, int u)
+{
+    auto *mark = new QWidget(parent);
+    mark->setFixedSize(int(0.42 * u), int(0.22 * u));
+    return mark;
+}
+} // namespace
+
+DeckSelectWidget::DeckSelectWidget(const QFont &cnFont, QWidget *parent)
+    : QWidget(parent)
+{
+    const int base = parent ? int(std::round(std::min(parent->width() / 18.5, parent->height() / 10.85))) : 96;
+    mUnit = qBound(76, base, 118);
+    const int U = mUnit;
+
+    setAttribute(Qt::WA_StyledBackground, true);
+    setStyleSheet("background:rgba(0,0,0,64);");
+
+    auto *outer = new QVBoxLayout(this);
+    outer->setContentsMargins(0, 0, 0, 0);
+    outer->setAlignment(Qt::AlignCenter);
+
+    auto *panel = makePanel(this, QStringLiteral("#263436"), int(0.10 * U));
+    panel->setFixedSize(int(9.95 * U), int(8.65 * U));
+    addBalatroShadow(panel, int(0.18 * U), 0, int(0.05 * U));
+    auto *pv = new QVBoxLayout(panel);
+    pv->setContentsMargins(int(0.24 * U), int(0.28 * U), int(0.24 * U), int(0.24 * U));
+    pv->setSpacing(int(0.07 * U));
+
+    for (GameDeckId id : selectableDeckOrder())
+        mDeckOptions.append({ id, deckBackPixmapFor(id) });
+
+    auto makeArrow = [&](const QString &text, QWidget *parentWidget, int hMul) {
+        QFont f = cnFont; f.setPixelSize(int(0.31 * U)); f.setBold(true);
+        auto *b = makeButton(text, f, parentWidget, QStringLiteral("#fe5f55"), int(0.10 * U));
+        b->setFixedSize(int(0.62 * U), hMul);
+        return b;
+    };
+
+    auto *mid = makePanel(panel, QStringLiteral("#050607"), int(0.10 * U), QStringLiteral("rgba(255,255,255,38)"));
+    mid->setFixedSize(int(7.28 * U), int(3.30 * U));
+    auto *midH = new QHBoxLayout(mid);
+    midH->setContentsMargins(int(0.18 * U), int(0.16 * U), int(0.14 * U), int(0.22 * U));
+    midH->setSpacing(int(0.09 * U));
+
+    auto *deckArea = new QWidget(mid);
+    deckArea->setFixedSize(int(2.18 * U), int(2.90 * U));
+    deckArea->setStyleSheet("background:transparent; border:none;");
+    auto *deckAreaV = new QVBoxLayout(deckArea);
+    deckAreaV->setContentsMargins(0, 0, 0, 0);
+    deckAreaV->setAlignment(Qt::AlignCenter);
+    mPreviewLabel = new QLabel(deckArea);
+    mPreviewLabel->setFixedSize(int(2.10 * U), int(2.86 * U));
+    mPreviewLabel->setAlignment(Qt::AlignCenter);
+    mPreviewLabel->setStyleSheet("background:transparent; border:none;");
+    deckAreaV->addWidget(mPreviewLabel);
+    midH->addWidget(deckArea, 0, Qt::AlignCenter);
+
+    auto *info = makePanel(mid, QStringLiteral("#111a1c"), int(0.10 * U), QStringLiteral("rgba(255,255,255,35)"));
+    info->setFixedSize(int(4.06 * U), int(2.52 * U));
+    auto *infoV = new QVBoxLayout(info);
+    infoV->setContentsMargins(int(0.11 * U), int(0.10 * U), int(0.11 * U), int(0.16 * U));
+    infoV->setSpacing(int(0.05 * U));
+
+    mNameLabel = new QLabel(info);
+    QFont nf = cnFont; nf.setPixelSize(int(0.31 * U)); nf.setBold(true);
+    mNameLabel->setFont(nf);
+    mNameLabel->setAlignment(Qt::AlignCenter);
+    mNameLabel->setFixedHeight(int(0.60 * U));
+    mNameLabel->setStyleSheet(QString("color:white; background:#263436; border:0; border-radius:%1px;")
+                                  .arg(int(0.08 * U)));
+    infoV->addWidget(mNameLabel);
+
+    mDescLabel = new QLabel(info);
+    QFont df = cnFont; df.setPixelSize(int(0.20 * U)); df.setBold(true);
+    mDescLabel->setFont(df);
+    mDescLabel->setAlignment(Qt::AlignCenter);
+    mDescLabel->setWordWrap(true);
+    mDescLabel->setStyleSheet(QString("color:#142022; background:#e9f1f1; border:0; border-radius:%1px; padding:%2px;")
+                                  .arg(int(0.08 * U)).arg(int(0.05 * U)));
+    infoV->addWidget(mDescLabel, 1);
+    midH->addWidget(info, 0, Qt::AlignCenter);
+
+    auto *stakeColumn = new QWidget(mid);
+    stakeColumn->setFixedSize(int(0.50 * U), int(2.52 * U));
+    stakeColumn->setStyleSheet("background:transparent; border:none;");
+    auto *stakeColumnV = new QVBoxLayout(stakeColumn);
+    stakeColumnV->setContentsMargins(0, int(0.04 * U), 0, int(0.02 * U));
+    stakeColumnV->setSpacing(int(0.03 * U));
+    auto *stakeText = new QLabel(QStringLiteral("赌注"), stakeColumn);
+    QFont sf = cnFont; sf.setPixelSize(int(0.16 * U)); sf.setBold(true);
+    stakeText->setFont(sf);
+    stakeText->setAlignment(Qt::AlignCenter);
+    stakeText->setStyleSheet("color:#53676b; background:transparent; border:none;");
+    stakeColumnV->addWidget(stakeText, 0, Qt::AlignCenter);
+    for (int i = 8; i >= 1; --i) {
+        auto *mark = makeStakeMark(stakeColumn, U);
+        mDeckStakeRows.append(mark);
+        stakeColumnV->addWidget(mark, 0, Qt::AlignCenter);
+    }
+    midH->addWidget(stakeColumn, 0, Qt::AlignCenter);
+
+    auto *deckCycle = new QWidget(panel);
+    deckCycle->setFixedSize(int(8.72 * U), int(3.80 * U));
+    deckCycle->setStyleSheet("background:transparent; border:none;");
+    auto *deckCycleH = new QHBoxLayout(deckCycle);
+    deckCycleH->setContentsMargins(0, 0, 0, 0);
+    deckCycleH->setSpacing(int(0.10 * U));
+    mPrevButton = makeArrow(QStringLiteral("<"), deckCycle, int(3.05 * U));
+    mNextButton = makeArrow(QStringLiteral(">"), deckCycle, int(3.05 * U));
+
+    auto *deckCenter = new QWidget(deckCycle);
+    deckCenter->setStyleSheet("background:transparent; border:none;");
+    auto *deckCenterV = new QVBoxLayout(deckCenter);
+    deckCenterV->setContentsMargins(0, 0, 0, 0);
+    deckCenterV->setSpacing(int(0.04 * U));
+    deckCenterV->addWidget(mid, 0, Qt::AlignCenter);
+
+    auto *deckPips = new QWidget(deckCenter);
+    deckPips->setStyleSheet("background:transparent; border:none;");
+    auto *deckPipsH = new QHBoxLayout(deckPips);
+    deckPipsH->setContentsMargins(0, 0, 0, 0);
+    deckPipsH->setSpacing(int(0.035 * U));
+    for (int i = 0; i < mDeckOptions.size(); ++i) {
+        auto *pip = makePip(deckPips, U);
+        mDeckPips.append(pip);
+        deckPipsH->addWidget(pip);
+    }
+    deckCenterV->addWidget(deckPips, 0, Qt::AlignCenter);
+    deckCycleH->addWidget(mPrevButton, 0, Qt::AlignCenter);
+    deckCycleH->addWidget(deckCenter, 0, Qt::AlignCenter);
+    deckCycleH->addWidget(mNextButton, 0, Qt::AlignCenter);
+    pv->addWidget(deckCycle, 0, Qt::AlignCenter);
+
+    auto *stakeMid = makePanel(panel, QStringLiteral("#050607"), int(0.10 * U), QStringLiteral("rgba(255,255,255,38)"));
+    stakeMid->setFixedSize(int(7.30 * U), int(1.70 * U));
+    auto *stakeH = new QHBoxLayout(stakeMid);
+    stakeH->setContentsMargins(int(0.12 * U), int(0.12 * U), int(0.14 * U), int(0.18 * U));
+    stakeH->setSpacing(int(0.10 * U));
+
+    auto *verticalStake = new QLabel(QStringLiteral("赌注"), stakeMid);
+    QFont vertFont = cnFont; vertFont.setPixelSize(int(0.18 * U)); vertFont.setBold(true);
+    verticalStake->setFont(vertFont);
+    verticalStake->setFixedSize(int(0.50 * U), int(1.25 * U));
+    verticalStake->setAlignment(Qt::AlignCenter);
+    verticalStake->setStyleSheet(QString("color:#53676b; background:#111a1c; border:2px solid rgba(255,255,255,35); border-radius:%1px;")
+                                     .arg(int(0.05 * U)));
+    stakeH->addWidget(verticalStake, 0, Qt::AlignCenter);
+
+    mStakeChipLabel = new QLabel(stakeMid);
+    mStakeChipLabel->setFixedSize(int(0.82 * U), int(0.82 * U));
+    mStakeChipLabel->setAlignment(Qt::AlignCenter);
+    mStakeChipLabel->setStyleSheet("background:transparent; border:none;");
+    stakeH->addWidget(mStakeChipLabel, 0, Qt::AlignCenter);
+
+    auto *stakeInfo = new QWidget(stakeMid);
+    stakeInfo->setStyleSheet("background:transparent; border:none;");
+    auto *stakeInfoV = new QVBoxLayout(stakeInfo);
+    stakeInfoV->setContentsMargins(0, 0, 0, 0);
+    stakeInfoV->setSpacing(int(0.04 * U));
+    mStakeNameLabel = new QLabel(stakeInfo);
+    QFont snf = cnFont; snf.setPixelSize(int(0.22 * U)); snf.setBold(true);
+    mStakeNameLabel->setFont(snf);
+    mStakeNameLabel->setAlignment(Qt::AlignCenter);
+    mStakeNameLabel->setStyleSheet("color:white; background:transparent; border:none;");
+    stakeInfoV->addWidget(mStakeNameLabel);
+    mStakeDescLabel = new QLabel(stakeInfo);
+    QFont sdf = cnFont; sdf.setPixelSize(int(0.21 * U)); sdf.setBold(true);
+    mStakeDescLabel->setFont(sdf);
+    mStakeDescLabel->setAlignment(Qt::AlignCenter);
+    mStakeDescLabel->setWordWrap(true);
+    mStakeDescLabel->setStyleSheet(QString("color:#142022; background:#e9f1f1; border:0; border-radius:%1px; padding:%2px;")
+                                      .arg(int(0.08 * U)).arg(int(0.04 * U)));
+    stakeInfoV->addWidget(mStakeDescLabel, 1);
+    stakeH->addWidget(stakeInfo, 1);
+
+    auto *stakeCycle = new QWidget(panel);
+    stakeCycle->setFixedSize(int(8.30 * U), int(2.03 * U));
+    stakeCycle->setStyleSheet("background:transparent; border:none;");
+    auto *stakeCycleH = new QHBoxLayout(stakeCycle);
+    stakeCycleH->setContentsMargins(0, 0, 0, 0);
+    stakeCycleH->setSpacing(int(0.10 * U));
+    auto *stakePrev = makeArrow(QStringLiteral("<"), stakeCycle, int(1.62 * U));
+    auto *stakeNext = makeArrow(QStringLiteral(">"), stakeCycle, int(1.62 * U));
+
+    auto *stakeCenter = new QWidget(stakeCycle);
+    stakeCenter->setStyleSheet("background:transparent; border:none;");
+    auto *stakeCenterV = new QVBoxLayout(stakeCenter);
+    stakeCenterV->setContentsMargins(0, 0, 0, 0);
+    stakeCenterV->setSpacing(int(0.04 * U));
+    stakeCenterV->addWidget(stakeMid, 0, Qt::AlignCenter);
+    auto *stakePips = new QWidget(stakeCenter);
+    stakePips->setStyleSheet("background:transparent; border:none;");
+    auto *stakePipsH = new QHBoxLayout(stakePips);
+    stakePipsH->setContentsMargins(0, 0, 0, 0);
+    stakePipsH->setSpacing(int(0.05 * U));
+    for (int i = 0; i < 8; ++i) {
+        auto *pip = makePip(stakePips, U);
+        mStakePips.append(pip);
+        stakePipsH->addWidget(pip);
+    }
+    stakeCenterV->addWidget(stakePips, 0, Qt::AlignCenter);
+    stakeCycleH->addWidget(stakePrev, 0, Qt::AlignCenter);
+    stakeCycleH->addWidget(stakeCenter, 0, Qt::AlignCenter);
+    stakeCycleH->addWidget(stakeNext, 0, Qt::AlignCenter);
+    pv->addWidget(stakeCycle, 0, Qt::AlignCenter);
+
+    auto *seedRow = new QLabel(QStringLiteral("预设局  ○"), panel);
+    QFont seedFont = cnFont; seedFont.setPixelSize(int(0.18 * U)); seedFont.setBold(true);
+    seedRow->setFont(seedFont);
+    seedRow->setFixedHeight(int(0.44 * U));
+    seedRow->setAlignment(Qt::AlignLeft | Qt::AlignVCenter);
+    seedRow->setIndent(int(1.25 * U));
+    seedRow->setStyleSheet("color:#d7e2e4; background:transparent; border:none;");
+    pv->addWidget(seedRow, 0, Qt::AlignCenter);
+
+    QFont startFont = cnFont; startFont.setPixelSize(int(0.43 * U)); startFont.setBold(true);
+    auto *btnStart = makeButton(QStringLiteral("开始游戏"), startFont, panel, QStringLiteral("#009dff"), int(0.10 * U));
+    btnStart->setFixedSize(int(4.85 * U), int(0.88 * U));
+    pv->addWidget(btnStart, 0, Qt::AlignCenter);
+    pv->addStretch(1);
+
+    QFont bf = cnFont; bf.setPixelSize(int(0.29 * U)); bf.setBold(true);
+    auto *btnBack = makeButton(QStringLiteral("返回"), bf, panel, QStringLiteral("#fda200"), int(0.08 * U));
+    btnBack->setFixedSize(int(8.70 * U), int(0.62 * U));
+    pv->addWidget(btnBack, 0, Qt::AlignCenter);
+
+    connect(mPrevButton, &QPushButton::clicked, this, [this]() { select(mSelectedIndex - 1); });
+    connect(mNextButton, &QPushButton::clicked, this, [this]() { select(mSelectedIndex + 1); });
+    connect(stakePrev, &QPushButton::clicked, this, [this]() { selectStake(mSelectedStake - 1); });
+    connect(stakeNext, &QPushButton::clicked, this, [this]() { selectStake(mSelectedStake + 1); });
+    connect(btnBack, &QPushButton::clicked, this, [this]() { emit cancelled(); });
+    connect(btnStart, &QPushButton::clicked, this, [this]() { emit startRequested(mSelected, mSelectedStake); });
+
+    outer->addWidget(panel);
+    select(0);
+    selectStake(1);
+}
+
+void DeckSelectWidget::select(int idx)
+{
+    if (mDeckOptions.isEmpty()) return;
+    mSelectedIndex = (idx % mDeckOptions.size() + mDeckOptions.size()) % mDeckOptions.size();
+    mSelected = mDeckOptions[mSelectedIndex].first;
+    refreshSelection();
+}
+
+void DeckSelectWidget::selectStake(int idx)
+{
+    mSelectedStake = (idx - 1 + 8) % 8 + 1;
+    refreshStakeSelection();
+}
+
+void DeckSelectWidget::refreshSelection()
+{
+    const auto deck = createGameDeck(mSelected);
+    if (mPreviewLabel)
+        mPreviewLabel->setPixmap(deckStackPixmap(mDeckOptions[mSelectedIndex].second));
+    if (mNameLabel)
+        mNameLabel->setText(deck->name());
+    if (mDescLabel)
+        mDescLabel->setText(deck->description());
+    if (mPageLabel)
+        mPageLabel->setText(deck->name());
+    for (int i = 0; i < mDeckPips.size(); ++i) {
+        const bool on = i == mSelectedIndex;
+        mDeckPips[i]->setStyleSheet(QString("background:%1; border-radius:%2px; border:none;")
+                                        .arg(on ? QStringLiteral("#ffffff") : QStringLiteral("#050607"))
+                                        .arg(qMax(2, mDeckPips[i]->width() / 2)));
+    }
+}
+
+void DeckSelectWidget::refreshStakeSelection()
+{
+    if (mStakeChipLabel)
+        mStakeChipLabel->setPixmap(stakeChipPixmap(mSelectedStake, int(0.72 * mUnit)));
+    if (mStakeNameLabel)
+        mStakeNameLabel->setText(stakeName(mSelectedStake));
+    if (mStakeDescLabel)
+        mStakeDescLabel->setText(stakeDescription(mSelectedStake));
+    for (int i = 0; i < mStakePips.size(); ++i) {
+        const bool on = i == mSelectedStake - 1;
+        mStakePips[i]->setStyleSheet(QString("background:%1; border-radius:%2px; border:none;")
+                                         .arg(on ? QStringLiteral("#ffffff") : QStringLiteral("#050607"))
+                                         .arg(qMax(2, mStakePips[i]->width() / 2)));
+    }
+    for (int i = 0; i < mDeckStakeRows.size(); ++i) {
+        const int stake = 8 - i;
+        const bool selected = stake == mSelectedStake;
+        const QColor fill = stake <= mSelectedStake ? stakeColour(stake) : QColor(255, 255, 255, 45);
+        mDeckStakeRows[i]->setStyleSheet(QString(
+            "background:%1; border:%2px solid %3; border-radius:%4px;")
+            .arg(fill.name(QColor::HexArgb))
+            .arg(selected ? 2 : 0)
+            .arg(selected ? QStringLiteral("#ffffff") : QStringLiteral("transparent"))
+            .arg(qMax(3, mDeckStakeRows[i]->height() / 2)));
+    }
+}
+
+QString DeckSelectWidget::stakeName(int stake)
+{
+    switch (stake) {
+    case 1: return QStringLiteral("白注");
+    case 2: return QStringLiteral("红注");
+    case 3: return QStringLiteral("绿注");
+    case 4: return QStringLiteral("黑注");
+    case 5: return QStringLiteral("蓝注");
+    case 6: return QStringLiteral("紫注");
+    case 7: return QStringLiteral("橙注");
+    case 8: return QStringLiteral("金注");
+    default: return QStringLiteral("白注");
+    }
+}
+
+QString DeckSelectWidget::stakeDescription(int stake)
+{
+    switch (stake) {
+    case 1: return QStringLiteral("基础难度");
+    case 2: return QStringLiteral("小盲注没有奖励金\n之前所有赌注也都起效");
+    case 3: return QStringLiteral("底注提升时过关需求分数的增速更快\n之前所有赌注也都起效");
+    case 4: return QStringLiteral("商店可能会出现永恒小丑牌\n（无法卖出或摧毁）\n之前所有赌注也都起效");
+    case 5: return QStringLiteral("弃牌次数 -1\n之前所有赌注也都起效");
+    case 6: return QStringLiteral("底注提升时过关需求分数的增速更快\n之前所有赌注也都起效");
+    case 7: return QStringLiteral("商店可能会出现易腐小丑牌\n（经过 5 回合后被削弱）\n之前所有赌注也都起效");
+    case 8: return QStringLiteral("商店可能会出现租用小丑牌\n（售价为 $1，每回合花费 $3）\n之前所有赌注也都起效");
+    default: return QStringLiteral("基础难度");
+    }
+}
+
+QPixmap DeckSelectWidget::deckBackPixmapFor(GameDeckId id)
+{
+    QPixmap sheet(QStringLiteral(":/textures/images/Enhancers.png"));
+    if (sheet.isNull()) return CardItem::cardBackPixmap();
+    if (id == GameDeckId::Queue)
+        return QPixmap(QStringLiteral(":/textures/images/deck_queue.png"));
+    if (id == GameDeckId::Stack)
+        return QPixmap(QStringLiteral(":/textures/images/deck_stack.png"));
+    const auto deck = createGameDeck(id);
+    const QPoint pos = deck->spritePos();
+    return sheet.copy(pos.x() * CardItem::SRC_W,
+                      pos.y() * CardItem::SRC_H,
+                      CardItem::SRC_W,
+                      CardItem::SRC_H);
+}
+
+QPixmap DeckSelectWidget::deckStackPixmap(const QPixmap &back) const
+{
+    const int U = mUnit;
+    const QSize target(int(2.10 * U), int(2.86 * U));
+    QPixmap out(target);
+    out.fill(Qt::transparent);
+    if (back.isNull()) return out;
+
+    QPainter p(&out);
+    p.setRenderHint(QPainter::SmoothPixmapTransform, false);
+    p.setRenderHint(QPainter::Antialiasing, false);
+
+    const QPixmap card = back.scaled(cardW(U), cardH(U), Qt::KeepAspectRatio, Qt::FastTransformation);
+    const QPoint base((target.width() - card.width()) / 2 + int(0.10 * U),
+                      (target.height() - card.height()) / 2 + int(0.10 * U));
+
+    for (int i = 9; i >= 0; --i) {
+        const QPoint offset(-i * qMax(1, int(0.018 * U)), -i * qMax(1, int(0.010 * U)));
+        QPixmap shadow(card.size());
+        shadow.fill(Qt::transparent);
+        {
+            QPainter sp(&shadow);
+            sp.setCompositionMode(QPainter::CompositionMode_Source);
+            sp.drawPixmap(0, 0, card);
+            sp.setCompositionMode(QPainter::CompositionMode_SourceIn);
+            sp.fillRect(shadow.rect(), QColor(0, 0, 0, 105));
+        }
+        p.drawPixmap(base + offset + QPoint(int(0.035 * U), int(0.045 * U)), shadow);
+        p.drawPixmap(base + offset, card);
+    }
+
+    QFont stickerFont;
+    stickerFont.setBold(true);
+    stickerFont.setPixelSize(int(0.18 * U));
+    p.setFont(stickerFont);
+    const QRect sticker(base.x() + card.width() - int(0.31 * U),
+                        base.y() + int(0.08 * U),
+                        int(0.25 * U), int(0.25 * U));
+    p.setBrush(QColor("#ffd447"));
+    p.setPen(QPen(QColor("#6b4a00"), qMax(1, int(0.018 * U))));
+    p.drawEllipse(sticker);
+    p.setPen(QColor("#6b4a00"));
+    p.drawText(sticker, Qt::AlignCenter, QStringLiteral("✓"));
+    return out;
 }

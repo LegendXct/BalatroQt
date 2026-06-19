@@ -651,6 +651,12 @@ void PackOpenWidget::showOptionTooltip(int idx)
             Joker tmp = createJoker(mContent.jokers[idx]);
             name = tmp.name;
             bodyHtml = CardTooltipFormat::fromLuaMarkup(tmp.description);
+            if (idx < mContent.jokerEternals.size() && mContent.jokerEternals[idx])
+                bodyHtml += QStringLiteral("<br>永恒卡：不能出售或被摧毁。");
+            if (idx < mContent.jokerPerishables.size() && mContent.jokerPerishables[idx])
+                bodyHtml += QStringLiteral("<br>易腐：经过 5 回合后会被削弱。");
+            if (idx < mContent.jokerRentals.size() && mContent.jokerRentals[idx])
+                bodyHtml += QStringLiteral("<br>租用：售价为 $1，回合结束时失去 $3。");
             const JokerRarity rr = jokerRarity(mContent.jokers[idx]);
             badges.append({CardTooltipFormat::rarityName(rr),
                            CardTooltipFormat::rarityColor(rr)});
@@ -994,6 +1000,11 @@ QPixmap PackOpenWidget::renderOption(int i) const
         Edition ed = Edition::None;
         if (i < mContent.jokerEditions.size()) ed = mContent.jokerEditions[i];
         if (ed != Edition::None) raw = BalatroShaders::renderEditionPixmap(raw, ed);
+        JokerItem::applyStakeStickerOverlay(
+            raw,
+            i < mContent.jokerEternals.size() && mContent.jokerEternals[i],
+            i < mContent.jokerPerishables.size() && mContent.jokerPerishables[i],
+            i < mContent.jokerRentals.size() && mContent.jokerRentals[i]);
         return raw.scaled(size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     }
     if (mContent.kind == PackKind::Arcana || mContent.kind == PackKind::Celestial
@@ -1126,8 +1137,16 @@ QString PackOpenWidget::optionDesc(int i) const
         }
         return parts.isEmpty() ? "加入牌组" : parts.join("\n");
     }
-    if (mContent.kind == PackKind::Buffoon)
-        return createJoker(mContent.jokers[i]).description;
+    if (mContent.kind == PackKind::Buffoon) {
+        QString desc = createJoker(mContent.jokers[i]).description;
+        if (i < mContent.jokerEternals.size() && mContent.jokerEternals[i])
+            desc += QStringLiteral("\n永恒卡：不能出售或被摧毁。");
+        if (i < mContent.jokerPerishables.size() && mContent.jokerPerishables[i])
+            desc += QStringLiteral("\n易腐：经过 5 回合后会被削弱。");
+        if (i < mContent.jokerRentals.size() && mContent.jokerRentals[i])
+            desc += QStringLiteral("\n租用：售价为 $1，回合结束时失去 $3。");
+        return desc;
+    }
     return createConsumable(mContent.consumables[i]).description;
 }
 

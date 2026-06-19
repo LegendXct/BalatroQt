@@ -80,6 +80,15 @@ void Deck::addCard(const CardData &card) {
     shuffle();
 }
 
+void Deck::setCards(const QVector<CardData> &cards, bool shuffleCards)
+{
+    mDrawPile.clear();
+    mDiscardPile.clear();
+    for (const CardData &card : cards)
+        mDrawPile.append(clearTransientFlags(card));
+    if (shuffleCards) shuffle();
+}
+
 void Deck::returnCards(const QVector<CardData> &cards)
 {
     for (const CardData &card : cards)

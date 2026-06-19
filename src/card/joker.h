@@ -97,6 +97,10 @@ public:
     int sellValue = 2;
     int extraSellValue = 0;
     bool isDebuffed = false;
+    bool eternal = false;
+    bool perishable = false;
+    bool rental = false;
+    int perishableRounds = 5;
     int counter = 0; // 动态数值：冰淇淋当前筹码等
 
     TriggerTiming timing;
@@ -108,5 +112,8 @@ JokerRarity jokerRarity(JokerType t);
 int jokerBaseCost(JokerType t);
 // 蓝图/头脑风暴能否复制该小丑的效果（原版部分被动/机制类小丑不可复制）。
 bool jokerBlueprintCompatible(JokerType t);
+// 原版 center 的 eternal_compat / perishable_compat。赌注贴纸判定必须尊重这些限制。
+bool jokerEternalCompatible(JokerType t);
+bool jokerPerishableCompatible(JokerType t);
 
 #endif // JOKER_HH

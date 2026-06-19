@@ -390,6 +390,30 @@ JokerItem::JokerItem(const Joker &j, QGraphicsItem *parent)
     }
 }
 
+void JokerItem::applyStakeStickerOverlay(QPixmap &pixmap, bool eternal,
+                                         bool perishable, bool rental)
+{
+    if (pixmap.isNull() || (!eternal && !perishable && !rental)) return;
+
+    // game.lua:175-177 使用 71x95 的 stickers atlas，并按整张牌面覆盖。
+    // 项目的小丑图集是其两倍尺寸，因此按目标 pixmap 全尺寸采样可保持原始像素边缘。
+    static QPixmap stickerSheet(QStringLiteral(":/textures/images/stickers.png"));
+    if (stickerSheet.isNull()) return;
+
+    constexpr int stickerW = 71;
+    constexpr int stickerH = 95;
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+    const QRect target(0, 0, pixmap.width(), pixmap.height());
+    const auto drawSticker = [&](int column, int row) {
+        painter.drawPixmap(target, stickerSheet,
+                           QRect(column * stickerW, row * stickerH, stickerW, stickerH));
+    };
+    if (eternal) drawSticker(0, 0);
+    if (perishable) drawSticker(0, 2);
+    if (rental) drawSticker(1, 2);
+}
+
 JokerItem::~JokerItem()
 {
     if (mShadow) {
@@ -460,6 +484,9 @@ void JokerItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) 
     const QString key = QString::number(int(mJoker.type)) + QLatin1Char('|')
                       + QString::number(int(mJoker.edition)) + QLatin1Char('|')
                       + QString::number(mJoker.isDebuffed ? 1 : 0) + QLatin1Char('|')
+                      + QString::number(mJoker.eternal ? 1 : 0) + QLatin1Char('|')
+                      + QString::number(mJoker.perishable ? 1 : 0) + QLatin1Char('|')
+                      + QString::number(mJoker.rental ? 1 : 0) + QLatin1Char('|')
                       + QString::number(frame);
     static QHash<QString, QPixmap> cache;
     static QStringList order;
@@ -482,6 +509,7 @@ void JokerItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) 
             body = BalatroShaders::renderEditionPixmap(body, mJoker.edition);
         if (mJoker.isDebuffed)
             body = BalatroShaders::renderDebuffedPixmap(body);
+        applyStakeStickerOverlay(body, mJoker.eternal, mJoker.perishable, mJoker.rental);
         if (mJoker.type == JokerType::WeeJoker) {
             // 原版 card.lua 对小小丑的 T.w/T.h ×0.7：复用普通 sprite 但整张缩小显示，
             // 阴影剪影随之缩小（阴影按渲染后的 body alpha 投影）。
@@ -501,7 +529,10 @@ void JokerItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) 
     // 外形变了（type/edition/debuff）才重算：垂直居中偏移 + 阴影黑色剪影。
     const QString silKey = QString::number(int(mJoker.type)) + QLatin1Char('|')
                          + QString::number(int(mJoker.edition)) + QLatin1Char('|')
-                         + QString::number(mJoker.isDebuffed ? 1 : 0);
+                         + QString::number(mJoker.isDebuffed ? 1 : 0) + QLatin1Char('|')
+                         + QString::number(mJoker.eternal ? 1 : 0) + QLatin1Char('|')
+                         + QString::number(mJoker.perishable ? 1 : 0) + QLatin1Char('|')
+                         + QString::number(mJoker.rental ? 1 : 0);
     if (silKey != mShadowSilKey) {
         const qreal dySrc = jokerContentDySrc(pix);
         mContentDyScreen = dySrc * qreal(HEIGHT) / qreal(SRC_H);

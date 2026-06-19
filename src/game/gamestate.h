@@ -117,6 +117,8 @@ public:
     // 游戏牌组（基础/队列…）：仅开局前注入；任何时刻 mGameDeck 非空。
     void setGameDeck(std::unique_ptr<GameDeckType> deck) { if (deck) mGameDeck = std::move(deck); }
     const GameDeckType &gameDeck() const { return *mGameDeck; }
+    void setStake(int stake) { mStake = qBound(1, stake, 8); }
+    int stake() const { return mStake; }
     int currentBlindStartingHands() const { return mBlindStartingHands; }
     BlindType blindType() const {return mBlindType;}
     GamePhase phase() const {return mPhase;}
@@ -284,7 +286,7 @@ signals:
 private:
     Deck mDeck;
     // 游戏牌组（多态）：规则修正集中在 GameDeckType 派生类，开局前由 UI 注入。
-    std::unique_ptr<GameDeckType> mGameDeck = std::make_unique<BaseGameDeck>();
+    std::unique_ptr<GameDeckType> mGameDeck = createGameDeck(GameDeckId::Red);
     QVector<CardData> mHand;
     QVector<Joker> mJokers;
     // Default initializers prevent uninitialized reads before startBlind().
@@ -378,6 +380,7 @@ private:
     int mExtraHandSize = 0;
     int mInterestCap = Constants::INTEREST_MAX;
     int mExtraJokerSlots = 0;
+    int mStake = 1;
     int mOneRoundHandSizeBonus = 0;
     int mPendingInvestmentBonus = 0;
     int mBlindStartingHands = Constants::INITIAL_HANDS;

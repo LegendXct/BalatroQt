@@ -3,6 +3,7 @@
 
 #include <QGraphicsObject>
 #include <QPixmap>
+#include <QPoint>
 #include <QPropertyAnimation>
 #include <QFont>
 #include "carddata.h"
@@ -43,6 +44,8 @@ public:
 
     static void loadResources();
     static QPixmap cardBackPixmap();   // 卡背贴图（牌组选择界面预览用）
+    static void setCardBackSpritePos(const QPoint &pos);
+    static void setCustomCardBackPixmap(const QPixmap &pixmap);
     // 迭代器增强（程设扩展）的卡面蒙版（enh_cs_iterator.png，透明底彩色装饰框）。
     // CardItem / 查看牌组 / 商店 / 开包 的卡面合成路径共用，保证观感一致。
     static void drawIteratorOverlay(QPainter *p, const QRectF &dst);
@@ -142,6 +145,8 @@ private:
     static QPixmap *sDeckSheet;
     static QPixmap *sEnhSheet;
     static QPixmap *sJokerSheet;
+    static QPoint sBackSpritePos;
+    static QPixmap *sCustomBackPixmap;
 };
 
 #endif // CARDITEM_H

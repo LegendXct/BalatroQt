@@ -27,6 +27,11 @@ public:
     // 非扩展类型返回空 pixmap，调用方回退到 Jokers.png 图集采样。
     static QPixmap customCardPixmap(JokerType type);
 
+    // 原版 stickers.png：永恒 (0,0)、易腐 (0,2)、租用 (1,2)。商店和局内牌面
+    // 共用该合成入口，避免两处贴纸状态不一致。
+    static void applyStakeStickerOverlay(QPixmap &pixmap, bool eternal,
+                                         bool perishable, bool rental);
+
     // 在给定的 painter 上、给定的目标矩形里，画出小丑的“浮动 soul 层”（Hologram 上方的小丑、
     // 五张传奇牌中央的肖像）。商店里 offerPixmap 也需要这一步，否则全息投影的卡只有空相框。
     static void drawFloatingSprite(QPainter *p, const QRectF &dst, JokerType type,
