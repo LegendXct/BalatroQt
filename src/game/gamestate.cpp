@@ -670,8 +670,12 @@ void GameState::applyCrimsonHeartDebuffForNextHand()
     bool changed = false;
     if (mCrimsonHeartDisabled >= 0 && mCrimsonHeartDisabled < mJokers.size()
         && mJokers[mCrimsonHeartDisabled].isDebuffed) {
-        mJokers[mCrimsonHeartDisabled].isDebuffed = false;
-        changed = true;
+        Joker &previouslyDisabled = mJokers[mCrimsonHeartDisabled];
+        // 易腐小丑耗尽后是永久禁用，不能被猩红之心的临时禁用恢复逻辑重新启用。
+        if (!(previouslyDisabled.perishable && previouslyDisabled.perishableRounds <= 0)) {
+            previouslyDisabled.isDebuffed = false;
+            changed = true;
+        }
     }
     mCrimsonHeartDisabled = -1;
 
@@ -687,16 +691,14 @@ void GameState::applyCrimsonHeartDebuffForNextHand()
     QVector<int> candidates;
     candidates.reserve(mJokers.size());
     for (int i = 0; i < mJokers.size(); ++i) {
-        if (mJokers.size() > 1 && i == mLastCrimsonHeartDisabled) continue;
-        candidates.append(i);
-    }
-    if (candidates.isEmpty()) {
-        for (int i = 0; i < mJokers.size(); ++i) candidates.append(i);
+        // blind.lua: 先调用 set_debuff(false)，再从仍未被禁用的牌中抽取。
+        // 只有一张小丑时允许它继续作为目标；易腐耗尽的小丑不会抢占其他小丑的目标位。
+        if (!mJokers[i].isDebuffed || mJokers.size() < 2)
+            candidates.append(i);
     }
 
     const int pick = candidates[QRandomGenerator::global()->bounded(candidates.size())];
     mCrimsonHeartDisabled = pick;
-    mLastCrimsonHeartDisabled = pick;
     mJokers[pick].isDebuffed = true;
     emit jokersChanged();
 }
@@ -1312,8 +1314,12 @@ void GameState::finalizePlayedHand()
     // 小丑不衰减。
     bool crimsonRestored = false;
     if (mCrimsonHeartDisabled >= 0 && mCrimsonHeartDisabled < mJokers.size()) {
-        mJokers[mCrimsonHeartDisabled].isDebuffed = false;
-        crimsonRestored = true;
+        Joker &previouslyDisabled = mJokers[mCrimsonHeartDisabled];
+        // card.lua:set_debuff() 在易腐倒计时归零时优先保持禁用状态。
+        if (!(previouslyDisabled.perishable && previouslyDisabled.perishableRounds <= 0)) {
+            previouslyDisabled.isDebuffed = false;
+            crimsonRestored = true;
+        }
     }
     mCrimsonHeartDisabled = -1;
 
@@ -1793,7 +1799,10 @@ double GameState::calcTargetScore() const {
     static const int purpleScores[] = { 0, 300, 1000, 3200, 9000, 25000, 60000, 110000, 200000 };
     const int *baseScores = (mStake >= 6) ? purpleScores : (mStake >= 3 ? greenScores : normalScores);
     double base;
-    if (mAnte <= 8) {
+    // 原版 get_blind_amount(ante < 1) 返回 100，用于新局尚未进入首个底注时的安全值。
+    if (mAnte < 1) {
+        base = 100.0;
+    } else if (mAnte <= 8) {
         base = double(baseScores[qBound(0, mAnte, 8)]);
     } else {
         // 无尽模式 ante 9+ 的指数级膨胀，沿用原版 get_blind_amount 公式。
@@ -3451,7 +3460,6 @@ void GameState::startGame()
     mEndlessMode = false;
     mCardsPlayedThisAnte.clear();
     mCrimsonHeartDisabled = -1;
-    mLastCrimsonHeartDisabled = -1;
     mVerdantLeafActive = false;
     mCeruleanForcedUid = -1;
     mAncientSuitInitialized = false;
@@ -3632,7 +3640,6 @@ void GameState::startBlind(BlindType type)
     mBlindStartingDiscards = mDiscardLeft;   // 延迟满足：判断本回合是否用过弃牌
 
     mCrimsonHeartDisabled = -1;
-    mLastCrimsonHeartDisabled = -1;
     mVerdantLeafActive = false;
     mCeruleanForcedUid = -1;
 

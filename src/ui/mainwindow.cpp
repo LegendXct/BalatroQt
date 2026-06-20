@@ -2712,16 +2712,25 @@ QPixmap collectionJokerPixmap(JokerType type, const QSize &target, Edition editi
 
     QPixmap body = JokerItem::customCardPixmap(type);   // 程设扩展小丑专属贴图
     if (body.isNull()) {
-        QPixmap sheet(QStringLiteral(":/textures/images/Jokers.png"));
+        // 原版把 Joker atlas 常驻在显存中；收藏翻页不能为每张新牌重复解包同一资源。
+        static const QPixmap sheet(QStringLiteral(":/textures/images/Jokers.png"));
         if (sheet.isNull()) return QPixmap();
         const QPoint c = JokerItem::spritePos(type);
         const QRect src(c.x() * JokerItem::SRC_W, c.y() * JokerItem::SRC_H,
                         JokerItem::SRC_W, JokerItem::SRC_H);
         body = sheet.copy(src);
     }
-    QPixmap pix(JokerItem::SRC_W, JokerItem::SRC_H);
-    pix.fill(Qt::transparent);
-    {
+    const bool needsFloatingLayer = type == JokerType::Hologram
+        || type == JokerType::Caino || type == JokerType::Triboulet
+        || type == JokerType::Yorick || type == JokerType::Chicot
+        || type == JokerType::Perkeo;
+    QPixmap pix;
+    if (type != JokerType::WeeJoker && !needsFloatingLayer && edition == Edition::None) {
+        // 普通收藏小丑与原版一样直接取 atlas 子区域；避免每次翻页新建 QPainter 合成层。
+        pix = body;
+    } else {
+        pix = QPixmap(JokerItem::SRC_W, JokerItem::SRC_H);
+        pix.fill(Qt::transparent);
         QPainter p(&pix);
         p.setRenderHint(QPainter::SmoothPixmapTransform, type == JokerType::WeeJoker);
         if (type == JokerType::WeeJoker) {
@@ -2731,8 +2740,9 @@ QPixmap collectionJokerPixmap(JokerType type, const QSize &target, Edition editi
         } else {
             p.drawPixmap(QRect(0, 0, JokerItem::SRC_W, JokerItem::SRC_H), body);
         }
-        JokerItem::drawFloatingSprite(&p, QRectF(0, 0, JokerItem::SRC_W, JokerItem::SRC_H),
-                                      type, false);
+        if (needsFloatingLayer)
+            JokerItem::drawFloatingSprite(&p, QRectF(0, 0, JokerItem::SRC_W, JokerItem::SRC_H),
+                                          type, false);
     }
     if (edition != Edition::None)
         pix = BalatroShaders::renderEditionPixmap(pix, edition);
@@ -2862,6 +2872,7 @@ protected:
                 mHoverLifted = false;
             }
             captureHome(true);
+            beginRootDragProxy();
             mDragging = true;
             mDragOffset = event->position().toPoint();
             setCursor(Qt::ClosedHandCursor);
@@ -2877,10 +2888,14 @@ protected:
     {
         if (mDragging) {
             const QPoint global = event->globalPosition().toPoint();
-            if (parentWidget())
+            if (mDragProxy) {
+                if (QWidget *root = mDragProxy->parentWidget())
+                    mDragProxy->move(root->mapFromGlobal(global - mDragOffset));
+            } else if (parentWidget()) {
                 move(parentWidget()->mapFromGlobal(global - mDragOffset));
-            else
+            } else {
                 move(global - mDragOffset);
+            }
             showInfo(global);
             event->accept();
             return;
@@ -2895,7 +2910,7 @@ protected:
             mDragging = false;
             mHoverLifted = false;
             setCursor(Qt::OpenHandCursor);
-            animateTo(mHome, 140);
+            animateRootDragProxyHome();
             event->accept();
             return;
         }
@@ -2909,6 +2924,65 @@ private:
             mHome = pos();
             mHomeCaptured = true;
         }
+    }
+
+    void beginRootDragProxy()
+    {
+        QWidget *root = overlayRoot();
+        if (!root || mDragProxy) return;
+
+        const QPoint rootPosition = root->mapFromGlobal(mapToGlobal(QPoint(0, 0)));
+        mDragSourcePixmap = grab();
+        if (mDragSourcePixmap.isNull()) return;
+
+        auto *proxy = new QLabel(root);
+        proxy->setFixedSize(size());
+        proxy->setAlignment(alignment());
+        proxy->setStyleSheet(styleSheet());
+        proxy->setAttribute(Qt::WA_TransparentForMouseEvents);
+        proxy->setPixmap(mDragSourcePixmap);
+        proxy->move(rootPosition);
+        proxy->show();
+        proxy->raise();
+        mDragProxy = proxy;
+
+        // 保留原控件在布局中的占位和鼠标抓取，避免重设 parent 后布局丢失子项。
+        clear();
+    }
+
+    void animateRootDragProxyHome()
+    {
+        if (!mDragProxy) {
+            animateTo(mHome, 140);
+            return;
+        }
+
+        QLabel *proxy = mDragProxy;
+        QWidget *root = proxy->parentWidget();
+        QWidget *parent = parentWidget();
+        if (!root || !parent) {
+            setPixmap(mDragSourcePixmap);
+            mDragSourcePixmap = QPixmap();
+            proxy->deleteLater();
+            mDragProxy = nullptr;
+            return;
+        }
+
+        const QPoint target = root->mapFromGlobal(parent->mapToGlobal(mHome));
+        auto *anim = new QPropertyAnimation(proxy, "pos", proxy);
+        mProxyAnim = anim;
+        anim->setDuration(140);
+        anim->setStartValue(proxy->pos());
+        anim->setEndValue(target);
+        anim->setEasingCurve(QEasingCurve::OutCubic);
+        connect(anim, &QPropertyAnimation::finished, this, [this, proxy, anim]() {
+            if (mProxyAnim == anim) mProxyAnim = nullptr;
+            if (mDragProxy == proxy) mDragProxy = nullptr;
+            setPixmap(mDragSourcePixmap);
+            mDragSourcePixmap = QPixmap();
+            proxy->deleteLater();
+        });
+        anim->start();
     }
 
     void showInfo(const QPoint &globalPos)
@@ -2991,6 +3065,9 @@ private:
     QPoint mHome;
     QPoint mDragOffset;
     QPointer<QPropertyAnimation> mMoveAnim;
+    QPointer<QLabel> mDragProxy;
+    QPointer<QPropertyAnimation> mProxyAnim;
+    QPixmap mDragSourcePixmap;
 };
 
 QLabel *makeCollectionImage(QWidget *parent, const QPixmap &pm, const QSize &iconSize,
@@ -3846,15 +3923,6 @@ void MainWindow::showCollectionJokersOverlay()
 
     auto *page = new int(0);
     connect(mCollectionOverlay, &QObject::destroyed, this, [page]() { delete page; });
-    auto prewarmPage = [=](int pageIndex) {
-        if (pageCount <= 0) return;
-        pageIndex = (pageIndex % pageCount + pageCount) % pageCount;
-        for (int i = 0; i < perPage; ++i) {
-            const int idx = pageIndex * perPage + i;
-            if (idx >= order.size()) break;
-            collectionJokerPixmap(order[idx], iconSize);
-        }
-    };
     auto rebuild = [=]() {
         for (int i = 0; i < cardSlots.size(); ++i) {
             QLabel *slot = cardSlots[i];
@@ -3884,10 +3952,6 @@ void MainWindow::showCollectionJokersOverlay()
         prev->setEnabled(pageCount > 1);
         next->setEnabled(pageCount > 1);
         animateCollectionPageRefresh(areaWrap);
-        QTimer::singleShot(0, areaWrap, [=]() {
-            prewarmPage((*page) + 1);
-            prewarmPage((*page) - 1);
-        });
     };
     connect(prev, &QPushButton::clicked, this, [=]() {
         if (pageCount <= 1) return;
@@ -3900,7 +3964,7 @@ void MainWindow::showCollectionJokersOverlay()
         rebuild();
     });
     rebuild();
-    // 小丑收藏共 152 张，不能在入口全量预热；只缓存当前页附近，避免 UI 线程卡顿。
+    // 原版每页只维护当前 15 张卡；此处同样不在翻页或入口预热其它页面。
 
     auto *back = makeCollectionBackButton(mCNFont, 20);
     connect(back, &QPushButton::clicked, this, [this]() {

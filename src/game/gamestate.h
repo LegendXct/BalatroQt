@@ -411,7 +411,6 @@ private:
     bool mEndlessMode = false;
     QSet<int> mCardsPlayedThisAnte;   // 支柱(The Pillar)：本 Ante 已打出过的牌 uid
     int mCrimsonHeartDisabled = -1;   // 绯红之心：本手被禁用的小丑下标
-    int mLastCrimsonHeartDisabled = -1;
     bool mVerdantLeafActive = false;  // 翠绿之叶：尚未卖出小丑时为 true
     int mCeruleanForcedUid = -1;      // 蔚蓝铃铛：强制选中的手牌 uid
     void refreshCeruleanForced();     // 强制牌离开手牌后重新挑一张
