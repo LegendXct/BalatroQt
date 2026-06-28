@@ -83,3 +83,33 @@ CMakeLists.txt.user*
 
 # 原版 Lua 参考源码：仅本地保留供查阅，不纳入版本库
 /balatro_original_code/
+
+# IDE / 编辑器工具文件（本地生成，不纳入版本库）
+/.qtc_clangd/
+/.qtcreator/
+/.claude/
+BalatroQt.cflags
+BalatroQt.config
+BalatroQt.creator
+BalatroQt.cxxflags
+BalatroQt.files
+BalatroQt.includes
+
+# AI 工具与临时文件
+CLAUDE.md
+AGENTS.md
+/docs/
+/git
+CMakeLists.txt.tmp.*
+
+# 路演 / 演示材料：本地保留，不纳入版本库
+*.pptx
+主讲字稿*.pdf
+演示脚本*.md
+录屏脚本.md
+
+# LaTeX 编译中间产物（保留最终的 PDF 报告）
+*.aux
+*.synctex.gz
+125-作业报告.log
+125-作业报告.out
