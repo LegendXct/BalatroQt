@@ -35,6 +35,7 @@ private:
 
     GameDeckId mSelected = GameDeckId::Red;
     QVector<QPair<GameDeckId, QPixmap>> mDeckOptions;
+    QVector<QPixmap> mDeckPreviewPixmaps;
     int mSelectedIndex = 0;
     int mSelectedStake = 1;
     int mUnit = 104;

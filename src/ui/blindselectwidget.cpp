@@ -203,13 +203,15 @@ void BlindSelectWidget::buildUi()
 
         // Boss 描述
         b.bossDescLbl = new QLabel("", b.upperBox);
-        QFont df = mCNFont; df.setPixelSize(fontPx(15));
+        QFont df = mCNFont; df.setPixelSize(fontPx(13));
         b.bossDescLbl->setFont(df);
         b.bossDescLbl->setAlignment(Qt::AlignCenter);
         b.bossDescLbl->setStyleSheet("color:#ffffff; background:transparent; border:none;");
         b.bossDescLbl->setWordWrap(true);
-        b.bossDescLbl->setFixedHeight(dp(34));
-        uvbl->addWidget(b.bossDescLbl);
+        // 原版 blind.lua 会把 Boss 描述拆成 loc_debuff_lines[1]/[2] 两行，
+        // 这里给 QLabel 明确的两行区域，避免较长 Boss 限制被一行高度裁掉。
+        b.bossDescLbl->setFixedSize(dp(244), dp(46));
+        uvbl->addWidget(b.bossDescLbl, 0, Qt::AlignHCenter);
 
         // ===== scoreFrame(更暗透明圆角) =====
         QWidget *scoreFrame = new QWidget(b.upperBox);

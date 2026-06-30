@@ -5043,8 +5043,8 @@ void MainWindow::showMainMenuOverlay()
             if (!mMenuBgLabel || !mMainMenuOverlay || !mMainMenuOverlay->isVisible()) return;
             const QSize full = mMenuBgLabel->size();
             if (full.isEmpty()) return;
-            // 漩涡放大后仍然顺滑，按比例缩到最宽 ~640 渲染，省 GPU/读回开销。
-            const int rw = qMin(full.width(), 640);
+            // 漩涡按原版 splash.fs 输出，不再做额外调色；提高离屏宽度减少放大后的发灰/糊感。
+            const int rw = qMin(full.width(), 960);
             const QSize rsz(rw, qMax(1, full.height() * rw / qMax(1, full.width())));
             // 时间基准要够大：shader 里有个开场"烟雾散开"项 -0.17*min(10,t*1.2-4)，
             // t≥11.67 时吃满到 -1.7，红蓝才铺满；否则中间过渡区发黑、蓝色出不来。

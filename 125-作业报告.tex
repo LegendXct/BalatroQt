@@ -1,184 +1,261 @@
-\documentclass[11pt]{ctexart}
+\documentclass[UTF8,11pt,a4paper]{ctexart}
 
-\usepackage[a4paper,margin=2.3cm]{geometry}
+\usepackage[margin=2.45cm,headheight=22pt]{geometry}
 \usepackage{amsmath}
-\usepackage{xcolor}
 \usepackage{booktabs}
+\usepackage{tabularx}
+\usepackage{array}
 \usepackage{enumitem}
+\usepackage[table]{xcolor}
 \usepackage{titlesec}
 \usepackage{fancyhdr}
-\usepackage{tcolorbox}
-\usepackage{array}
+\usepackage{hyperref}
+\usepackage{setspace}
 
-% ---- 颜色 ----
-\definecolor{accent}{RGB}{176,42,52}      % Balatro 红
-\definecolor{accent2}{RGB}{40,90,160}     % Balatro 蓝
-\definecolor{lightgray}{RGB}{245,245,245}
+\definecolor{mainblue}{RGB}{35,64,96}
+\definecolor{subblue}{RGB}{55,88,125}
+\definecolor{lightgray}{RGB}{242,244,247}
+\definecolor{rulegray}{RGB}{208,214,222}
 
-% ---- 标题样式 ----
+\hypersetup{
+  colorlinks=true,
+  linkcolor=mainblue,
+  urlcolor=subblue
+}
+
+\setstretch{1.18}
+\setlength{\parindent}{2em}
+\setlength{\parskip}{0.2em}
+\setlength{\emergencystretch}{3em}
+\renewcommand{\arraystretch}{1.22}
+
+\setlist[itemize]{leftmargin=2.2em,itemsep=0.18em,topsep=0.25em}
+\setlist[enumerate]{leftmargin=2.2em,itemsep=0.18em,topsep=0.25em}
+
 \titleformat{\section}
-  {\Large\bfseries\color{accent}}{\thesection}{0.6em}{}
+  {\Large\bfseries\color{mainblue}}{\thesection}{0.8em}{}
 \titleformat{\subsection}
-  {\large\bfseries\color{accent2}}{\thesubsection}{0.6em}{}
-\titlespacing*{\section}{0pt}{1.2ex}{0.6ex}
-\titlespacing*{\subsection}{0pt}{0.8ex}{0.4ex}
+  {\normalsize\bfseries\color{subblue}}{\thesubsection}{0.8em}{}
+\titlespacing*{\section}{0pt}{1.2em}{0.55em}
+\titlespacing*{\subsection}{0pt}{0.85em}{0.35em}
 
-% ---- 页眉页脚 ----
 \pagestyle{fancy}
 \fancyhf{}
-\lhead{\small\color{accent}BalatroQt 大作业报告}
-\rhead{\small\thepage}
-\renewcommand{\headrulewidth}{0.4pt}
+\lhead{\small BalatroQt 程序设计课程作业报告}
+\rhead{\small 第 \thepage 页}
+\renewcommand{\headrulewidth}{0.35pt}
+\renewcommand{\headrule}{\hbox to\headwidth{\color{rulegray}\leaders\hrule height \headrulewidth\hfill}}
 
-\setlist{itemsep=1pt,topsep=2pt,parsep=0pt}
-\linespread{1.12}
-
-% 行内代码样式
 \newcommand{\code}[1]{\texttt{\small #1}}
+\newcolumntype{Y}{>{\raggedright\arraybackslash}X}
+\newcolumntype{L}[1]{>{\raggedright\arraybackslash}p{#1}}
 
 \begin{document}
 
-% ===================== 封面标题区 =====================
-\begin{center}
-  {\Huge\bfseries\color{accent} BalatroQt}\\[2pt]
-  {\large 基于 Qt6 / C++17 的卡牌肉鸽游戏《Balatro》复刻}\\[10pt]
-  {\large\bfseries 程序设计课程大作业报告}\\[14pt]
-  \begin{tabular}{rl}
-    \textbf{小组编号：} & 125 \\
-    \textbf{小组成员：} & 肖楚童 \quad 朱韬宇 \quad 罗铭皓 \\
-    \textbf{技术栈：} & C++17 \,/\, Qt 6 Widgets \,/\, QtOpenGL \,/\, CMake + Ninja \\
-    \textbf{规模：} & 约 3.8 万行源码，单一桌面可执行程序 \\
-  \end{tabular}
-\end{center}
-\vspace{4pt}
-\hrule height 1pt
-\vspace{8pt}
+\pagenumbering{Roman}
+\begin{titlepage}
+\thispagestyle{empty}
+\centering
+\vspace*{3.0cm}
 
-% ===================== 1. 程序功能介绍 =====================
+{\Huge\bfseries BalatroQt\par}
+\vspace{0.6cm}
+{\Large 基于 Qt6 / C++17 的卡牌游戏复刻与扩展\par}
+\vspace{1.4cm}
+{\Large 程序设计实习课程大作业报告\par}
+
+\vspace{2.5cm}
+\begin{tabular}{rl}
+\toprule
+组号 & 125 \\
+组员 & 肖楚童、朱韬宇、罗铭皓 \\
+技术栈 & C++17、Qt 6 Widgets、QtOpenGL、CMake \\
+提交文件 & 125-作业报告.pdf \\
+日期 & 2026 年 6 月 30 日 \\
+\bottomrule
+\end{tabular}
+
+\vfill
+\end{titlepage}
+
+\clearpage
+\pagenumbering{arabic}
+\tableofcontents
+\newpage
+
+\begin{abstract}
+BalatroQt 是一个基于 Qt6/C++17 实现的桌面端卡牌肉鸽游戏项目，目标是在 C++ 环境中复刻并扩展《Balatro》的核心玩法。项目已经实现牌局循环、牌型识别、事件驱动计分、商店经济、补充包、优惠券、标签、赌注、Boss 盲注、收藏图鉴、演示模式等系统，并结合课程内容设计了队列牌组、栈牌组、运算符重载小丑、类模板小丑、迭代器增强和浅拷贝塔罗等原创机制。本文按课程作业报告要求，从程序功能、模块与类设计、小组分工以及项目总结四个方面说明项目成果。
+
+\textbf{关键词：} Qt6；C++17；卡牌游戏；事件驱动计分；面向对象设计；图形界面
+\end{abstract}
+
 \section{程序功能介绍}
 
-BalatroQt 是用 Qt6 / C++17 重新实现的卡牌肉鸽（roguelike）游戏《Balatro》。整个游戏被编译为一个桌面可执行程序，使用 CMake + Ninja（MinGW）构建，界面基于 Qt Widgets 与 QtOpenGL。它在高度还原原版玩法的基础上，叠加了一层以 C++ 语言概念为主题的原创内容。
+\subsection{项目定位}
 
-\subsection{核心玩法链}
-玩家在一局游戏中循环经历：\textbf{选择盲注 $\rightarrow$ 出牌 / 弃牌计分 $\rightarrow$ 回合结算 $\rightarrow$ 进入商店 $\rightarrow$ 迎战 Boss 盲注}，逐层推进底注（Ante）。每次出牌由扑克牌型决定基础\emph{筹码}与\emph{倍率}，最终得分为 $\text{筹码}\times\text{倍率}$，需达到目标分才能通过盲注。通关 Ante 8 后可进入\textbf{无尽模式}继续游玩。
+BalatroQt 是一个单机桌面游戏程序，使用 Qt Widgets、QGraphicsScene 与 QtOpenGL 构建图形界面。项目以《Balatro》的主要规则为参照，复刻“选择盲注、出牌或弃牌、结算分数、进入商店、推进底注、挑战 Boss 盲注”的核心循环。与简单的纸牌演示不同，本项目同时处理牌局状态、卡牌效果、资源经济、界面动画、音效反馈和资源渲染，形成了一个可实际运行的中型 C++ 应用。
 
-\subsection{内容规模}
+从课程目标看，本项目还承担了“将程序设计概念转化为游戏机制”的任务。队列牌组和栈牌组分别对应先进先出与后进先出的数据结构思想；运算符重载、类模板、迭代器、浅拷贝等概念被设计为可触发、可展示、可参与计分的卡牌效果，使课程知识点不只停留在语法层面，而能在游戏过程中被直观体验。
+
+\subsection{核心玩法}
+
+玩家每回合从牌组抽取手牌，在有限的出牌次数和弃牌次数内获得足够分数。每次出牌最多选择五张牌，系统根据点数、花色和特殊效果判断牌型，再计算基础筹码和基础倍率。最终得分以“筹码 $\times$ 倍率”的方式累积，并受到增强牌、版本、蜡封、小丑牌、Boss 盲注、赌注贴纸和牌组规则影响。
+
+通过当前盲注后，玩家进入商店阶段。商店提供小丑牌、塔罗牌、星球牌、幻灵牌、补充包和优惠券等资源。玩家在有限金币下选择构筑方向，并为后续盲注做准备。通过 Boss 盲注后，游戏进入下一底注，目标分数和限制条件继续提升。直到通关8底注Boss便视为游戏胜利，可以选择开始新的一局或者继续挑战无尽模式。
+
+\subsection{已实现功能}
+
+项目当前功能可以概括为以下几类：
+
 \begin{itemize}
-  \item \textbf{13 种牌型}：从高牌、对子到同花五条，分值集中在 \code{constants.h} 统一管理。
-  \item \textbf{100 余张小丑牌（Joker）}：覆盖加筹码、加倍率、乘倍率、经济联动、计数器、造牌、牌型判定修正等多种机制，并实现了蓝图 / 头脑风暴的“复制其他小丑效果”与传奇小丑。
-  \item \textbf{三类消耗牌}：塔罗牌、行星牌、幻灵牌，配合\textbf{增强 / 版本 / 蜡封}三套卡牌修饰系统。
-  \item \textbf{商店与经济}：小丑、消耗牌、补充包、优惠券（Voucher）四类商品，利息、赌注贴纸（Stake）等经济机制。
-  \item \textbf{Boss 盲注}：多种 Boss debuff（封禁花色、背面发牌、强制牌型等）。
-  \item \textbf{15+ 种牌组皮肤}，外加两套原创扩展牌组。
+  \item \textbf{牌局与计分：} 支持 13 类牌型识别，包含高牌、对子、两对、三条、顺子、同花、葫芦、四条、同花顺、皇家同花顺、五条、同花葫芦、同花五条等；计分过程采用事件流组织，便于 UI 逐项播放动画。
+  \item \textbf{卡牌效果：} 支持普通扑克牌的增强、版本、蜡封、debuff 与永久加筹；支持小丑牌、塔罗牌、星球牌和幻灵牌等多类效果。
+  \item \textbf{商店经济：} 实现商品刷新、购买、出售、重掷、折扣、优惠券、补充包和标签奖励等机制。
+  \item \textbf{盲注与赌注：} 实现小盲、大盲、Boss 盲注、底注推进以及不同赌注等级的规则限制。
+  \item \textbf{牌组系统：} 复刻基础牌组选择逻辑，并加入队列牌组和栈牌组等课程特色牌组。
+  \item \textbf{贴纸系统：} 实现永恒、租用、易腐等原版贴纸效果，支持在商店、收藏图鉴、比赛信息和牌局结算中正确显示与生效。
+  \item \textbf{收藏与演示：} 提供收藏图鉴界面、卡牌悬浮信息、演示模式和课堂路演所需的固定流程。
+  \item \textbf{视听反馈：} 使用像素风贴图、卡牌阴影、拖拽动画、开包动画、商店动画、计分动画、GLSL 着色器和音效反馈提升交互表现。
 \end{itemize}
 
-\subsection{视觉与演示特性}
-\begin{itemize}
-  \item \textbf{GPU 着色器特效}：卡面的金箔 / 全息 / 多彩 / 负片版本、卡牌溶解、火焰、漩涡、CRT 等均由 GLSL 片元着色器在离屏 FBO 中渲染为 \code{QPixmap}；GL 初始化失败时自动回退到 CPU 实现，两条路径保持同步。
-  \item \textbf{事件驱动的计分动画}：每一笔筹码 / 倍率贡献都被记录为一个评分事件，UI 按事件顺序逐一回放成动画，所见即所得。
-  \item \textbf{路演演示模式}：用一套静态状态机替换全部随机数，使录屏与现场演示每次走相同剧本，结果可复现。
-\end{itemize}
-
-% ===================== 2. 模块与类设计 =====================
-\section{各模块与类的设计细节}
-
-项目采用严格的四层架构，依赖方向单向为 \code{ui $\rightarrow$ game $\rightarrow$ card $\rightarrow$ utils}。UI 层从不直接修改游戏状态，只调用 \code{GameState} 的成员函数，并响应其发出的信号进行刷新——这是整个工程能在万行规模下保持可维护的关键约束。
+在上述功能中，牌局主循环是各系统联动的核心，其主要流程如下表所示。
 
 \begin{center}
 \small
-\begin{tabular}{>{\bfseries}l l}
+\begin{tabularx}{\textwidth}{L{3.0cm}Y}
 \toprule
-模块目录 & 职责 \\
+\rowcolor{lightgray}
+流程环节 & 功能说明 \\
 \midrule
-\code{src/card/}  & 纯数据值类型 + 每个实体的图形视图 \\
-\code{src/game/}  & 纯模型逻辑（除信号外不依赖 UI） \\
-\code{src/ui/}    & 基于 QGraphicsScene 的视图与动画编排 \\
-\code{src/utils/} & 全局常量、CPU / GPU 着色器渲染 \\
+盲注选择 & 展示小盲、大盲和 Boss 盲注，支持跳过奖励与标签触发。 \\
+出牌与弃牌 & 根据手牌、牌组约束和 Boss 规则决定可选牌，并更新剩余次数。 \\
+计分结算 & 生成基础分与 \code{ScoreEvent} 序列，驱动筹码、倍率和小丑触发动画。 \\
+商店阶段 & 处理商品、优惠券、补充包、金币、重掷和槽位变化。 \\
+底注推进 & 通过 Boss 后进入下一 Ante，目标分数和赌注限制继续提高。 \\
 \bottomrule
-\end{tabular}
+\end{tabularx}
 \end{center}
 
-\subsection{card 层：数据与视图分离}
-\begin{itemize}
-  \item \textbf{\code{CardData}}（值类型）封装花色、点数、增强、版本、蜡封、debuff 标记、永久加筹，以及一个\textbf{进程唯一的 \code{uid}}。所有卡牌动画都\emph{按 uid 追踪身份}而非下标：卡牌移动时保留 uid，只有真正生成新牌时才调用 \code{assignNewUid()}，从而让动画在洗牌、复制、销毁中始终锁定正确的对象。
-  \item \textbf{\code{Joker}} 采用\emph{回调式}设计：每张小丑由 \code{JokerType} 枚举、触发时机 \code{TriggerTiming}（计分逐张 / 出牌后 / 弃牌 / 回合结束 / 被动）和一个 \code{std::function<void(TriggerContext\&)>} 效果 lambda 组成。新增一张小丑只需注册一个 lambda，主计分流程无需改动——这是“开闭原则”在本项目中最集中的体现。
-  \item \code{carditem} / \code{jokeritem} / \code{consumableitem} 是对应的 \code{QGraphicsObject} 视图，负责悬停倾斜、拖拽、果冻形变、翻面等动画。
-\end{itemize}
+\section{项目各模块与类设计细节}
 
-\subsection{game 层：单一事实源}
-\begin{itemize}
-  \item \textbf{\code{GameState}}（约 4400 行）是全局唯一的状态源，持有手牌、小丑、金币、分数、盲注进度、消耗品、优惠券等，并通过约 16 个信号（\code{handChanged}、\code{scoreChanged}、\code{jokersChanged}、\code{shopChanged} 等）驱动界面。
-  \item \textbf{\code{HandEvaluator::evaluate}} 负责牌型判定：排序后判断同花 / 顺子 / 按点数分组，定出牌型并给出基础筹码与倍率。其精髓在于\textbf{事件驱动计分}：每个贡献（计分牌筹码、增强倍率、版本乘区、小丑乘区、蜡封重触发、玻璃破碎……）都被压入一个 \code{ScoreEvent} 列表，而非“静默地累加一个数字”。UI 正是依靠回放这串事件来生成逐项动画。
-  \item \textbf{\code{Shop}} 将商品按种类滚入三行槽位（主货架 / 优惠券 / 补充包）；优惠券通过 setter 修改商店参数（槽位数、刷新价、各类概率），并联动 \code{GameState} 上的扩展字段。
-  \item \textbf{\code{Deck} / \code{GameDeckType} / \code{BossBlind} / \code{Tag} / \code{BoosterPack}} 分别管理 52 张牌池、牌组规则、Boss debuff、跳过标签奖励与补充包内容。
-\end{itemize}
+\subsection{总体架构}
 
-\subsection{ui 层：信号驱动的场景}
-\code{MainWindow}（约 1.09 万行）是整个视图的总线，将每个游戏信号接到相应的场景更新，统管场景图元、动画与各覆盖层（对局、选盲注、商店、开包、牌组查看、回合结算、启动页、选项菜单）。计分动画在大量 \code{QPropertyAnimation} 与 \code{QTimer} 之间精心编排。受限于驱动问题（全屏 \code{QOpenGLWidget} 上叠加原生 \code{QDialog} 会触发黑屏重建），所有模态一律改用\emph{场景内覆盖层}实现。
-
-\subsection{面向对象核心：牌组体系的继承与多态}
-牌组规则集中在抽象基类 \code{GameDeckType} 中：\code{name()} / \code{description()} 为纯虚函数，出牌次数、弃牌次数、选牌窗口等为带默认实现的虚函数。\code{BalatroGameDeck}（原版 15 种皮肤）、\code{QueueGameDeck}（队列牌组：仅队首窗口内可选、禁止排序）、\code{StackGameDeck}（栈牌组：出牌必须包含栈顶新牌）均为派生类重写。更换一套玩法只需注入一个不同的子类对象，主流程代码完全不变——这是本项目对“继承与多态”最直接的运用。
-
-\subsection{程序设计概念卡：把语言特性做成可玩机制}
-团队最具特色的设计，是将四个 C++ 概念实现为可在牌桌上打出的卡牌，且页面同步展示真实源码：
+项目采用分层结构，依赖方向为 \code{ui -> game -> card -> utils}。其中 \code{game} 层维护纯游戏规则，\code{ui} 层只通过接口和信号响应状态变化，避免界面直接篡改游戏状态。这样的结构使得复杂规则可以集中在 \code{GameState}、\code{HandEvaluator} 和 \code{Shop} 等核心类中维护，也便于后续继续扩展小丑、牌组、赌注和商店规则。
 
 \begin{center}
 \small
-\renewcommand{\arraystretch}{1.25}
-\begin{tabular}{>{\bfseries}l p{11.2cm}}
+\begin{tabularx}{\textwidth}{L{2.5cm}L{4.1cm}Y}
 \toprule
-概念 & 实现要点 \\
+\rowcolor{lightgray}
+模块 & 代表类或文件 & 主要职责 \\
 \midrule
-运算符重载 & \code{OperatorOverload} 小丑：待整条计分事件流生成完毕后，统一将每个事件的“筹码$\leftrightarrow$倍率”方向互换，再按 UI 回放规则重算，保证屏幕动画终值与结算分严格一致。 \\
-类模板 & \code{ClassTemplate} 小丑：每底注被打出的\emph{第一种牌型}将其“实例化”为 \code{template<牌型>}，此后该牌型按构成张数获得乘区加成。 \\
-迭代器 & \code{Iterator} 增强：每次打出后该牌点数 $+1$（K$\rightarrow$A$\rightarrow$2 回绕），模型逻辑与翻面动画共用同一份递推规则 \code{iterNextRank}。 \\
-浅拷贝 & \code{ShallowCopy} 塔罗：使两张牌共享一份状态。系统为每对链接保存快照，每次手牌变更时比较哪一侧被改动，再将其状态镜像给另一侧（点数 / 花色 / 增强 / 版本 / 蜡封 / debuff / 加筹全部同步）。 \\
+\code{src/card} & \code{CardData}, \code{Joker}, \code{CardItem} & 定义卡牌、小丑和消耗牌的数据结构与图形对象。 \\
+\code{src/game} & \code{GameState}, \code{HandEvaluator}, \code{Shop}, \code{BossBlind} & 维护牌局状态、计分、商店、盲注、赌注和牌组规则。 \\
+\code{src/ui} & \code{MainWindow}, \code{ShopWidget}, \code{PackOpenWidget}, \code{DeckSelectWidget} & 负责界面、动画、悬浮信息、场景切换和用户交互。 \\
+\code{src/utils} & \code{constants.h}, \code{ShaderEffects}, \code{GpuEffectsRenderer} & 提供常量配置、CPU/GPU 图像效果和着色器工具。 \\
+\code{src/audio} & \code{AudioManager} & 统一管理背景音乐与音效播放。 \\
 \bottomrule
-\end{tabular}
+\end{tabularx}
 \end{center}
 
-\subsection{两个原创算法}
-\begin{itemize}
-  \item \textbf{占卜（胜率预览）}——\code{simulatePlayScore}：对当前选中的手牌做一次\emph{无副作用}的计分模拟，估算能打到目标分的百分比。它镜像真实计分流程但剥离事件与随机数，所有\textbf{概率触发的效果均按数学期望折算}（如幸运牌按 $1/5$ 概率折算为倍率期望），并以 \code{mDryRun} 标志位抑制一切对游戏状态的写入。
-  \item \textbf{最佳出牌}——\code{findBestPlay}：用\textbf{位掩码枚举}所有合法出牌子集（至多 5 张），对每个子集仅对\emph{计分牌做全排列}（\code{std::next\_permutation}）——因为存在“重复触发第一张牌”等与顺序相关的小丑，卡牌顺序会影响得分。再对每种排列调用上述模拟器取最高分。算法严格“守规矩”：队列牌组只在窗口内搜索，栈顶牌与 Boss 强制牌必带上，背面朝下（玩家看不到）的牌一律排除，不作弊。
-\end{itemize}
+\subsection{卡牌与小丑设计}
 
-% ===================== 3. 分工 =====================
-\section{小组成员分工}
+\code{CardData} 是扑克牌的值类型，封装花色、点数、增强、版本、蜡封、debuff 标记和永久加筹等信息。每张牌拥有进程内唯一的 \code{uid}，动画和移动逻辑通过 \code{uid} 追踪卡牌，而不是依赖数组下标。这可以避免洗牌、复制、移动或销毁卡牌时出现对象错位。
+
+\code{Joker} 使用类型枚举、触发时机和回调函数组织效果。每张小丑牌由 \code{JokerType}、\code{TriggerTiming} 和效果函数共同描述。新增小丑时只需补充触发逻辑，而不必重写主计分流程。这种设计符合开闭原则，适合维护大量差异化效果。
+
+\code{CardItem}、\code{JokerItem} 和 \code{ConsumableItem} 是对应的 QGraphicsObject 视图对象，负责绘制卡面、阴影、拖拽、悬停、翻面、缩放和触发动画。数据对象与显示对象分离，使规则计算和视觉表现可以分别维护。
+
+\subsection{游戏状态与事件驱动计分}
+
+\code{GameState} 是项目的单一事实源，保存手牌、小丑、金币、分数、盲注进度、消耗品、优惠券、赌注、标签和本局统计数据。界面层通过 \code{handChanged}、\code{scoreChanged}、\code{jokersChanged}、\code{shopChanged} 等信号刷新显示，而不是直接修改内部状态。
+
+牌型识别和基础计分由 \code{HandEvaluator::evaluate} 完成。它不仅返回最终数值，还返回 \code{ScoreEvent} 列表。计分牌筹码、增强倍率、版本加成、钢铁牌乘区、小丑加成、红蜡封重触发、玻璃牌破碎等效果都会成为独立事件。UI 逐项回放这些事件，从而把“算分逻辑”和“演出动画”解耦。
+
+\subsection{商店、牌组与赌注系统}
+
+\code{Shop} 管理商店货架、优惠券和补充包。优惠券不是简单的显示项，而会改变商店槽位、商品概率、折扣、重掷成本和特殊商品规则。补充包则负责生成并展示可选内容，和塔罗、星球、幻灵等消耗牌系统联动。
+
+牌组规则集中在 \code{GameDeckType} 及其派生类中。\code{name()}、\code{description()} 等接口由派生类实现，出牌次数、弃牌次数、选牌窗口、是否允许排序等规则通过虚函数覆盖。原版牌组、队列牌组和栈牌组都通过同一套接口接入主流程，体现了继承与多态的使用。
+
+赌注系统负责在不同难度下修改牌局规则，例如改变目标分数、应用贴纸、限制资源和影响盲注信息显示。该系统与牌组选择、比赛信息面板、计分旁赌注图标和收藏图鉴都有交互，因此被集中纳入游戏状态层维护，减少 UI 层重复判断。
+
+\subsection{界面与渲染设计}
+
+\code{MainWindow} 是视图层调度中心，连接 \code{GameState} 信号与界面刷新，并管理对局、商店、开包、收藏、牌组选择、回合结算、启动页和选项菜单等场景。计分动画依赖 \code{QPropertyAnimation} 与 \code{QTimer} 协调，保证不同分数事件按顺序播放。
+
+GPU 特效由 GLSL 片元着色器完成，覆盖金箔、全息、多彩、负片、火焰、漩涡、CRT 等效果。若 OpenGL 初始化失败，系统保留 CPU 回退路径，降低图形环境差异导致的风险。全屏 OpenGL 场景中容易出现原生弹窗黑屏问题，因此项目尽量采用场景内覆盖层实现菜单和提示框，避免破坏渲染上下文。
+
+\subsection{课程特色机制}
+
+项目把部分 C++ 程序设计概念设计为游戏内机制，使课程知识与玩法结合。
 
 \begin{center}
-\renewcommand{\arraystretch}{1.35}
-\begin{tabular}{>{\bfseries}l p{10.5cm}}
+\small
+\begin{tabularx}{\textwidth}{L{2.4cm}Y}
 \toprule
-成员 & 负责内容 \\
+\rowcolor{lightgray}
+概念 & 游戏内实现 \\
 \midrule
-肖楚童 & 核心游戏逻辑、计分事件流、版本管理（Git 工作流） \\
-朱韬宇 & 界面动画、GLSL 着色器特效、路演演示模式 \\
-罗铭皓 & 牌组体系（继承与多态）、四张程序设计概念卡、两个原创算法 \\
+队列 & 队列牌组按抽牌顺序排列手牌，只能从队首窗口选牌，体现先进先出约束。 \\
+栈 & 栈牌组要求出牌或弃牌包含最新抽入的栈顶牌，体现后进先出约束。 \\
+运算符重载 & 运算符重载小丑在计分事件流中交换筹码与倍率贡献，再按 UI 事件回放结算。 \\
+类模板 & 类模板小丑记录每底注首次打出的牌型，并将其视作一次模板实例化。 \\
+迭代器 & 迭代器增强使被打出的牌点数递增并循环，模型逻辑和翻面动画共享同一规则。 \\
+浅拷贝 & 浅拷贝塔罗使两张牌共享状态，一侧变化时同步点数、花色、增强、版本和蜡封。 \\
 \bottomrule
-\end{tabular}
+\end{tabularx}
 \end{center}
 
-\noindent 三人在工程协作上全程使用 Git，一学期累计百余次提交，并采用\textbf{双分支策略}：\code{develop} 开发线供自由迭代，\code{main} 主线仅接收经过审核的合并、保证始终可构建可运行。
+此外，项目实现了两个原创辅助算法。占卜功能用于分数预测和胜率预览，在不写入真实状态的前提下模拟当前出牌得分；最佳出牌功能使用位掩码枚举合法出牌组合，并结合牌组约束、Boss 限制和顺序相关小丑寻找推荐出牌。
 
-% ===================== 4. 总结与反思 =====================
+\section{小组成员分工情况}
+
+\begin{center}
+\small
+\begin{tabularx}{\textwidth}{L{2.6cm}Y}
+\toprule
+\rowcolor{lightgray}
+成员 & 主要分工 \\
+\midrule
+肖楚童 & 负责核心游戏逻辑、计分事件流、状态管理以及版本管理与 Git 工作流维护。 \\
+朱韬宇 & 负责界面动画、GLSL 着色器特效、路演演示模式和主要视觉反馈。 \\
+罗铭皓 & 负责牌组体系设计、继承与多态机制、程序设计概念卡和原创算法设计。 \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+小组协作采用 Git 管理版本。项目开发过程中使用 \code{develop} 与 \code{main} 分支区分日常迭代和稳定版本，功能修复后再合并到主线。这一流程降低了多人协作中代码互相覆盖、功能回退和资源文件遗漏的风险。
+
 \section{项目总结与反思}
 
-\subsection{收获与亮点}
-\begin{itemize}
-  \item \textbf{把课程概念“玩”了出来}：四张概念卡让运算符重载、类模板、迭代器、浅拷贝不再是抽象语法，而成为玩法本身——这是团队最得意的设计。
-  \item \textbf{清晰的架构换来可扩展性}：单向分层 + 单一事实源 + 信号驱动，使得 100 余张小丑、十余种牌型、多种 Boss 能在不互相破坏的前提下持续叠加；回调式小丑模型让新增内容几乎不触碰主流程。
-  \item \textbf{事件驱动计分}：把“算分”与“演分”解耦，既保证了数值正确，又支撑了复杂的逐项动画，新效果只需发出事件即可自动获得动画。
-\end{itemize}
+\subsection{项目成果}
 
-\subsection{遇到的困难与反思}
+BalatroQt 已经形成一个功能较完整的桌面游戏项目。它不仅实现了基础牌局循环，还覆盖商店、卡包、优惠券、标签、赌注、收藏、牌组选择、演示模式和视觉特效等系统。项目核心 C++/Header 代码约 3.4 万行，按整体项目口径约 3.8 万行；其中 \code{MainWindow} 和 \code{GameState} 承担了大量界面调度与状态管理工作。
+
+工程设计上的主要成果，是使用单一事实源和事件驱动计分结构组织复杂规则。新增卡牌效果时，模型层生成明确的计分事件，界面层按事件播放动画。这样既保证最终得分可追踪，也让动画表现不必侵入规则计算。
+
+\subsection{开发困难}
+
+项目最大的困难来自复杂系统之间的联动。小丑、版本、蜡封、Boss 盲注、赌注贴纸和商店优惠都会影响同一局游戏状态。如果缺少统一状态源和事件流，调试成本会迅速上升。后期通过 \code{GameState} 与 \code{ScoreEvent} 集中管理，项目可维护性有所提高。
+
+第二个困难来自 UI 与底层渲染的耦合。Qt Widgets、QGraphicsScene 与 OpenGL 同时使用时，原生弹窗、全屏窗口和 GPU 后处理可能产生黑屏或重绘问题。项目改用场景内覆盖层实现菜单和提示框，说明图形界面开发不仅要实现控件功能，还要验证不同渲染路径的兼容性。
+
+第三个困难是项目规模增长带来的维护压力。当前部分文件仍然较大，尤其是 \code{MainWindow} 和 \code{GameState}。虽然集中实现便于快速迭代，但长期维护时应继续拆分收藏界面、牌组选择、商店、计分动画和规则子模块。
+
+\subsection{后续改进方向}
+
+后续若继续开发，可以从以下方面改进：
+
 \begin{itemize}
-  \item \textbf{开发线的波折}：\code{develop} 分支在迭代过程中确实出现过一些 bug 与反复，尤其在浅拷贝同步、计分动画时序与高 DPI 缩放等处。得益于“主线只收审核过的合并”这一纪律，主线十余次合并未出现事故——这让我们真切体会到\emph{分支管理与代码评审}对团队项目质量的兜底作用。
-  \item \textbf{UI 与底层驱动的耦合}：全屏 OpenGL 场景上叠加原生对话框会黑屏，迫使我们改用场景内覆盖层；这提醒我们在跨平台图形开发中要尽早验证“看似无关”的渲染假设。
-  \item \textbf{复杂度管理}：随着小丑数量膨胀，计分阶段的触发顺序、重触发、复制效果交织，调试成本陡增。事件流与无副作用模拟器在很大程度上缓解了这一点，但也说明\emph{在设计初期就规划好扩展点}的重要性。
+  \item 为牌型识别、计分事件、赌注规则和牌组限制等功能补充自动化测试，减少风险引入。
+  \item 优化动画等UI设计，校准 UI 比例、动画节奏、卡牌说明和触发时机，贴合原版游戏体验。
+  \item 增加更加新颖有趣、贴合实际校园生活以及程设课程的游戏卡牌及相关逻辑，提高趣味性。
+  \item 优化收藏界面、卡牌预览和翻页逻辑中的资源缓存，减少重复贴图合成和卡顿。
 \end{itemize}
 
 \subsection{结语}
-BalatroQt 在还原一款成熟商业游戏的同时，融入了对 C++ 语言概念的原创表达，并在面向对象设计、算法实现与工程协作三个维度上得到了完整的实践。它既是一份课程作业，也是一次关于“如何在规模增长中保持代码可维护”的真实演练。
+
+本项目使小组完整经历了一次从规则建模、界面实现、动画组织到版本协作的综合开发过程。BalatroQt 的价值不只在于复刻一款游戏，也在于把 C++ 程序设计概念嵌入可交互系统中。通过该项目，我们进一步理解了面向对象设计、事件驱动架构、图形界面开发和团队版本管理在中型项目中的实际意义。
 
 \end{document}
