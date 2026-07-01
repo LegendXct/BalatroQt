@@ -25,6 +25,14 @@ enum class Rank {
     Eight, Nine, Ten, Jack, Queen, King, Ace
 };
 
+// 迭代器增强（程设扩展）的点数递推：每次打出后 +1，K→A→2 回绕
+// （区别于"力量"塔罗的 nextRank：那个 A 封顶）。
+// 模型(finalizePlayedHand)与 UI(计分后的翻面演出)共用，规则只此一份。
+inline Rank iterNextRank(Rank r)
+{
+    return (r == Rank::Ace) ? Rank::Two : static_cast<Rank>(static_cast<int>(r) + 1);
+}
+
 // 增强类型
 enum class Enhancement {
     None,
@@ -35,7 +43,8 @@ enum class Enhancement {
     Steel, // 持有时 ×1.5 倍率
     Stone, // +50 筹码，无花色，无点数
     Gold, // 回合结束 +3 金币
-    Lucky // 1/5概率 +20 倍率，1/15概率 +20 金币
+    Lucky, // 1/5概率 +20 倍率，1/15概率 +20 金币
+    Iterator // 程设扩展：每次打出后点数 +1（K→A，A→2），无计分效果
 };
 
 // 版本

@@ -1,5 +1,6 @@
 #include "packopenwidget.h"
 #include "../card/carditem.h"
+#include "../card/deckskin.h"
 #include "../card/jokeritem.h"
 #include "../card/consumableitem.h"
 #include "../utils/shadereffects.h"
@@ -312,6 +313,8 @@ void PackOpenWidget::open(const PackContent &content,
     mChoicesUsed = 0;
     mChosenOptions.clear();
     mSelectedHand.clear();
+    mForcedFlipUids.clear();
+    mHandFlipAnimatingUids.clear();
     mFinishing = false;
     mLastDragTo = -1;
     if (mFocusedOptIdx >= 0) {
@@ -342,6 +345,23 @@ void PackOpenWidget::setPackHand(const QVector<CardData> &packHand)
     if (mFinishing && (mContent.kind == PackKind::Buffoon || mContent.kind == PackKind::Standard))
         return;
     refreshAll();
+}
+
+void PackOpenWidget::forceNextHandFlipUids(const QVector<int> &uids)
+{
+    mForcedFlipUids.clear();
+    for (int uid : uids)
+        if (uid > 0) mForcedFlipUids.insert(uid);
+}
+
+void PackOpenWidget::clearHandSelection()
+{
+    if (mSelectedHand.isEmpty()) return;
+    mSelectedHand.clear();
+    layoutPackHand();
+    refreshOptionUi();
+    refreshInventoryUi();
+    emit handSelectionChanged();
 }
 
 void PackOpenWidget::setInventoryConsumables(const QVector<Consumable> &inv)
@@ -424,9 +444,11 @@ void PackOpenWidget::refreshHandUi()
                                     || (oc.rank        != nc.rank)
                                     || (oc.isDebuffed  != nc.isDebuffed)
                                     || (oc.permanentBonusChips != nc.permanentBonusChips);
-            if (visualChanged) {
+            if ((visualChanged || mForcedFlipUids.contains(nc.uid))
+                && !mHandFlipAnimatingUids.contains(nc.uid)) {
                 toFlip.append(item);
                 flipNewData.append(nc);
+                mHandFlipAnimatingUids.insert(nc.uid);
             }
             reordered.append(item);
         } else {
@@ -450,6 +472,7 @@ void PackOpenWidget::refreshHandUi()
         it.value()->deleteLater();
     }
     mPackHandItems = reordered;
+    mForcedFlipUids.clear();
 
     // 触发"翻到背面 → 换数据 → 翻回正面"的双段翻面，对齐 mainwindow.cpp
     // 的塔罗/幻灵节奏：单次 flip() 只是 1→0→1 的 240ms 收缩+扩张，并且在中点
@@ -458,6 +481,7 @@ void PackOpenWidget::refreshHandUi()
     for (int k = 0; k < toFlip.size(); ++k) {
         CardItem *target = toFlip[k];
         const CardData newData = flipNewData[k];
+        const int uid = newData.uid;
         target->flip();
         QPointer<CardItem> guard(target);
         // 1) 翻到背面的中点（≈120ms）切换数据，setCardData 保留 faceUp=false。
@@ -467,6 +491,9 @@ void PackOpenWidget::refreshHandUi()
         // 2) 等首次 flip 整段（240ms）+ 短暂停顿后再翻回正面。
         QTimer::singleShot(300, this, [guard]() {
             if (guard) guard->flip();
+        });
+        QTimer::singleShot(560, this, [this, uid]() {
+            mHandFlipAnimatingUids.remove(uid);
         });
     }
 
@@ -624,6 +651,12 @@ void PackOpenWidget::showOptionTooltip(int idx)
             Joker tmp = createJoker(mContent.jokers[idx]);
             name = tmp.name;
             bodyHtml = CardTooltipFormat::fromLuaMarkup(tmp.description);
+            if (idx < mContent.jokerEternals.size() && mContent.jokerEternals[idx])
+                bodyHtml += QStringLiteral("<br>永恒卡：不能出售或被摧毁。");
+            if (idx < mContent.jokerPerishables.size() && mContent.jokerPerishables[idx])
+                bodyHtml += QStringLiteral("<br>易腐：经过 5 回合后会被削弱。");
+            if (idx < mContent.jokerRentals.size() && mContent.jokerRentals[idx])
+                bodyHtml += QStringLiteral("<br>租用：售价为 $1，回合结束时失去 $3。");
             const JokerRarity rr = jokerRarity(mContent.jokers[idx]);
             badges.append({CardTooltipFormat::rarityName(rr),
                            CardTooltipFormat::rarityColor(rr)});
@@ -789,6 +822,7 @@ void PackOpenWidget::onPackCardClicked(CardItem *card)
     layoutPackHand();
     refreshOptionUi();
     refreshInventoryUi();
+    emit handSelectionChanged();
 }
 
 void PackOpenWidget::onPackCardDragMoved(CardItem *card, QPointF scenePos)
@@ -951,18 +985,26 @@ QPixmap PackOpenWidget::renderOption(int i) const
     const QSize size(134, 180);
 
     if (mContent.kind == PackKind::Buffoon) {
-        QPixmap sheet(":/textures/images/Jokers.png");
-        if (sheet.isNull()) return QPixmap();
-        QPoint xy = JokerItem::spritePos(mContent.jokers[i]);
-        // Jokers.png 每格固定 142×190——必须使用 SRC_W / SRC_H 采样；之前用 WIDTH/HEIGHT
-        // (170×228 显示尺寸) 会按错误的步长切图，导致每张小丑里粘上隔壁单元的边缘。
-        QPixmap raw = sheet.copy(xy.x() * JokerItem::SRC_W, xy.y() * JokerItem::SRC_H,
-                                 JokerItem::SRC_W, JokerItem::SRC_H);
+        QPixmap raw = JokerItem::customCardPixmap(mContent.jokers[i]);   // 程设扩展小丑专属贴图
+        if (raw.isNull()) {
+            QPixmap sheet(":/textures/images/Jokers.png");
+            if (sheet.isNull()) return QPixmap();
+            QPoint xy = JokerItem::spritePos(mContent.jokers[i]);
+            // Jokers.png 每格固定 142×190——必须使用 SRC_W / SRC_H 采样；之前用 WIDTH/HEIGHT
+            // (170×228 显示尺寸) 会按错误的步长切图，导致每张小丑里粘上隔壁单元的边缘。
+            raw = sheet.copy(xy.x() * JokerItem::SRC_W, xy.y() * JokerItem::SRC_H,
+                             JokerItem::SRC_W, JokerItem::SRC_H);
+        }
         // 演示模式可以通过 pack.jokerEditions 给单张小丑挂版本（多彩/闪箔/镭射/负片）——
         // 包内 hover 时就应该看到 shader 效果，不能等买入后才显示。
         Edition ed = Edition::None;
         if (i < mContent.jokerEditions.size()) ed = mContent.jokerEditions[i];
         if (ed != Edition::None) raw = BalatroShaders::renderEditionPixmap(raw, ed);
+        JokerItem::applyStakeStickerOverlay(
+            raw,
+            i < mContent.jokerEternals.size() && mContent.jokerEternals[i],
+            i < mContent.jokerPerishables.size() && mContent.jokerPerishables[i],
+            i < mContent.jokerRentals.size() && mContent.jokerRentals[i]);
         return raw.scaled(size, Qt::KeepAspectRatio, Qt::SmoothTransformation);
     }
     if (mContent.kind == PackKind::Arcana || mContent.kind == PackKind::Celestial
@@ -981,7 +1023,8 @@ QPixmap PackOpenWidget::renderPlayingCard(const CardData &c, const QSize &size) 
 {
     // 按图集原始 142×190 切取，最后 scaled() 输出实际显示尺寸。
     constexpr int W = ConsumableItem::SRC_W, H = ConsumableItem::SRC_H;
-    QPixmap deckSheet(":/textures/images/8BitDeck.png");
+    QPixmap deckSheet = DeckSkin::deckSheet();   // 跟随定制牌组换肤
+
     QPixmap enhSheet (":/textures/images/Enhancers.png");
     QPixmap pix(W, H); pix.fill(Qt::transparent);
     QPainter p(&pix);
@@ -1014,6 +1057,12 @@ QPixmap PackOpenWidget::renderPlayingCard(const CardData &c, const QSize &size) 
         }
         p.drawPixmap(QRect(0, 0, W, H), deckSheet, QRect(col*W, row*H, W, H));
     }
+    // 程设整卡人像：背景式增强以不透明"边框"叠在人像上（玻璃整张叠加），角标回贴。
+    if (!enhSheet.isNull() && DeckSkin::enhancementOverArt(c.rank, c.enhancement))
+        DeckSkin::drawEnhancementOverArt(&p, enhSheet, QRect(eCol*W, eRow*H, W, H),
+                                         c.rank, c.suit, c.enhancement);
+    if (c.enhancement == Enhancement::Iterator)
+        CardItem::drawIteratorOverlay(&p, QRectF(0, 0, W, H));
     p.end();
 
     if (c.edition != Edition::None)
@@ -1088,8 +1137,16 @@ QString PackOpenWidget::optionDesc(int i) const
         }
         return parts.isEmpty() ? "加入牌组" : parts.join("\n");
     }
-    if (mContent.kind == PackKind::Buffoon)
-        return createJoker(mContent.jokers[i]).description;
+    if (mContent.kind == PackKind::Buffoon) {
+        QString desc = createJoker(mContent.jokers[i]).description;
+        if (i < mContent.jokerEternals.size() && mContent.jokerEternals[i])
+            desc += QStringLiteral("\n永恒卡：不能出售或被摧毁。");
+        if (i < mContent.jokerPerishables.size() && mContent.jokerPerishables[i])
+            desc += QStringLiteral("\n易腐：经过 5 回合后会被削弱。");
+        if (i < mContent.jokerRentals.size() && mContent.jokerRentals[i])
+            desc += QStringLiteral("\n租用：售价为 $1，回合结束时失去 $3。");
+        return desc;
+    }
     return createConsumable(mContent.consumables[i]).description;
 }
 

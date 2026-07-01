@@ -20,9 +20,11 @@ qt_add_executable(BalatroQt
     src/game/deck.h src/game/deck.cpp
     src/game/handevaluator.h src/game/handevaluator.cpp
     src/game/gamestate.h src/game/gamestate.cpp
+    src/game/gamedeck.h src/game/gamedeck.cpp
     src/game/demoscript.h src/game/demoscript.cpp
     src/card/cardshadow.h src/card/cardshadow.cpp
     src/card/carditem.h src/card/carditem.cpp
+    src/card/deckskin.h src/card/deckskin.cpp
     src/ui/roundendoverlay.h src/ui/roundendoverlay.cpp
     src/card/jokeritem.h src/card/jokeritem.cpp
     src/game/shop.h src/game/shop.cpp
@@ -37,6 +39,7 @@ qt_add_executable(BalatroQt
     src/ui/floatingscore.h src/ui/floatingscore.cpp
     src/ui/shopsignwidget.h src/ui/shopsignwidget.cpp
     src/ui/deckviewwidget.h src/ui/deckviewwidget.cpp
+    src/ui/deckselectwidget.h src/ui/deckselectwidget.cpp
     src/ui/dynamicbackgrounditem.h src/ui/dynamicbackgrounditem.cpp
     src/ui/splashshaderoverlay.h src/ui/splashshaderoverlay.cpp
     src/ui/animatedblindchip.h src/ui/animatedblindchip.cpp
@@ -74,12 +77,36 @@ qt_add_resources(BalatroQt "textures"
         resources/images/boosters.png
         resources/images/BlindChips.png
         resources/images/chips.png
+        resources/images/deck_queue.png
+        resources/images/deck_stack.png
+        resources/images/stickers.png
         resources/images/tags.png
         resources/images/ui_assets.png
         resources/images/icons.png
         resources/images/balatro.png
         resources/images/ShopSignAnimation.png
         resources/images/Vouchers.png
+        resources/images/deckskin_cs_sA.png
+        resources/images/deckskin_cs_sJ.png
+        resources/images/deckskin_cs_sQ.png
+        resources/images/deckskin_cs_sK.png
+        resources/images/deckskin_cs_hA.png
+        resources/images/deckskin_cs_hJ.png
+        resources/images/deckskin_cs_hQ.png
+        resources/images/deckskin_cs_hK.png
+        resources/images/deckskin_cs_cA.png
+        resources/images/deckskin_cs_cJ.png
+        resources/images/deckskin_cs_cQ.png
+        resources/images/deckskin_cs_cK.png
+        resources/images/deckskin_cs_dA.png
+        resources/images/deckskin_cs_dJ.png
+        resources/images/deckskin_cs_dQ.png
+        resources/images/deckskin_cs_dK.png
+        resources/images/joker_cs_overload.png
+        resources/images/joker_cs_template.png
+        resources/images/tarot_cs_iterator.png
+        resources/images/tarot_cs_shallow.png
+        resources/images/enh_cs_iterator.png
 )
 
 

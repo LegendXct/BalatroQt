@@ -5,6 +5,7 @@
 #include <QVector>
 #include <QPixmap>
 #include <QPoint>
+#include <QSet>
 #include "../game/boosterpack.h"
 #include "../card/consumable.h"
 
@@ -32,6 +33,8 @@ public:
     void setPackHand(const QVector<CardData> &packHand);
     void setInventoryConsumables(const QVector<Consumable> &inventoryConsumables);
     void setFreeJokerSlots(int freeSlots);
+    void forceNextHandFlipUids(const QVector<int> &uids);
+    void clearHandSelection();
     QVector<int> selectedHandIndices() const { return mSelectedHand; }
     const QVector<CardData> &packHand() const { return mPackHand; }
 
@@ -40,6 +43,7 @@ signals:
     void choiceMade(int chosenIdx, QVector<int> selectedHandIdx);
     void inventoryConsumableRequested(int inventoryIdx, QVector<int> selectedHandIdx);
     void packHandReordered(QVector<CardData> packHand);
+    void handSelectionChanged();
     void packFinished();
 
 protected:
@@ -65,6 +69,8 @@ private:
     int mChoicesUsed = 0;
     QVector<int> mChosenOptions;
     QVector<int> mSelectedHand;
+    QSet<int> mForcedFlipUids;
+    QSet<int> mHandFlipAnimatingUids;
     bool mFinishing = false;
     QTimer *mSoulAnimTimer = nullptr;
     int mLastDragTo = -1;

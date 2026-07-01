@@ -3,7 +3,9 @@
 
 #include <QGraphicsObject>
 #include <QPixmap>
+#include <QPoint>
 #include <QPropertyAnimation>
+#include <QFont>
 #include "carddata.h"
 
 class CardShadowItem;
@@ -41,6 +43,12 @@ public:
     // ──────────────────────────────────────────────────
 
     static void loadResources();
+    static QPixmap cardBackPixmap();   // 卡背贴图（牌组选择界面预览用）
+    static void setCardBackSpritePos(const QPoint &pos);
+    static void setCustomCardBackPixmap(const QPixmap &pixmap);
+    // 迭代器增强（程设扩展）的卡面蒙版（enh_cs_iterator.png，透明底彩色装饰框）。
+    // CardItem / 查看牌组 / 商店 / 开包 的卡面合成路径共用，保证观感一致。
+    static void drawIteratorOverlay(QPainter *p, const QRectF &dst);
     explicit CardItem(const CardData &data, QGraphicsItem *parent = nullptr);
     ~CardItem() override;
     QRectF boundingRect() const override;
@@ -73,6 +81,9 @@ public:
     // 计分阶段抬升：mainwindow.cpp 在 playScoreEvent / animatePlayedCardsToDiscardThen
     // 期间调用，让正在被计分的牌阴影最大化（off + blur 增大），看上去卡牌悬浮起来。
     void setScoringLifted(bool lifted);
+    // 浅拷贝链接角标：两张链接牌共享的"内存地址"文案（空 = 无链接，不绘制）。
+    void setLinkTag(const QString &tag);
+    static void setLinkTagFont(const QFont &f);   // MainWindow loadFonts 后注入像素字体
 signals:
     void clicked(CardItem *card);
     void dragMoved(CardItem *card, QPointF scenePos);
@@ -88,6 +99,7 @@ protected:
     QVariant itemChange(GraphicsItemChange change, const QVariant &value) override;
 private:
     CardData mData;
+    QString mLinkTag;          // 浅拷贝共享地址角标文案（空 = 不绘制）
     bool mSelected = false;
     bool mHovered = false;
     bool mPressed = false;
@@ -127,10 +139,14 @@ private:
 
     void paintFront(QPainter *painter);
     void paintBack(QPainter *painter);
+    void paintLinkTag(QPainter *painter);
+    static QFont sLinkTagFont;
 
     static QPixmap *sDeckSheet;
     static QPixmap *sEnhSheet;
     static QPixmap *sJokerSheet;
+    static QPoint sBackSpritePos;
+    static QPixmap *sCustomBackPixmap;
 };
 
 #endif // CARDITEM_H

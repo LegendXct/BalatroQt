@@ -80,6 +80,15 @@ void Deck::addCard(const CardData &card) {
     shuffle();
 }
 
+void Deck::setCards(const QVector<CardData> &cards, bool shuffleCards)
+{
+    mDrawPile.clear();
+    mDiscardPile.clear();
+    for (const CardData &card : cards)
+        mDrawPile.append(clearTransientFlags(card));
+    if (shuffleCards) shuffle();
+}
+
 void Deck::returnCards(const QVector<CardData> &cards)
 {
     for (const CardData &card : cards)
@@ -93,4 +102,25 @@ QVector<CardData> Deck::allKnownCards() const
     for (const CardData &c : mDiscardPile)
         out.append(clearTransientFlags(c));
     return out;
+}
+
+CardData *Deck::findByUid(int uid)
+{
+    for (CardData &c : mDrawPile)    if (c.uid == uid) return &c;
+    for (CardData &c : mDiscardPile) if (c.uid == uid) return &c;
+    return nullptr;
+}
+
+bool Deck::removeByUid(int uid, CardData *removed)
+{
+    auto removeFrom = [uid, removed](QVector<CardData> &cards) {
+        for (int i = 0; i < cards.size(); ++i) {
+            if (cards[i].uid != uid) continue;
+            if (removed) *removed = cards[i];
+            cards.removeAt(i);
+            return true;
+        }
+        return false;
+    };
+    return removeFrom(mDrawPile) || removeFrom(mDiscardPile);
 }

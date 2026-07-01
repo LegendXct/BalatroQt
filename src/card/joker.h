@@ -64,7 +64,11 @@ enum class JokerType {
     Pareidolia, Hallucination, Luchador, InvisibleJoker,
     // Batch 9：收尾小丑
     CreditCard, MrBones, DietCola, FourFingers, OopsAllSixes,
+    // Batch 10：补充小丑
     SixthSense, RedCard, BaseballCard, TradingCard, Matador, Astronomer,
+    // 程设扩展：C++ 概念小丑（专属卡面见 joker_cs_*.png）
+    OperatorOverload,   // 函数重载：计分事件流里筹码/倍率贡献互换
+    ClassTemplate,      // 类模板：每底注第一种牌型实例化，该牌型 ×构成张数
 };
 
 class Joker; // 前置声明，供 TriggerContext::self 使用
@@ -93,6 +97,10 @@ public:
     int sellValue = 2;
     int extraSellValue = 0;
     bool isDebuffed = false;
+    bool eternal = false;
+    bool perishable = false;
+    bool rental = false;
+    int perishableRounds = 5;
     int counter = 0; // 动态数值：冰淇淋当前筹码等
 
     TriggerTiming timing;
@@ -102,6 +110,10 @@ public:
 Joker createJoker(JokerType type);
 JokerRarity jokerRarity(JokerType t);
 int jokerBaseCost(JokerType t);
+// 蓝图/头脑风暴能否复制该小丑的效果（原版部分被动/机制类小丑不可复制）。
 bool jokerBlueprintCompatible(JokerType t);
+// 原版 center 的 eternal_compat / perishable_compat。赌注贴纸判定必须尊重这些限制。
+bool jokerEternalCompatible(JokerType t);
+bool jokerPerishableCompatible(JokerType t);
 
 #endif // JOKER_HH

@@ -103,6 +103,7 @@ inline QString enhancementName(Enhancement e)
     case Enhancement::Stone: return QStringLiteral("石头牌");
     case Enhancement::Gold:  return QStringLiteral("黄金牌");
     case Enhancement::Lucky: return QStringLiteral("幸运牌");
+    case Enhancement::Iterator: return QStringLiteral("迭代器牌");
     default: return QString();
     }
 }
@@ -295,6 +296,10 @@ inline QString enhancementBodyHtml(Enhancement e)
     case Enhancement::Stone:
         return span(QStringLiteral("+50"), kChipsColor()) + QStringLiteral(" 筹码<br/>")
              + QStringLiteral("无点数 / 无花色");
+    case Enhancement::Iterator:
+        return QStringLiteral("每次打出后点数 ")
+             + span(QStringLiteral("+1"), kChipsColor())
+             + QStringLiteral("<br/>K→A，A→2 循环递增");
     default:
         return QString();
     }
@@ -340,6 +345,7 @@ inline Enhancement consumableGrantsEnhancement(ConsumableType t)
     case ConsumableType::Tarot_Justice:    return Enhancement::Glass;
     case ConsumableType::Tarot_Tower:      return Enhancement::Stone;
     case ConsumableType::Tarot_Devil:      return Enhancement::Gold;
+    case ConsumableType::Tarot_Iterator:   return Enhancement::Iterator;
     default:                               return Enhancement::None;
     }
 }
@@ -429,6 +435,11 @@ inline QString cardBodyHtml(const CardData &c)
             lines << span(QStringLiteral("1/15"), kProbColor())
                    + QStringLiteral(" 概率 ")
                    + span(QStringLiteral("$20"), kMoneyColor());
+            break;
+        case Enhancement::Iterator:
+            lines << QStringLiteral("每次打出后点数 ")
+                   + span(QStringLiteral("+1"), kChipsColor())
+                   + QStringLiteral("（K→A，A→2）");
             break;
         default: break;
         }

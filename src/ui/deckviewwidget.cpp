@@ -1,7 +1,9 @@
 #include "deckviewwidget.h"
 #include "balatroinfopanel.h"
 #include "cardtooltipformat.h"
+#include "../card/carditem.h"
 #include "../card/consumableitem.h"
+#include "../card/deckskin.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
 #include <QGridLayout>
@@ -521,7 +523,8 @@ QPixmap DeckViewWidget::renderCard(const CardData &c, const QSize &size) const
 {
     // 这里只是按图集每格 142×190 切取原始纹理；最后通过 scaled() 输出 size。
     constexpr int W = ConsumableItem::SRC_W, H = ConsumableItem::SRC_H;
-    QPixmap deckSheet(":/textures/images/8BitDeck.png");
+    QPixmap deckSheet = DeckSkin::deckSheet();   // 跟随定制牌组换肤
+
     QPixmap enhSheet (":/textures/images/Enhancers.png");
     QPixmap pix(W, H); pix.fill(Qt::transparent);
     QPainter p(&pix);
@@ -553,6 +556,12 @@ QPixmap DeckViewWidget::renderCard(const CardData &c, const QSize &size) const
         }
         p.drawPixmap(QRect(0, 0, W, H), deckSheet, QRect(col*W, row*H, W, H));
     }
+    // 程设整卡人像：背景式增强以不透明"边框"叠在人像上（玻璃整张叠加），角标回贴。
+    if (!enhSheet.isNull() && DeckSkin::enhancementOverArt(c.rank, c.enhancement))
+        DeckSkin::drawEnhancementOverArt(&p, enhSheet, QRect(eCol*W, eRow*H, W, H),
+                                         c.rank, c.suit, c.enhancement);
+    if (c.enhancement == Enhancement::Iterator)
+        CardItem::drawIteratorOverlay(&p, QRectF(0, 0, W, H));
 
     int sCol = -1, sRow = 0;
     switch (c.seal) {

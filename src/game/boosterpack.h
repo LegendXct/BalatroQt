@@ -32,6 +32,10 @@ struct PackContent {
     QVector<CardData>       standardCards;   // Standard 用
     QVector<JokerType>      jokers;          // Buffoon 用
     QVector<Edition>        jokerEditions;   // 与 jokers 平行；空表示全 None。演示模式给公牛挂多彩用。
+    // 与 jokers 平行。原版 common_events.lua 对 pack_cards 与 shop_jokers 使用相同赌注贴纸规则。
+    QVector<bool>           jokerEternals;
+    QVector<bool>           jokerPerishables;
+    QVector<bool>           jokerRentals;
     QVector<ConsumableType> consumables;     // Arcana / Celestial / Spectral 用
 };
 

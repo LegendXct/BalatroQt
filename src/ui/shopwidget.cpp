@@ -1,5 +1,7 @@
 #include "shopwidget.h"
+#include "../card/carditem.h"
 #include "../card/consumableitem.h"
+#include "../card/deckskin.h"
 #include "../card/jokeritem.h"
 #include "../audio/audiomanager.h"
 #include "cardtooltipformat.h"
@@ -755,6 +757,15 @@ void ShopWidget::showOfferInfo(QWidget *source)
         s.preferredWidth = 130;
         mInfoPanel->addSidePanel(s);
     };
+    auto addStickerSide = [this](const QString &name, const QString &body,
+                                 const QColor &badgeColor, int preferredWidth = 128) {
+        BalatroInfoPanel::SideEntry s;
+        s.name = name;
+        s.body = CardTooltipFormat::fromLuaMarkup(body);
+        s.badges.append({name, badgeColor});
+        s.preferredWidth = preferredWidth;
+        mInfoPanel->addSidePanel(s);
+    };
 
     if (offer) {
         switch (offer->kind) {
@@ -774,6 +785,18 @@ void ShopWidget::showOfferInfo(QWidget *source)
                                CardTooltipFormat::rarityColor(rr)});
             mInfoPanel->setMainContent(name, bodyHtml, mainBadges, mainWidth, nameWhiteBox);
             addEditionSide(offer->jokerEdition);
+            if (offer->jokerEternal)
+                addStickerSide(QStringLiteral("永恒卡"),
+                               QStringLiteral("不能出售\n或被摧毁"),
+                               QColor("#4f6367"));
+            if (offer->jokerPerishable)
+                addStickerSide(QStringLiteral("易腐"),
+                               QStringLiteral("经过{C:attention}5{}回合后\n会被削弱"),
+                               QColor("#4ca893"));
+            if (offer->jokerRental)
+                addStickerSide(QStringLiteral("租用"),
+                               QStringLiteral("售价为$1，在回合\n结束时失去{C:money}$3{}"),
+                               QColor("#f3b958"));
             break;
         }
         case OfferKind::Tarot:
@@ -1374,6 +1397,9 @@ void ShopWidget::refresh()
                             .arg(x, 0, 'f', 2);
             }
             if (!ed.isEmpty()) body += "\n" + editionDescription(o.jokerEdition);
+            if (o.jokerEternal) body += QStringLiteral("\n永恒卡：不能出售或被摧毁。");
+            if (o.jokerPerishable) body += QStringLiteral("\n易腐：经过 5 回合后会被削弱。");
+            if (o.jokerRental) body += QStringLiteral("\n租用：售价为 $1，回合结束时失去 $3。");
         } else if (o.kind == OfferKind::Pack) {
             name = packDisplayName(o.pack, o.packSize);
             body = "购买后打开，选择其中的牌。";
@@ -1397,7 +1423,7 @@ void ShopWidget::refresh()
         // 卡图由 ShopCardButton 自己绘制，保留原始像素清晰度，并在 hover 时做原版式顶点透视。
         // 关键：选中切换 / 价格刷新都会触发 refresh()，但 offer 本身没变时不要重渲卡图，
         // 否则带 shader 的牌面（Foil/Holographic 等）每次会产生轻微色差，看上去就是"光泽闪一下"。
-        const QString offerHash = QString("%1|j%2|e%3|c%4|p%5|s%6|pv%7|v%8|r%9|u%10|h%11|d%12|l%13|b%14|sold%15")
+        const QString offerHash = QString("%1|j%2|e%3|c%4|p%5|s%6|pv%7|v%8|r%9|u%10|h%11|d%12|l%13|b%14|sold%15|et%16|pe%17|re%18")
                                       .arg(int(o.kind))
                                       .arg(int(o.joker))
                                       .arg(int(o.jokerEdition))
@@ -1412,7 +1438,10 @@ void ShopWidget::refresh()
                                       .arg(int(o.playingCard.edition))
                                       .arg(int(o.playingCard.seal))
                                       .arg(o.playingCard.isDebuffed ? 1 : 0)
-                                      .arg(o.sold ? 1 : 0);
+                                      .arg(o.sold ? 1 : 0)
+                                      .arg(o.jokerEternal ? 1 : 0)
+                                      .arg(o.jokerPerishable ? 1 : 0)
+                                      .arg(o.jokerRental ? 1 : 0);
         if (ou.cardBtn->property("offerHash").toString() != offerHash) {
             QPixmap pix = offerPixmap(o);
             if (auto *tiltBtn = dynamic_cast<ShopCardButton *>(ou.cardBtn))
@@ -1579,11 +1608,14 @@ void ShopWidget::refresh()
 QPixmap ShopWidget::offerPixmap(const ShopOffer &o) const
 {
     if (o.kind == OfferKind::Joker) {
-        QPixmap sheet(":/textures/images/Jokers.png");
-        if (sheet.isNull()) return QPixmap();
-        QPoint c = JokerItem::spritePos(o.joker);
-        QPixmap pix = sheet.copy(c.x() * JokerItem::SRC_W, c.y() * JokerItem::SRC_H,
-                                 JokerItem::SRC_W, JokerItem::SRC_H);
+        QPixmap pix = JokerItem::customCardPixmap(o.joker);   // 程设扩展小丑专属贴图
+        if (pix.isNull()) {
+            QPixmap sheet(":/textures/images/Jokers.png");
+            if (sheet.isNull()) return QPixmap();
+            QPoint c = JokerItem::spritePos(o.joker);
+            pix = sheet.copy(c.x() * JokerItem::SRC_W, c.y() * JokerItem::SRC_H,
+                             JokerItem::SRC_W, JokerItem::SRC_H);
+        }
         // 全息投影 / 五张传奇牌：原版 card.lua:4512-4523 走 floating_sprite 浮动层。
         // 商店里如果只画 pos 主体，Hologram 看上去就是个空相框，传奇牌也少了肖像。
         {
@@ -1593,9 +1625,11 @@ QPixmap ShopWidget::offerPixmap(const ShopOffer &o) const
             JokerItem::drawFloatingSprite(&p, QRectF(0, 0, pix.width(), pix.height()),
                                           o.joker, /*animated=*/false);
         }
-        if (o.jokerEdition != Edition::None)
-            pix = BalatroShaders::renderEditionPixmap(pix, o.jokerEdition);
-        return pix;
+          if (o.jokerEdition != Edition::None)
+              pix = BalatroShaders::renderEditionPixmap(pix, o.jokerEdition);
+          JokerItem::applyStakeStickerOverlay(pix, o.jokerEternal,
+                                              o.jokerPerishable, o.jokerRental);
+          return pix;
     }
 
     if (o.kind == OfferKind::Tarot || o.kind == OfferKind::Planet || o.kind == OfferKind::Spectral) {
@@ -1655,7 +1689,8 @@ QPixmap ShopWidget::playingCardPixmap(const CardData &c) const
 {
     // 在图集原始 142×190 上合成；显示尺寸由 ShopCardButton 的绘制流程缩放。
     constexpr int W = ConsumableItem::SRC_W, H = ConsumableItem::SRC_H;
-    QPixmap deckSheet(":/textures/images/8BitDeck.png");
+    QPixmap deckSheet = DeckSkin::deckSheet();   // 跟随定制牌组换肤
+
     QPixmap enhSheet (":/textures/images/Enhancers.png");
     QPixmap pix(W, H); pix.fill(Qt::transparent);
     QPainter p(&pix);
@@ -1687,6 +1722,12 @@ QPixmap ShopWidget::playingCardPixmap(const CardData &c) const
         }
         p.drawPixmap(QRect(0, 0, W, H), deckSheet, QRect(col*W, row*H, W, H));
     }
+    // 程设整卡人像：背景式增强以不透明"边框"叠在人像上（玻璃整张叠加），角标回贴。
+    if (!enhSheet.isNull() && DeckSkin::enhancementOverArt(c.rank, c.enhancement))
+        DeckSkin::drawEnhancementOverArt(&p, enhSheet, QRect(eCol*W, eRow*H, W, H),
+                                         c.rank, c.suit, c.enhancement);
+    if (c.enhancement == Enhancement::Iterator)
+        CardItem::drawIteratorOverlay(&p, QRectF(0, 0, W, H));
     p.end();
 
     if (c.edition != Edition::None)

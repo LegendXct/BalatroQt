@@ -51,6 +51,7 @@ class QPropertyAnimation;
 class QGraphicsObject;
 class FlameTile;
 class BalatroInfoCluster;
+class DeckSelectWidget;
 
 class MainWindow : public QMainWindow
 {
@@ -75,6 +76,7 @@ private:
     QLabel *mLblTarget = nullptr; // 目标分数
     QLabel *mLblReward = nullptr;
     QLabel *mLblScore = nullptr; // 回合分数
+    QLabel *mStakeChip = nullptr; // 当前赌注筹码
     QProgressBar *mScoreProgressBar = nullptr; // 回合分数 / 目标分数进度条
     QGraphicsDropShadowEffect *mScoreProgressGlow = nullptr; // 进度条发光效果
     QPropertyAnimation *mScoreProgressAnim = nullptr; // 进度条平滑过渡
@@ -100,6 +102,7 @@ private:
     QVector<CardItem *> mHandCards; // 手牌
     QVector<CardItem *> mPlayedCards; // 出牌区
     QSet<int> mShatteredPlayedIndices;
+    QSet<int> mShatteredHandUids;
     QVector <int> mSelected; // 选中的手牌下标
     bool mBestPlayHintActive = false; // 第二次点击最佳出牌时恢复原点数/花色顺序
     QVector<int> mBestPlayHintHandOrder;
@@ -167,7 +170,7 @@ private:
     PackContent     mPendingPack;        // 当前正在打开的包
     QVector<CardData> mPendingPackHand;  // 开包界面临时翻出的一手牌
     bool mPackFromTag = false;
-    bool mPendingPackChoiceMade = false;
+    bool mPendingPackChoiceMade = false;   // 本次开包是否做出了选择（用于检测“跳过补充包”→红牌）
     QVector<PackKind> mQueuedTagPacks;
 
     struct PendingSlotFlyIn {
@@ -461,10 +464,21 @@ private:
     // 设置界面：用 in-scene overlay 复用现有覆盖层模式（避免在 QOpenGLWidget 上弹原生 QDialog）。
     void showSettingsOverlay();
     void hideSettingsOverlay();
+    // 选项家族界面（选项/设置/收藏/统计/定制牌组）收起回到对局时恢复计分链；
+    // 主菜单仍可见说明还在菜单语境，保持暂停。所有这些界面的"返回"出口必须走它。
+    void resumeGameIfNotInMenu();
     QPointer<QWidget> mSettingsOverlay;
     void showMainMenuOverlay();
     void hideMainMenuOverlay();
     QPointer<QWidget> mMainMenuOverlay;
+    // 队列牌组：手牌左上"队首"标记 + 按当前牌组启/禁排序按钮。
+    QGraphicsTextItem *mQueueHeadLabel = nullptr;
+    void updateSortButtonsForDeck();
+    // 开局牌组选择层：主菜单"开始游戏"→ 选牌组 → 开局；局内"新的一局"复用上次选择。
+    QPointer<DeckSelectWidget> mDeckSelectOverlay;
+    GameDeckId mSelectedGameDeckId = GameDeckId::Red;
+    int mSelectedStake = 1;
+    void showDeckSelectOverlay();
     // 主菜单红蓝漩涡背景：用离屏 FBO 渲成 QPixmap 贴到普通 QLabel 上，再用定时器逐帧刷新。
     // 不用嵌套 QOpenGLWidget——后者在部分驱动上无法盖住底层 GL 场景，漩涡根本不显示。
     QPointer<QLabel> mMenuBgLabel;
@@ -479,6 +493,9 @@ private:
     QPointF                 mMenuTitleCardHome;
     void layoutMainMenuContent();   // 按 overlay 尺寸定全屏视图缩放、logo/卡牌位置、按钮容器位置
     bool mHasOngoingRun = false;   // 启动直进主菜单时 "继续当前局" 灰掉,开过新局后亮起
+    // 选项家族界面（设置/收藏/统计/定制牌组）的宿主：主菜单可见时挂 centralWidget()
+    // （与主菜单同级才能 raise 到它上面），局内仍挂 mPlayPage 只盖右侧牌桌。
+    QWidget *menuOverlayHost();
     void showStatsOverlay();
     void showCollectionOverlay();
     void showCollectionJokersOverlay();
@@ -491,6 +508,7 @@ private:
     void showCollectionSealsOverlay();
     void showCollectionEditionsOverlay();
     void showCollectionDecksOverlay();
+    void clearCollectionOverlay();
     void showDeckCustomizeOverlay();
     QPointer<QWidget> mStatsOverlay;
     QPointer<QWidget> mCollectionOverlay;

@@ -5,6 +5,9 @@
 #include <QVector>
 #include <QHash>
 #include <QSet>
+#include <QPair>
+#include <memory>
+#include "gamedeck.h"
 #include "deck.h"
 #include "handevaluator.h"
 #include "../card/carddata.h"
@@ -74,7 +77,7 @@ public:
     int spendableGold() const { return mGold + (hasJokerType(JokerType::CreditCard) ? 20 : 0); }
     // 商店侧栏"预览下一回合"用：暴露当前的修正值（不含 Boss 影响——Boss 还没选）。
     int extraHandsPerRoundPreview() const {
-        int delta = mExtraHandsPerRound;
+        int delta = mExtraHandsPerRound + mGameDeck->extraHands();
         for (const Joker &j : mJokers) {
             if (j.isDebuffed) continue;
             if (j.type == JokerType::Troubadour) delta -= 1;
@@ -86,7 +89,7 @@ public:
     int totalHandsPlayedThisRun() const { return mTotalHandsPlayedThisRun; }
     int unusedDiscardsThisRun() const { return mUnusedDiscardsThisRun; }
     int extraDiscardsPerRoundPreview() const {
-        int delta = mExtraDiscardsPerRound;
+        int delta = mExtraDiscardsPerRound + mGameDeck->extraDiscards();
         for (const Joker &j : mJokers) {
             if (j.isDebuffed) continue;
             if (j.type == JokerType::Drunkard)  delta += 1;
@@ -98,6 +101,8 @@ public:
     bool hasFreeShopReroll() const {
         return !mChaosFreeRerollUsed && hasJokerType(JokerType::ChaosTheClown);
     }
+    // 概率系统：六六大顺(OopsAllSixes)使所有概率翻倍。numerator 是 2^(持有数)，
+    // chanceIn(odds) 表示 numerator/odds 的命中概率。probDenom 仅为兼容旧调用点保留。
     int probabilityNumerator() const;
     bool chanceIn(int odds) const;
     int probDenom(int n) const;
@@ -109,6 +114,11 @@ public:
     double targetScore() const {return mTargetScore;}
     int ante() const {return mAnte;}
     int jokerSlots() const;
+    // 游戏牌组（基础/队列…）：仅开局前注入；任何时刻 mGameDeck 非空。
+    void setGameDeck(std::unique_ptr<GameDeckType> deck) { if (deck) mGameDeck = std::move(deck); }
+    const GameDeckType &gameDeck() const { return *mGameDeck; }
+    void setStake(int stake) { mStake = qBound(1, stake, 8); }
+    int stake() const { return mStake; }
     int currentBlindStartingHands() const { return mBlindStartingHands; }
     BlindType blindType() const {return mBlindType;}
     GamePhase phase() const {return mPhase;}
@@ -145,7 +155,7 @@ public:
     const QHash<HandType, HandLevel> &handLevels() const { return mHandLevels; }
     void levelUpHand(HandType t, int times = 1);   // 行星牌用
     bool handTypePlayedThisRound(HandType t) const { return mHandTypesPlayedThisRound.contains(static_cast<int>(t)); }
-    // 幻视：持有时所有牌（石头牌除外）都算人头牌
+    // 幻想性错觉：持有时所有牌（石头牌除外）都算人头牌
     bool isFaceCard(const CardData &c) const {
         if (c.enhancement == Enhancement::Stone) return false;
         return hasJokerType(JokerType::Pareidolia)
@@ -163,7 +173,23 @@ public:
     BossInfo currentBossInfo() const { return bossInfo(mBossEffect); }
 
     QVector<CardData> &handMutable() { return mHand; }
-    void notifyHandChanged() { emit handChanged(); }
+    // 手牌变化先做浅拷贝同步，再通知 UI——任何经 notifyHandChanged 收尾的卡牌
+    // 修改（塔罗增强/变点/变花色/Boss debuff 等）都会自动镜像到链接的另一侧。
+    void notifyHandChanged() { syncShallowLinks(); emit handChanged(); }
+
+    // ── 浅拷贝塔罗：两张牌共享状态（点数/花色/增强/版本/蜡封/debuff/永久加筹） ──
+    void registerShallowLink(int uidA, int uidB);
+    void registerShallowLink(const CardData &a, const CardData &b);
+    void syncShallowLinks();
+    void syncShallowLinks(QVector<CardData> &externalCards);
+    int shallowLinkedUid(int uid) const;
+    // UI 用：当前所有链接对（uidA, uidB），给两侧牌面画共享地址角标。
+    QVector<QPair<int,int>> shallowLinkPairs() const {
+        QVector<QPair<int,int>> out;
+        out.reserve(mShallowLinks.size());
+        for (const auto &l : mShallowLinks) out.append({l.uidA, l.uidB});
+        return out;
+    }
 
     // 消耗品接口
     const QVector<Consumable> &consumables() const { return mConsumables; }
@@ -196,7 +222,7 @@ public:
     bool applyPackChoice(const PackContent &pack, int chosenIdx,
                          const QVector<int> &selectedPackHandIdx,
                          QVector<CardData> &packHand);
-    void notifyBoosterSkipped();
+    void notifyBoosterSkipped();   // 红牌：跳过一个补充包时 +3 倍率计数
     bool useConsumableOnPackHand(int consumableIdx,
                                  const QVector<int> &selectedPackHandIdx,
                                  QVector<CardData> &packHand);
@@ -212,13 +238,13 @@ public:
     void addPermanentHandSizeBonus(int delta);
     void immolateRandomHandCards(int destroyCount, int goldGain);
     void notifyPlayingCardDestroyed(const CardData &card);
-    void notifyPlayingCardsAdded(int count);
+    void notifyPlayingCardsAdded(int count);   // 向牌组/手牌新增游戏牌时通知（全息影像计数）
     bool dnaCanTriggerThisPlay() const;
     void createDNACopy(const CardData &card);
     double cainoXMult() const { return mCainoXMult; }
     double yorickXMult() const { return mYorickXMult; }
     int yorickDiscardsRemaining() const { return mYorickDiscardsRemaining; }
-    int planetsUsedThisRunCount() const { return mPlanetsUsedThisRun.size(); }
+    int planetsUsedThisRunCount() const { return mPlanetsUsedThisRun.size(); }   // 卫星
     int jokerDynamicCounter(JokerType t) const;
     void levelUpAllHands(int times = 1);
     void selectCurrentBlind();                       // 玩家从 BlindSelect 点"选择"
@@ -259,6 +285,8 @@ signals:
 
 private:
     Deck mDeck;
+    // 游戏牌组（多态）：规则修正集中在 GameDeckType 派生类，开局前由 UI 注入。
+    std::unique_ptr<GameDeckType> mGameDeck = createGameDeck(GameDeckId::Red);
     QVector<CardData> mHand;
     QVector<Joker> mJokers;
     // Default initializers prevent uninitialized reads before startBlind().
@@ -290,6 +318,19 @@ private:
     int  mTotalHandsPlayedThisRun = 0;     // Handy Tag 用：本局已打出的总手数（累加，不重置）
     int  mUnusedDiscardsThisRun = 0;       // Garbage Tag 用：上一回合结束时累加的"剩余弃牌数"
     void cleanupDepletedJokers();          // 移除计数耗尽的小丑（爆米花/拉面/苏打水/海龟豆）
+
+    // ── 浅拷贝塔罗（程设扩展） ──
+    // snapshot 记录上次同步后的两侧状态：哪侧与 snapshot 不一致即"写方"，把状态镜像给另一侧。
+    struct ShallowLink {
+        int uidA = -1, uidB = -1;
+        CardData snapA, snapB;             // 只比较/拷贝状态字段，uid 无意义
+    };
+    QVector<ShallowLink> mShallowLinks;
+    CardData *findCardByUidAnywhere(int uid, QVector<CardData> *externalCards = nullptr);
+    void syncShallowLinksImpl(QVector<CardData> *externalCards);
+
+    // ── 函数重载小丑（程设扩展）：事件流筹码/倍率互换 ──
+    void applyOperatorOverloadIfHeld(HandResult &result);
     BlindState mBlindStates[3] = {
         BlindState::Current, BlindState::Upcoming, BlindState::Upcoming
     };
@@ -300,7 +341,11 @@ private:
     double mPendingHandScore = 0.0;
     QVector<int> mPendingPlayedIndices;
     QVector<bool> mPendingShattered;
-    bool mPendingBossTriggeredForMatador = false;
+    QHash<int, int> mLuckyTriggerOrdinalByUid;
+    QHash<quint64, QPair<bool, bool>> mShallowLuckyRolls;
+    QHash<int, bool> mShallowGlassRolls;
+    QSet<int> mShallowGlassEventGroups;
+    bool mPendingBossTriggeredForMatador = false;  // 斗牛士：本手是否触发了 Boss 盲注能力
     int mPendingRoundPayout = 0; // 胜利结算先暂存，点击“提现”后再真正加到金币
     bool mSuppressGoldSignal = false; // 回合末临时计算提现金额时，避免提前刷新左侧金币
     void finishWinningRound();
@@ -335,6 +380,7 @@ private:
     int mExtraHandSize = 0;
     int mInterestCap = Constants::INTEREST_MAX;
     int mExtraJokerSlots = 0;
+    int mStake = 1;
     int mOneRoundHandSizeBonus = 0;
     int mPendingInvestmentBonus = 0;
     int mBlindStartingHands = Constants::INITIAL_HANDS;
@@ -365,7 +411,6 @@ private:
     bool mEndlessMode = false;
     QSet<int> mCardsPlayedThisAnte;   // 支柱(The Pillar)：本 Ante 已打出过的牌 uid
     int mCrimsonHeartDisabled = -1;   // 绯红之心：本手被禁用的小丑下标
-    int mLastCrimsonHeartDisabled = -1;
     bool mVerdantLeafActive = false;  // 翠绿之叶：尚未卖出小丑时为 true
     int mCeruleanForcedUid = -1;      // 蔚蓝铃铛：强制选中的手牌 uid
     void refreshCeruleanForced();     // 强制牌离开手牌后重新挑一张

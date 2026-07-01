@@ -167,8 +167,43 @@ void JokerItem::loadResources() {
 }
 
 // 坐标取自原版 game.lua 的 j_xxx pos = {x=?, y=?}
+QPixmap JokerItem::customCardPixmap(JokerType t)
+{
+    const char *res = nullptr;
+    switch (t) {
+    case JokerType::OperatorOverload: res = ":/textures/images/joker_cs_overload.png"; break;
+    case JokerType::ClassTemplate:    res = ":/textures/images/joker_cs_template.png"; break;
+    default: return QPixmap();
+    }
+    static QHash<int, QPixmap> cache;
+    const auto it = cache.constFind(int(t));
+    if (it != cache.constEnd()) return *it;
+
+    if (!sSheet || sSheet->isNull()) loadResources();
+    QPixmap cell(SRC_W, SRC_H);
+    cell.fill(Qt::transparent);
+    const QPixmap card{QString::fromLatin1(res)};
+    if (!card.isNull()) {
+        QPainter p(&cell);
+        p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        p.drawPixmap(QRect(0, 0, SRC_W, SRC_H), card);
+        // 专属素材是一整张不透明卡面，不能借用 Jokers.png 某个小丑内容层的 alpha，
+        // 否则内容层顶部/底部的透明区会把素材自带白边一起裁掉。这里只裁整卡四角。
+        p.setCompositionMode(QPainter::CompositionMode_DestinationIn);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        QPainterPath cardShape;
+        cardShape.addRoundedRect(QRectF(0, 0, SRC_W, SRC_H), 5, 5);
+        p.fillPath(cardShape, Qt::white);
+    }
+    cache.insert(int(t), cell);
+    return cell;
+}
+
 QPoint JokerItem::spritePos(JokerType t) {
     switch (t) {
+    // 程设扩展：专属整卡贴图见 customCardPixmap()，不在图集里。
+    case JokerType::OperatorOverload:
+    case JokerType::ClassTemplate:   return {0, 0};
     case JokerType::Joker:           return {0, 0};
     case JokerType::JollyJoker:      return {2, 0};
     case JokerType::ZanyJoker:       return {3, 0};
@@ -355,6 +390,30 @@ JokerItem::JokerItem(const Joker &j, QGraphicsItem *parent)
     }
 }
 
+void JokerItem::applyStakeStickerOverlay(QPixmap &pixmap, bool eternal,
+                                         bool perishable, bool rental)
+{
+    if (pixmap.isNull() || (!eternal && !perishable && !rental)) return;
+
+    // game.lua:175-177 使用 71x95 的 stickers atlas，并按整张牌面覆盖。
+    // 项目的小丑图集是其两倍尺寸，因此按目标 pixmap 全尺寸采样可保持原始像素边缘。
+    static QPixmap stickerSheet(QStringLiteral(":/textures/images/stickers.png"));
+    if (stickerSheet.isNull()) return;
+
+    constexpr int stickerW = 71;
+    constexpr int stickerH = 95;
+    QPainter painter(&pixmap);
+    painter.setRenderHint(QPainter::SmoothPixmapTransform, false);
+    const QRect target(0, 0, pixmap.width(), pixmap.height());
+    const auto drawSticker = [&](int column, int row) {
+        painter.drawPixmap(target, stickerSheet,
+                           QRect(column * stickerW, row * stickerH, stickerW, stickerH));
+    };
+    if (eternal) drawSticker(0, 0);
+    if (perishable) drawSticker(0, 2);
+    if (rental) drawSticker(1, 2);
+}
+
 JokerItem::~JokerItem()
 {
     if (mShadow) {
@@ -425,6 +484,9 @@ void JokerItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) 
     const QString key = QString::number(int(mJoker.type)) + QLatin1Char('|')
                       + QString::number(int(mJoker.edition)) + QLatin1Char('|')
                       + QString::number(mJoker.isDebuffed ? 1 : 0) + QLatin1Char('|')
+                      + QString::number(mJoker.eternal ? 1 : 0) + QLatin1Char('|')
+                      + QString::number(mJoker.perishable ? 1 : 0) + QLatin1Char('|')
+                      + QString::number(mJoker.rental ? 1 : 0) + QLatin1Char('|')
                       + QString::number(frame);
     static QHash<QString, QPixmap> cache;
     static QStringList order;
@@ -437,16 +499,20 @@ void JokerItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) 
         QPainter cp(&pix);
         cp.setRenderHint(QPainter::SmoothPixmapTransform, false);
         cp.setRenderHint(QPainter::Antialiasing, true);
-        QPoint c = spritePos(mJoker.type);
-        QRect src(c.x() * SRC_W, c.y() * SRC_H, SRC_W, SRC_H);
-        QPixmap body = sSheet->copy(src);
+        QPixmap body = customCardPixmap(mJoker.type);
+        if (body.isNull()) {
+            QPoint c = spritePos(mJoker.type);
+            QRect src(c.x() * SRC_W, c.y() * SRC_H, SRC_W, SRC_H);
+            body = sSheet->copy(src);
+        }
         if (mJoker.edition != Edition::None)
             body = BalatroShaders::renderEditionPixmap(body, mJoker.edition);
         if (mJoker.isDebuffed)
             body = BalatroShaders::renderDebuffedPixmap(body);
+        applyStakeStickerOverlay(body, mJoker.eternal, mJoker.perishable, mJoker.rental);
         if (mJoker.type == JokerType::WeeJoker) {
-            // 原版 card.lua 对 Wee Joker 的 T.w/T.h 乘 0.7；它复用普通小丑 sprite，
-            // 但整张牌在槽位中缩小显示，阴影剪影也要跟着缩小。
+            // 原版 card.lua 对小小丑的 T.w/T.h ×0.7：复用普通 sprite 但整张缩小显示，
+            // 阴影剪影随之缩小（阴影按渲染后的 body alpha 投影）。
             const QRectF weeDst(SRC_W * 0.15, SRC_H * 0.15, SRC_W * 0.70, SRC_H * 0.70);
             cp.setRenderHint(QPainter::SmoothPixmapTransform, true);
             cp.drawPixmap(weeDst, body, QRectF(0, 0, SRC_W, SRC_H));
@@ -463,7 +529,10 @@ void JokerItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) 
     // 外形变了（type/edition/debuff）才重算：垂直居中偏移 + 阴影黑色剪影。
     const QString silKey = QString::number(int(mJoker.type)) + QLatin1Char('|')
                          + QString::number(int(mJoker.edition)) + QLatin1Char('|')
-                         + QString::number(mJoker.isDebuffed ? 1 : 0);
+                         + QString::number(mJoker.isDebuffed ? 1 : 0) + QLatin1Char('|')
+                         + QString::number(mJoker.eternal ? 1 : 0) + QLatin1Char('|')
+                         + QString::number(mJoker.perishable ? 1 : 0) + QLatin1Char('|')
+                         + QString::number(mJoker.rental ? 1 : 0);
     if (silKey != mShadowSilKey) {
         const qreal dySrc = jokerContentDySrc(pix);
         mContentDyScreen = dySrc * qreal(HEIGHT) / qreal(SRC_H);

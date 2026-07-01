@@ -562,11 +562,124 @@ void main() {
     // 过渡区压成纯黑，整体偏暗。原版同样是 max(0, ...)。白色高光只加在红/蓝最亮处。
     float mod_flash = max(0.0, max(c1p, c2p) * 5.0 - 4.4);
     vec4 col = ret_col * (1.0 - mod_flash) + mod_flash * vec4(1.0, 1.0, 1.0, 1.0);
-    // 提高饱和度(×1.4)与亮度(×1.16)，贴近原版主菜单更鲜亮的红蓝（原版叠了 bloom/CRT 显得更亮）。
-    float lum = dot(col.rgb, vec3(0.299, 0.587, 0.114));
-    col.rgb = clamp(mix(vec3(lum), col.rgb, 1.4) * 1.16, 0.0, 1.0);
     col.a = 1.0;   // 主菜单背景：整屏不透明
     gl_FragColor = col;
+}
+)GLSL");
+}
+
+static QString menuCrtVertexSource()
+{
+    return QStringLiteral(R"GLSL(
+#ifdef GL_ES
+precision highp float;
+#endif
+attribute vec2 a_pos;
+attribute vec2 a_uv;
+varying vec2 v_uv;
+void main() {
+    v_uv = a_uv;
+    gl_Position = vec4(a_pos, 0.0, 1.0);
+}
+)GLSL");
+}
+
+static QString menuCrtFragmentSource()
+{
+    return QStringLiteral(R"GLSL(
+#ifdef GL_ES
+precision highp float;
+#endif
+uniform sampler2D u_scene;
+uniform vec2 u_screen_size;
+uniform float u_time;
+uniform vec2 u_distortion_fac;
+uniform vec2 u_scale_fac;
+uniform float u_feather_fac;
+uniform float u_noise_fac;
+uniform float u_crt_intensity;
+uniform float u_glitch_intensity;
+uniform float u_scanlines;
+varying vec2 v_uv;
+
+#define BUFF 0.01
+
+vec4 scene_tex(vec2 tc)
+{
+    return texture2D(u_scene, tc);
+}
+
+void main() {
+    vec2 tc = v_uv;
+
+    tc = tc * 2.0 - vec2(1.0);
+    tc *= u_scale_fac;
+    tc += (tc.yx * tc.yx) * tc * (u_distortion_fac - 1.0);
+
+    float mask = (1.0 - smoothstep(1.0 - u_feather_fac, 1.0, abs(tc.x) - BUFF))
+               * (1.0 - smoothstep(1.0 - u_feather_fac, 1.0, abs(tc.y) - BUFF));
+
+    tc = (tc + vec2(1.0)) / 2.0;
+
+    float offset_l = 0.0;
+    float offset_r = 0.0;
+    if (u_glitch_intensity > 0.01) {
+        float timefac = 3.0 * u_time;
+        offset_l = 50.0 * (-3.5 + sin(timefac * 0.512 + tc.y * 40.0)
+            + sin(-timefac * 0.8233 + tc.y * 81.532)
+            + sin(timefac * 0.333 + tc.y * 30.3)
+            + sin(-timefac * 0.1112331 + tc.y * 13.0));
+        offset_r = -50.0 * (-3.5 + sin(timefac * 0.6924 + tc.y * 29.0)
+            + sin(-timefac * 0.9661 + tc.y * 41.532)
+            + sin(timefac * 0.4423 + tc.y * 40.3)
+            + sin(-timefac * 0.13321312 + tc.y * 11.0));
+        if (u_glitch_intensity > 1.0) {
+            offset_l = 50.0 * (-1.5 + sin(timefac * 0.512 + tc.y * 4.0)
+                + sin(-timefac * 0.8233 + tc.y * 1.532)
+                + sin(timefac * 0.333 + tc.y * 3.3)
+                + sin(-timefac * 0.1112331 + tc.y * 1.0));
+            offset_r = -50.0 * (-1.5 + sin(timefac * 0.6924 + tc.y * 19.0)
+                + sin(-timefac * 0.9661 + tc.y * 21.532)
+                + sin(timefac * 0.4423 + tc.y * 20.3)
+                + sin(-timefac * 0.13321312 + tc.y * 5.0));
+        }
+        tc.x = tc.x + 0.001 * u_glitch_intensity * clamp(offset_l, clamp(offset_r, -1.0, 0.0), 1.0);
+    }
+
+    vec4 crt_tex = scene_tex(tc);
+    float artifact_amplifier = (abs(clamp(offset_l, clamp(offset_r, -1.0, 0.0), 1.0)) * u_glitch_intensity > 0.9 ? 3.0 : 1.0);
+    float crt_amount_adjusted = max(0.0, u_crt_intensity / (0.16 * 0.3)) * artifact_amplifier;
+    if (crt_amount_adjusted > 0.0000001) {
+        float aberr = 0.0005 * (1.0 + 10.0 * (artifact_amplifier - 1.0)) * 1600.0 / max(u_screen_size.x, 1.0);
+        crt_tex.r = crt_tex.r * (1.0 - crt_amount_adjusted) + crt_amount_adjusted * scene_tex(tc + vec2( aberr, 0.0)).r;
+        crt_tex.g = crt_tex.g * (1.0 - crt_amount_adjusted) + crt_amount_adjusted * scene_tex(tc + vec2(-aberr, 0.0)).g;
+    }
+    vec3 rgb_result = crt_tex.rgb * (1.0 - (1.0 * u_crt_intensity * artifact_amplifier));
+
+    if (sin(u_time + tc.y * 200.0) > 0.85) {
+        if (offset_l < 0.99 && offset_l > 0.01) rgb_result.r = rgb_result.g * 1.5;
+        if (offset_r > -0.99 && offset_r < -0.01) rgb_result.g = rgb_result.r * 1.5;
+    }
+
+    vec3 rgb_scanline = vec3(
+        clamp(-0.3 + 2.0 * sin(tc.y * u_scanlines - 3.14 / 4.0) - 0.8 * clamp(sin(tc.x * u_scanlines * 4.0), 0.4, 1.0), -1.0, 2.0),
+        clamp(-0.3 + 2.0 * cos(tc.y * u_scanlines) - 0.8 * clamp(cos(tc.x * u_scanlines * 4.0), 0.0, 1.0), -1.0, 2.0),
+        clamp(-0.3 + 2.0 * cos(tc.y * u_scanlines - 3.14 / 3.0) - 0.8 * clamp(cos(tc.x * u_scanlines * 4.0 - 3.14 / 4.0), 0.0, 1.0), -1.0, 2.0));
+    rgb_result += crt_tex.rgb * rgb_scanline * u_crt_intensity * artifact_amplifier;
+
+    float x = (tc.x - mod(tc.x, 0.002)) * (tc.y - mod(tc.y, 0.0013)) * u_time * 1000.0;
+    x = mod(x, 13.0) * mod(x, 123.0);
+    float dx = mod(x, 0.11) / 0.11;
+    rgb_result = (1.0 - clamp(u_noise_fac * artifact_amplifier, 0.0, 1.0)) * rgb_result
+               + dx * clamp(u_noise_fac * artifact_amplifier, 0.0, 1.0) * vec3(1.0);
+
+    const float bloom_fac = 0.0;
+    rgb_result -= vec3(0.55 - 0.02 * (artifact_amplifier - 1.0 - crt_amount_adjusted * bloom_fac * 0.7));
+    rgb_result = rgb_result * (1.0 + 0.14 + crt_amount_adjusted * (0.012 - bloom_fac * 0.12));
+    rgb_result += vec3(0.5);
+
+    vec4 final_col = vec4(rgb_result, 1.0);
+    gl_FragColor = final_col * mask;
 }
 )GLSL");
 }
@@ -582,6 +695,7 @@ private:
     std::unique_ptr<QOffscreenSurface> m_surface;
     std::unique_ptr<QOpenGLContext> m_context;
     std::unique_ptr<QOpenGLShaderProgram> m_program;
+    std::unique_ptr<QOpenGLShaderProgram> m_crtProgram;
 };
 
 bool SplashRenderer::ensure()
@@ -622,6 +736,20 @@ bool SplashRenderer::ensure()
         m_failed = true;
         return false;
     }
+
+    m_crtProgram.reset(new QOpenGLShaderProgram());
+    if (!m_crtProgram->addShaderFromSourceCode(QOpenGLShader::Vertex, menuCrtVertexSource()) ||
+        !m_crtProgram->addShaderFromSourceCode(QOpenGLShader::Fragment, menuCrtFragmentSource())) {
+        qWarning("SplashRenderer: CRT shader compile failed: %s", qPrintable(m_crtProgram->log()));
+        m_crtProgram.reset();
+    } else {
+        m_crtProgram->bindAttributeLocation("a_pos", 0);
+        m_crtProgram->bindAttributeLocation("a_uv", 1);
+        if (!m_crtProgram->link()) {
+            qWarning("SplashRenderer: CRT shader link failed: %s", qPrintable(m_crtProgram->log()));
+            m_crtProgram.reset();
+        }
+    }
     m_context->doneCurrent();
     return true;
 }
@@ -634,10 +762,10 @@ QPixmap SplashRenderer::render(const QSize &size, float time, const QColor &c1, 
     QOpenGLFunctions *gl = m_context->functions();
     if (!gl) { m_context->doneCurrent(); return QPixmap(); }
 
-    QOpenGLFramebufferObject fbo(size);
-    if (!fbo.isValid()) { m_context->doneCurrent(); return QPixmap(); }
+    QOpenGLFramebufferObject sceneFbo(size);
+    if (!sceneFbo.isValid()) { m_context->doneCurrent(); return QPixmap(); }
 
-    fbo.bind();
+    sceneFbo.bind();
     gl->glViewport(0, 0, size.width(), size.height());
     gl->glDisable(GL_DEPTH_TEST);
     gl->glDisable(GL_CULL_FACE);
@@ -663,9 +791,69 @@ QPixmap SplashRenderer::render(const QSize &size, float time, const QColor &c1, 
     gl->glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
     m_program->disableAttributeArray(0);
     m_program->release();
-    fbo.release();
+    sceneFbo.release();
 
-    QImage out = fbo.toImage().convertToFormat(QImage::Format_RGB32);
+    if (!m_crtProgram) {
+        QImage out = sceneFbo.toImage().convertToFormat(QImage::Format_RGB32);
+        QPixmap result = QPixmap::fromImage(out);
+        m_context->doneCurrent();
+        return result;
+    }
+
+    QOpenGLFramebufferObject outFbo(size);
+    if (!outFbo.isValid()) {
+        QImage out = sceneFbo.toImage().convertToFormat(QImage::Format_RGB32);
+        QPixmap result = QPixmap::fromImage(out);
+        m_context->doneCurrent();
+        return result;
+    }
+
+    outFbo.bind();
+    gl->glViewport(0, 0, size.width(), size.height());
+    gl->glDisable(GL_DEPTH_TEST);
+    gl->glDisable(GL_CULL_FACE);
+    gl->glDisable(GL_BLEND);
+    gl->glClearColor(0.f, 0.f, 0.f, 1.f);
+    gl->glClear(GL_COLOR_BUFFER_BIT);
+
+    const float effectiveCrt = 70.0f * 0.3f; // globals.lua 默认 crt=70；game.lua 发送前 crt *= 0.3。
+    const float crt01 = effectiveCrt / 100.0f;
+    m_crtProgram->bind();
+    gl->glActiveTexture(GL_TEXTURE0);
+    gl->glBindTexture(GL_TEXTURE_2D, sceneFbo.texture());
+    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    gl->glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    m_crtProgram->setUniformValue("u_scene", 0);
+    m_crtProgram->setUniformValue("u_screen_size", QVector2D(float(size.width()), float(size.height())));
+    m_crtProgram->setUniformValue("u_time", 400.0f + time);
+    m_crtProgram->setUniformValue("u_distortion_fac", QVector2D(1.0f + 0.07f * crt01, 1.0f + 0.10f * crt01));
+    m_crtProgram->setUniformValue("u_scale_fac", QVector2D(1.0f - 0.008f * crt01, 1.0f - 0.008f * crt01));
+    m_crtProgram->setUniformValue("u_feather_fac", 0.01f);
+    m_crtProgram->setUniformValue("u_noise_fac", 0.001f * crt01);
+    m_crtProgram->setUniformValue("u_crt_intensity", 0.16f * crt01);
+    m_crtProgram->setUniformValue("u_glitch_intensity", 0.0f);
+    m_crtProgram->setUniformValue("u_scanlines", float(size.height()) * 0.75f);
+
+    const GLfloat uvs[] = {
+        0.f, 0.f,
+        1.f, 0.f,
+        0.f, 1.f,
+        1.f, 1.f
+    };
+    m_crtProgram->enableAttributeArray(0);
+    m_crtProgram->enableAttributeArray(1);
+    m_crtProgram->setAttributeArray(0, GL_FLOAT, verts, 2);
+    m_crtProgram->setAttributeArray(1, GL_FLOAT, uvs, 2);
+    gl->glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+    m_crtProgram->disableAttributeArray(1);
+    m_crtProgram->disableAttributeArray(0);
+    m_crtProgram->release();
+    gl->glBindTexture(GL_TEXTURE_2D, 0);
+    outFbo.release();
+
+    QImage out = outFbo.toImage().convertToFormat(QImage::Format_RGB32);
     QPixmap result = QPixmap::fromImage(out);
     m_context->doneCurrent();
     return result;

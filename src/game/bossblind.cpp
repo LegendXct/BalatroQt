@@ -5,34 +5,34 @@
 
 BossInfo bossInfo(BossEffect e) {
     switch (e) {
-    case BossEffect::TheHook:    return {"钩子",   "出牌后随机弃 2 张手牌"};
-    case BossEffect::TheWall:    return {"围墙",   "目标分数 ×2"};
-    case BossEffect::TheNeedle:  return {"针",     "每回合只能出 1 次"};
-    case BossEffect::TheClub:    return {"梅花",   "所有 ♣ 牌被禁用"};
-    case BossEffect::ThePlant:   return {"植物",   "所有 J/Q/K 被禁用"};
-    case BossEffect::TheGoad:    return {"尖刺",   "所有 ♠ 牌被禁用"};
-    case BossEffect::TheWindow:  return {"窗口",   "所有 ♦ 牌被禁用"};
-    case BossEffect::TheHead:    return {"头颅",   "所有 ♥ 牌被禁用"};
-    case BossEffect::TheWater:   return {"水",     "本盲注没有弃牌次数"};
-    case BossEffect::TheManacle: return {"镣铐",   "本盲注手牌上限 -1"};
+    case BossEffect::TheHook:    return {"钩子",   "每次出牌随机弃掉2张手牌"};
+    case BossEffect::TheWall:    return {"围墙",   "特大盲注"};
+    case BossEffect::TheNeedle:  return {"针",     "本回合只能出一次牌"};
+    case BossEffect::TheClub:    return {"梅花",   "所有梅花牌都被削弱"};
+    case BossEffect::ThePlant:   return {"植物",   "所有人头牌都被削弱"};
+    case BossEffect::TheGoad:    return {"挑衅",   "所有黑桃牌都被削弱"};
+    case BossEffect::TheWindow:  return {"窗口",   "所有方片牌都被削弱"};
+    case BossEffect::TheHead:    return {"头部",   "所有红桃牌都被削弱"};
+    case BossEffect::TheWater:   return {"水",     "初始弃牌次数为0"};
+    case BossEffect::TheManacle: return {"镣铐",   "手牌上限-1"};
     case BossEffect::ThePsychic: return {"灵媒",   "必须出 5 张牌"};
     case BossEffect::TheFlint:   return {"燧石",   "基础筹码和倍率减半"};
-    case BossEffect::TheArm:     return {"手臂",   "出牌后该牌型等级下降"};
-    case BossEffect::TheMouth:   return {"嘴",     "本盲注只能出第一种牌型"};
-    case BossEffect::TheEye:     return {"眼",     "本盲注不能重复出同一种牌型"};
-    case BossEffect::TheOx:      return {"公牛",   "打出最常用牌型时金币归零"};
-    case BossEffect::TheHouse:   return {"房屋",   "第一手牌背面朝下发出"};
-    case BossEffect::TheWheel:   return {"轮子",   "1/7 的牌背面朝下发出"};
-    case BossEffect::TheFish:    return {"鱼",     "每次出牌后补的牌背面朝下"};
-    case BossEffect::TheMark:    return {"标记",   "所有人头牌背面朝下发出"};
-    case BossEffect::ThePillar:  return {"支柱",   "本 Ante 之前打出过的牌被禁用"};
-    case BossEffect::TheTooth:   return {"牙齿",   "每打出 1 张牌失去 $1"};
-    case BossEffect::TheSerpent: return {"巨蛇",   "出牌或弃牌后固定只补 3 张"};
-    case BossEffect::AmberAcorn: return {"琥珀橡果", "所有小丑翻面并打乱顺序"};
-    case BossEffect::CeruleanBell:return {"蔚蓝铃铛","强制 1 张手牌始终被选中"};
-    case BossEffect::CrimsonHeart:return {"绯红之心","每出一手随机禁用 1 张小丑"};
-    case BossEffect::VerdantLeaf: return {"翠绿之叶","所有牌被禁用，直到卖出 1 张小丑"};
-    case BossEffect::VioletVessel:return {"紫罗兰之器","超大盲注"};
+    case BossEffect::TheArm:     return {"手臂",   "降低打出的牌型等级"};
+    case BossEffect::TheMouth:   return {"嘴巴",   "本回合只能打出1种牌型"};
+    case BossEffect::TheEye:     return {"眼睛",   "本回合中不可打出重复牌型"};
+    case BossEffect::TheOx:      return {"公牛",   "打出指定牌型时资金归$0"};
+    case BossEffect::TheHouse:   return {"房屋",   "第一次的手牌以背面朝上方式抽取"};
+    case BossEffect::TheWheel:   return {"车轮",   "1/7几率，抽到的牌会是背面朝上"};
+    case BossEffect::TheFish:    return {"鱼",     "出牌后自动抽取的牌都是背面朝上"};
+    case BossEffect::TheMark:    return {"标记",   "所有人头牌都是以背面朝上的方式抽取"};
+    case BossEffect::ThePillar:  return {"支柱",   "在这一底注中打出过的牌都被削弱"};
+    case BossEffect::TheTooth:   return {"牙齿",   "每出一张牌损失$1"};
+    case BossEffect::TheSerpent: return {"巨蟒",   "出牌或弃牌后总是抽 3 张牌"};
+    case BossEffect::AmberAcorn: return {"琥珀之实", "翻转并洗乱所有小丑牌"};
+    case BossEffect::CeruleanBell:return {"蔚蓝之铃","迫使 1 张牌总是被选中"};
+    case BossEffect::CrimsonHeart:return {"绯红之心","每次出牌使随机一张小丑牌失效"};
+    case BossEffect::VerdantLeaf: return {"翠绿之叶","所有卡牌都被削弱，直到售出1张小丑牌"};
+    case BossEffect::VioletVessel:return {"靛紫之杯","超大盲注"};
     case BossEffect::None:       return {"",       ""};
     }
     return {"", ""};
@@ -76,7 +76,7 @@ int bossChipRow(BossEffect e)
 struct BossCandidate { BossEffect effect; int minAnte; int maxAnte; };
 
 BossEffect randomBossEffect(int ante) {
-    // 演示模式：脚本指定的 ante（默认仅第一 Ante）固定为支柱；脚本说"不干预"再走原 RNG。
+    // 演示模式：脚本指定的 ante（默认仅第一 Ante）固定 Boss；脚本说"不干预"再走原 RNG。
     if (DemoScript::active()) {
         BossEffect scripted = DemoScript::scriptedBoss(ante);
         if (scripted != BossEffect::None) return scripted;

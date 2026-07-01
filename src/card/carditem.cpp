@@ -22,11 +22,15 @@
 #include "../audio/audiomanager.h"
 #include "../utils/shadereffects.h"
 #include "cardshadow.h"
+#include "deckskin.h"
 #include <QGraphicsScene>
 
 QPixmap *CardItem::sDeckSheet = nullptr;
 QPixmap *CardItem::sEnhSheet = nullptr;
 QPixmap *CardItem::sJokerSheet = nullptr;
+QFont CardItem::sLinkTagFont;
+QPoint CardItem::sBackSpritePos = {0, 0};
+QPixmap *CardItem::sCustomBackPixmap = nullptr;
 
 namespace {
 QSet<CardItem*> sAnimatedCards;
@@ -73,6 +77,16 @@ void CardItem::loadResources() {
         qWarning("CardItem: Fail to Load Enhancers.png");
     if (sJokerSheet->isNull())
         qWarning("CardItem: Fail to Load Jokers.png");
+}
+
+void CardItem::drawIteratorOverlay(QPainter *p, const QRectF &dst)
+{
+    static QPixmap overlay(QStringLiteral(":/textures/images/enh_cs_iterator.png"));
+    if (overlay.isNull()) return;
+    const bool smooth = p->renderHints().testFlag(QPainter::SmoothPixmapTransform);
+    p->setRenderHint(QPainter::SmoothPixmapTransform, true);
+    p->drawPixmap(dst, overlay, QRectF(overlay.rect()));
+    p->setRenderHint(QPainter::SmoothPixmapTransform, smooth);
 }
 
 CardItem::CardItem(const CardData &data, QGraphicsItem *parent)
@@ -160,8 +174,12 @@ void CardItem::paint(QPainter *painter, const QStyleOptionGraphicsItem *, QWidge
     painter->setRenderHint(QPainter::SmoothPixmapTransform, false);
     // 阴影由 mShadow（sibling CardShadowItem）单独绘制——z=-1000 保证落在其他牌之下，
     // 按下/拖动/计分时由 updateShadowZ() 升到本牌之下。这里 paint() 只画牌面本体。
-    if (mData.faceUp) paintFront(painter);
-    else paintBack(painter);
+    if (mData.faceUp) {
+        paintFront(painter);
+        if (!mLinkTag.isEmpty()) paintLinkTag(painter);
+    } else {
+        paintBack(painter);
+    }
 
     // hover / selected 不再画蓝/黄描边——原版没有这个轮廓线，状态变化由"抬升 + 阴影距离"
     // 表达，info 浮窗负责承载文字信息。
@@ -222,7 +240,9 @@ void CardItem::paintFront(QPainter *painter)
                       + QString::number(int(mData.edition)) + QLatin1Char('|')
                       + QString::number(int(mData.seal)) + QLatin1Char('|')
                       + QString::number(mData.isDebuffed ? 1 : 0) + QLatin1Char('|')
-                      + QString::number(frame);
+                      + QString::number(frame) + QLatin1Char('|')
+                      // 掺入换肤代数：切换定制牌组后旧缓存条目自然失效，J/Q/K/A 立即换面。
+                      + QString::number(DeckSkin::generation());
 
     static QHash<QString, QPixmap> cache;
     static QStringList order;
@@ -239,7 +259,14 @@ void CardItem::paintFront(QPainter *painter)
             QRect enh = enhanceSrcRect();
             if (!enh.isNull()) bp.drawPixmap(cacheRect, *sEnhSheet, enh);
             if (mData.enhancement != Enhancement::Stone)
-                bp.drawPixmap(cacheRect, *sDeckSheet, deckSrcRect());
+                bp.drawPixmap(cacheRect, DeckSkin::deckSheet(), deckSrcRect());
+            // 程设整卡人像：背景式增强以不透明"边框"叠在人像上（玻璃整张叠加），角标回贴。
+            if (DeckSkin::enhancementOverArt(mData.rank, mData.enhancement))
+                DeckSkin::drawEnhancementOverArt(&bp, *sEnhSheet, enh,
+                                                 mData.rank, mData.suit, mData.enhancement);
+            // 迭代器增强：画在 body 里，让版本 shader / debuff 滤镜一并作用于装饰框。
+            if (mData.enhancement == Enhancement::Iterator)
+                drawIteratorOverlay(&bp, QRectF(cacheRect));
         }
 
         if (mData.edition != Edition::None)
@@ -282,9 +309,71 @@ void CardItem::paintFront(QPainter *painter)
 
 void CardItem::paintBack(QPainter *painter) {
     QRectF dst(0, 0, WIDTH, HEIGHT);
-    QRect backSrc(0 * SRC_W, 0 * SRC_H, SRC_W, SRC_H);
     painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
+    if (sCustomBackPixmap && !sCustomBackPixmap->isNull()) {
+        painter->drawPixmap(dst, *sCustomBackPixmap,
+                            QRectF(0, 0,
+                                   sCustomBackPixmap->width(),
+                                   sCustomBackPixmap->height()));
+        return;
+    }
+    QRect backSrc(sBackSpritePos.x() * SRC_W, sBackSpritePos.y() * SRC_H, SRC_W, SRC_H);
     painter->drawPixmap(dst, *sEnhSheet, backSrc);
+}
+
+QPixmap CardItem::cardBackPixmap() {
+    if (sCustomBackPixmap && !sCustomBackPixmap->isNull()) return *sCustomBackPixmap;
+    if (!sEnhSheet || sEnhSheet->isNull()) return QPixmap();
+    return sEnhSheet->copy(sBackSpritePos.x() * SRC_W,
+                           sBackSpritePos.y() * SRC_H,
+                           SRC_W,
+                           SRC_H);
+}
+
+void CardItem::setCardBackSpritePos(const QPoint &pos)
+{
+    sBackSpritePos = pos;
+    delete sCustomBackPixmap;
+    sCustomBackPixmap = nullptr;
+}
+
+void CardItem::setCustomCardBackPixmap(const QPixmap &pixmap)
+{
+    if (!sCustomBackPixmap) {
+        sCustomBackPixmap = new QPixmap(pixmap);
+    } else {
+        *sCustomBackPixmap = pixmap;
+    }
+}
+
+void CardItem::setLinkTagFont(const QFont &f)
+{
+    sLinkTagFont = f;
+    sLinkTagFont.setPixelSize(17);
+}
+
+void CardItem::setLinkTag(const QString &tag)
+{
+    if (mLinkTag == tag) return;
+    mLinkTag = tag;
+    update();
+}
+
+// 浅拷贝共享地址角标：牌面下缘中央一块深色小铭牌，链接两侧文案相同，
+// 隐喻"两个指针指向同一块内存"。画在缓存图层之上，不进 paintFront 的缓存 key。
+void CardItem::paintLinkTag(QPainter *p)
+{
+    p->setFont(sLinkTagFont);
+    const QFontMetrics fm(sLinkTagFont);
+    const qreal w = fm.horizontalAdvance(mLinkTag) + 14;
+    const qreal h = 20;
+    const QRectF plate((WIDTH - w) / 2.0, HEIGHT - h - 7, w, h);
+    p->setRenderHint(QPainter::Antialiasing, true);
+    p->setPen(Qt::NoPen);
+    p->setBrush(QColor(20, 24, 28, 210));
+    p->drawRoundedRect(plate, 5, 5);
+    p->setPen(QColor(154, 232, 255));
+    p->drawText(plate, Qt::AlignCenter, mLinkTag);
 }
 
 void CardItem::setCardData(const CardData &data) {
