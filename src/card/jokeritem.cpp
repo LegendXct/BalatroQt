@@ -9,6 +9,7 @@
 #include <QGraphicsSceneHoverEvent>
 #include <QLineF>
 #include <QDateTime>
+#include <QElapsedTimer>
 #include <QTimer>
 #include <QPainterPath>
 #include <QCoreApplication>
@@ -18,6 +19,7 @@
 #include <cmath>
 #include <QtMath>
 #include "../audio/audiomanager.h"
+#include "../utils/balatromotion.h"
 #include "../utils/shadereffects.h"
 #include "cardshadow.h"
 #include <QGraphicsScene>
@@ -30,6 +32,9 @@ static bool hologramSoulPos(JokerType t, QPoint &out);
 namespace {
 QSet<JokerItem*> sAnimatedJokers;
 QTimer *sJokerShaderTimer = nullptr;
+QSet<JokerItem*> sAmbientJokers;
+QTimer *sJokerAmbientTimer = nullptr;
+QElapsedTimer sJokerAmbientClock;
 
 bool jokerNeedsShaderTick(const Joker &j)
 {
@@ -366,6 +371,9 @@ JokerItem::JokerItem(const Joker &j, QGraphicsItem *parent)
     setFlag(QGraphicsItem::ItemSendsGeometryChanges, true);
     mShadow = new CardShadowItem(WIDTH, HEIGHT, [this]() { return mShadowLift; });
     mShadow->setZValue(-1000.0);
+    mAmbientId = BalatroMotion::nextCardLikeId();
+    ensureAmbientTimer();
+    sAmbientJokers.insert(this);
     // 异形小丑：把阴影几何收紧到真实可见区域，避免在透明像素下方还印一块矩形阴影。
     switch (j.type) {
     case JokerType::HalfJoker:
@@ -416,6 +424,8 @@ void JokerItem::applyStakeStickerOverlay(QPixmap &pixmap, bool eternal,
 
 JokerItem::~JokerItem()
 {
+    sAnimatedJokers.remove(this);
+    sAmbientJokers.remove(this);
     if (mShadow) {
         if (auto *s = mShadow->scene()) s->removeItem(mShadow);
         delete mShadow;
@@ -658,8 +668,10 @@ void JokerItem::applyHoverTransform()
 {
     const qreal cx = WIDTH / 2.0;
     const qreal cy = HEIGHT / 2.0;
-    const qreal tiltX = qDegreesToRadians(mHoverTiltX);
-    const qreal tiltY = qDegreesToRadians(mHoverTiltY);
+    const double totalTiltX = (mHovered || mDragging) ? mHoverTiltX : mAmbientTiltX;
+    const double totalTiltY = (mHovered || mDragging) ? mHoverTiltY : mAmbientTiltY;
+    const qreal tiltX = qDegreesToRadians(totalTiltX);
+    const qreal tiltY = qDegreesToRadians(totalTiltY);
 
     const qreal cosY = std::cos(tiltY);
     const qreal cosX = std::cos(tiltX);
@@ -679,6 +691,31 @@ void JokerItem::applyHoverTransform()
     setTransform(t);
 }
 
+void JokerItem::ensureAmbientTimer()
+{
+    if (sJokerAmbientTimer) return;
+    sJokerAmbientClock.start();
+    sJokerAmbientTimer = new QTimer(QCoreApplication::instance());
+    sJokerAmbientTimer->setTimerType(Qt::CoarseTimer);
+    QObject::connect(sJokerAmbientTimer, &QTimer::timeout, []() {
+        const double seconds = sJokerAmbientClock.elapsed() / 1000.0;
+        const auto items = sAmbientJokers.values();
+        for (JokerItem *item : items) {
+            if (item) item->updateAmbientTilt(seconds);
+        }
+    });
+    sJokerAmbientTimer->start(33);
+}
+
+void JokerItem::updateAmbientTilt(double seconds)
+{
+    if (mHovered || mDragging || !scene() || !isVisible()) return;
+    const QPointF tilt = BalatroMotion::ambientTiltDegrees(mAmbientId, seconds, mAmbientTiltStrength);
+    mAmbientTiltY = tilt.x();
+    mAmbientTiltX = tilt.y();
+    applyHoverTransform();
+}
+
 void JokerItem::hoverEnterEvent(QGraphicsSceneHoverEvent *e)
 {
     mHovered = true;
@@ -686,7 +723,7 @@ void JokerItem::hoverEnterEvent(QGraphicsSceneHoverEvent *e)
                                    0.9 + QRandomGenerator::global()->generateDouble() * 0.2,
                                    0.35);
     setTransformOriginPoint(WIDTH / 2.0, HEIGHT / 2.0);
-    animateScale(1.08, 100);
+    animateScale(1.05, 100);
     animateShadowLift(currentShadowTarget(), 120);
     triggerHoverJitter();
     emit hoverChanged(this, true);
@@ -698,8 +735,8 @@ void JokerItem::triggerHoverJitter()
 {
     if (mDragging) return; // 拖拽时不抖
     const double dir = (QRandomGenerator::global()->bounded(2) == 0) ? -1.0 : 1.0;
-    const double peakRot   = 2.4 * dir;
-    const double overshoot = -0.6 * dir;
+    const double peakRot   = 0.7 * dir;
+    const double overshoot = -0.18 * dir;
 
     auto *rotOut = new QPropertyAnimation(this, "rotation");
     rotOut->setDuration(70);
@@ -732,6 +769,13 @@ void JokerItem::hoverMoveEvent(QGraphicsSceneHoverEvent *e)
         QGraphicsObject::hoverMoveEvent(e);
         return;
     }
+    const qreal lx = qBound<qreal>(0.0, e->pos().x(), qreal(WIDTH));
+    const qreal ly = qBound<qreal>(0.0, e->pos().y(), qreal(HEIGHT));
+    const qreal nx = lx / WIDTH - 0.5;
+    const qreal ny = ly / HEIGHT - 0.5;
+    mHoverTiltY = qBound(-3.0, nx * 6.0, 3.0);
+    mHoverTiltX = qBound(-3.0, ny * 6.0, 3.0);
+    applyHoverTransform();
     QGraphicsObject::hoverMoveEvent(e);
 }
 

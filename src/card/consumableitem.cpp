@@ -8,12 +8,14 @@
 #include <QRandomGenerator>
 #include <QLineF>
 #include <QGraphicsSceneHoverEvent>
+#include "../utils/balatromotion.h"
 #include "../utils/shadereffects.h"
 #include "cardshadow.h"
 #include <QGraphicsScene>
 #include <QCursor>
 #include <QTimer>
 #include <QDateTime>
+#include <QElapsedTimer>
 #include <QPainterPath>
 #include <QLinearGradient>
 #include <QRadialGradient>
@@ -29,6 +31,9 @@ QPixmap *ConsumableItem::sSheet = nullptr;
 namespace {
 QSet<ConsumableItem*> sAnimatedConsumables;
 QTimer *sConsumableShaderTimer = nullptr;
+QSet<ConsumableItem*> sAmbientConsumables;
+QTimer *sConsumableAmbientTimer = nullptr;
+QElapsedTimer sConsumableAmbientClock;
 
 bool consumableNeedsShaderTick(const Consumable &c)
 {
@@ -213,6 +218,9 @@ ConsumableItem::ConsumableItem(const Consumable &c, QGraphicsItem *parent)
     setFlag(QGraphicsItem::ItemSendsGeometryChanges, true);
     mShadow = new CardShadowItem(WIDTH, HEIGHT, [this]() { return mShadowLift; });
     mShadow->setZValue(-1000.0);
+    mAmbientId = BalatroMotion::nextCardLikeId();
+    ensureAmbientTimer();
+    sAmbientConsumables.insert(this);
     // 不再用 Qt 原生 QToolTip——它会和 MainWindow::mHoverTooltip (BalatroInfoPanel)
     // 同时弹出，造成"暗色 info + 浅色系统 tooltip"重叠。统一由场景级浮窗处理。
 
@@ -225,6 +233,8 @@ ConsumableItem::ConsumableItem(const Consumable &c, QGraphicsItem *parent)
 
 ConsumableItem::~ConsumableItem()
 {
+    sAnimatedConsumables.remove(this);
+    sAmbientConsumables.remove(this);
     if (mShadow) {
         if (auto *s = mShadow->scene()) s->removeItem(mShadow);
         delete mShadow;
@@ -379,8 +389,10 @@ void ConsumableItem::applyHoverTransform()
 {
     const qreal cx = WIDTH / 2.0;
     const qreal cy = HEIGHT / 2.0;
-    const qreal tiltX = qDegreesToRadians(mHoverTiltX);
-    const qreal tiltY = qDegreesToRadians(mHoverTiltY);
+    const double totalTiltX = (mHovered || mDragging) ? mHoverTiltX : mAmbientTiltX;
+    const double totalTiltY = (mHovered || mDragging) ? mHoverTiltY : mAmbientTiltY;
+    const qreal tiltX = qDegreesToRadians(totalTiltX);
+    const qreal tiltY = qDegreesToRadians(totalTiltY);
 
     const qreal cosY = std::cos(tiltY);
     const qreal cosX = std::cos(tiltX);
@@ -400,6 +412,31 @@ void ConsumableItem::applyHoverTransform()
     setTransform(t);
 }
 
+void ConsumableItem::ensureAmbientTimer()
+{
+    if (sConsumableAmbientTimer) return;
+    sConsumableAmbientClock.start();
+    sConsumableAmbientTimer = new QTimer(QCoreApplication::instance());
+    sConsumableAmbientTimer->setTimerType(Qt::CoarseTimer);
+    QObject::connect(sConsumableAmbientTimer, &QTimer::timeout, []() {
+        const double seconds = sConsumableAmbientClock.elapsed() / 1000.0;
+        const auto items = sAmbientConsumables.values();
+        for (ConsumableItem *item : items) {
+            if (item) item->updateAmbientTilt(seconds);
+        }
+    });
+    sConsumableAmbientTimer->start(33);
+}
+
+void ConsumableItem::updateAmbientTilt(double seconds)
+{
+    if (mHovered || mDragging || !scene() || !isVisible()) return;
+    const QPointF tilt = BalatroMotion::ambientTiltDegrees(mAmbientId, seconds, mAmbientTiltStrength);
+    mAmbientTiltY = tilt.x();
+    mAmbientTiltX = tilt.y();
+    applyHoverTransform();
+}
+
 void ConsumableItem::hoverEnterEvent(QGraphicsSceneHoverEvent *e)
 {
     mHovered = true;
@@ -407,7 +444,7 @@ void ConsumableItem::hoverEnterEvent(QGraphicsSceneHoverEvent *e)
                                    0.9 + QRandomGenerator::global()->generateDouble() * 0.2,
                                    0.35);
     setTransformOriginPoint(WIDTH / 2.0, HEIGHT / 2.0);
-    animateScale(1.08, 100);
+    animateScale(1.05, 100);
     animateShadowLift(currentShadowTarget(), 120);
     triggerHoverJitter();
     update();
@@ -419,8 +456,8 @@ void ConsumableItem::triggerHoverJitter()
 {
     if (mDragging) return;
     const double dir = (QRandomGenerator::global()->bounded(2) == 0) ? -1.0 : 1.0;
-    const double peakRot   = 2.4 * dir;
-    const double overshoot = -0.6 * dir;
+    const double peakRot   = 0.7 * dir;
+    const double overshoot = -0.18 * dir;
 
     auto *rotOut = new QPropertyAnimation(this, "rotation");
     rotOut->setDuration(70);
@@ -453,6 +490,13 @@ void ConsumableItem::hoverMoveEvent(QGraphicsSceneHoverEvent *e)
         QGraphicsObject::hoverMoveEvent(e);
         return;
     }
+    const qreal lx = qBound<qreal>(0.0, e->pos().x(), qreal(WIDTH));
+    const qreal ly = qBound<qreal>(0.0, e->pos().y(), qreal(HEIGHT));
+    const qreal nx = lx / WIDTH - 0.5;
+    const qreal ny = ly / HEIGHT - 0.5;
+    mHoverTiltY = qBound(-3.0, nx * 6.0, 3.0);
+    mHoverTiltX = qBound(-3.0, ny * 6.0, 3.0);
+    applyHoverTransform();
     QGraphicsObject::hoverMoveEvent(e);
 }
 

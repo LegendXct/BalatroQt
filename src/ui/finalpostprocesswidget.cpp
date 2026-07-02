@@ -1,9 +1,5 @@
 #include "finalpostprocesswidget.h"
 
-#include <QOpenGLFramebufferObject>
-#include <QOpenGLPaintDevice>
-#include <QPainter>
-#include <QPixmap>
 #include <QSurfaceFormat>
 #include <QVector2D>
 #include <algorithm>
@@ -75,7 +71,7 @@ varying highp vec2 v_screen;
 
 highp vec4 scene_tex(highp vec2 tc)
 {
-    return texture2D(u_scene, vec2(tc.x, 1.0 - tc.y));
+    return texture2D(u_scene, tc);
 }
 
 void main()
@@ -166,7 +162,7 @@ void main()
                 samp.r = max(1.0 / (1.0 - cutoff) * samp.r - 1.0 / (1.0 - cutoff) + 1.0, 0.0);
                 samp.g = max(1.0 / (1.0 - cutoff) * samp.g - 1.0 / (1.0 - cutoff) + 1.0, 0.0);
                 samp.b = max(1.0 / (1.0 - cutoff) * samp.b - 1.0 / (1.0 - cutoff) + 1.0, 0.0);
-                col += min(min(samp.r, samp.g), samp.b) * (2.0 - float(abs(i + j)) / float(BLOOM_AMT + BLOOM_AMT));
+                col += min(min(samp.r, samp.g), samp.b) * (2.0 - abs(float(i + j)) / float(BLOOM_AMT + BLOOM_AMT));
             }
         }
         col /= float(BLOOM_AMT * BLOOM_AMT);
@@ -219,7 +215,10 @@ FinalPostProcessWidget::FinalPostProcessWidget(QWidget *source, QWidget *parent)
             const float elapsed = (mClock.elapsed() / 1000.0f) - mVortexStart;
             if (elapsed >= mVortexDuration) { mVortexActive = false; mVortexAmount = 0.0f; }
         }
-        if (isVisible()) update();
+        if (isVisible()) {
+            captureSourceSnapshot();
+            update();
+        }
     });
     mTimer.start(16);
 }
@@ -227,7 +226,10 @@ FinalPostProcessWidget::FinalPostProcessWidget(QWidget *source, QWidget *parent)
 FinalPostProcessWidget::~FinalPostProcessWidget()
 {
     makeCurrent();
-    mFramebuffer.reset();
+    if (mSceneTexture) {
+        glDeleteTextures(1, &mSceneTexture);
+        mSceneTexture = 0;
+    }
     mProgram.reset();
     doneCurrent();
 }
@@ -290,6 +292,7 @@ void FinalPostProcessWidget::initializeGL()
                  && mProgram->addShaderFromSourceCode(QOpenGLShader::Fragment, kFragmentShader)
                  && mProgram->link();
     mProgramReady = ok;
+    glGenTextures(1, &mSceneTexture);
     rebuildMesh();
 }
 
@@ -297,20 +300,7 @@ void FinalPostProcessWidget::resizeGL(int w, int h)
 {
     Q_UNUSED(w);
     Q_UNUSED(h);
-    mFramebuffer.reset();
     rebuildMesh();
-}
-
-void FinalPostProcessWidget::ensureFramebuffer()
-{
-    const qreal dpr = devicePixelRatioF();
-    const QSize wanted(std::max(1, int(std::round(width() * dpr))),
-                       std::max(1, int(std::round(height() * dpr))));
-    if (mFramebuffer && mFramebuffer->size() == wanted) return;
-    QOpenGLFramebufferObjectFormat fmt;
-    fmt.setAttachment(QOpenGLFramebufferObject::CombinedDepthStencil);
-    fmt.setTextureTarget(GL_TEXTURE_2D);
-    mFramebuffer = std::make_unique<QOpenGLFramebufferObject>(wanted, fmt);
 }
 
 void FinalPostProcessWidget::rebuildMesh()
@@ -335,36 +325,43 @@ void FinalPostProcessWidget::rebuildMesh()
     }
 }
 
-void FinalPostProcessWidget::renderSourceToFramebuffer()
+void FinalPostProcessWidget::captureSourceSnapshot()
 {
-    if (!mSource || !mFramebuffer) return;
+    if (!mSource || !mSource->isVisible() || mSource->width() <= 0 || mSource->height() <= 0) {
+        return;
+    }
 
-    const qreal dpr = devicePixelRatioF();
-    mFramebuffer->bind();
-    glViewport(0, 0, mFramebuffer->width(), mFramebuffer->height());
-    glClearColor(0.f, 0.f, 0.f, 1.f);
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT | GL_STENCIL_BUFFER_BIT);
+    // Do not call QWidget::grab() from paintGL(). On Qt/MinGW Release builds
+    // that can re-enter QWidget backing-store rendering while an OpenGL paint
+    // is active and crash. The timer captures a complete UI frame first; the
+    // GL pass only uploads and post-processes that cached frame.
+    mSnapshot = mSource->grab().toImage().convertToFormat(QImage::Format_RGBA8888);
+}
 
-    QOpenGLPaintDevice device(mFramebuffer->size());
-    QPainter painter(&device);
-    painter.setRenderHint(QPainter::Antialiasing, true);
-    painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
-    painter.scale(dpr, dpr);
+bool FinalPostProcessWidget::uploadSnapshotTexture()
+{
+    if (!mSceneTexture) return false;
+    if (mSnapshot.isNull()) captureSourceSnapshot();
+    if (mSnapshot.isNull()) return false;
 
-    // QWidget::grab() 抓的是 source widget 的最终合成结果；overlay 本身不是 source 的子对象，
-    // 因此不会递归抓到自己。随后把这张最终画面写入 OpenGL FBO。
-    const QPixmap snapshot = mSource->grab();
-    const qreal snapDpr = snapshot.devicePixelRatioF() > 0 ? snapshot.devicePixelRatioF() : 1.0;
-    painter.drawPixmap(QRectF(0, 0, mSource->width(), mSource->height()),
-                       snapshot,
-                       QRectF(0, 0, snapshot.width() / snapDpr, snapshot.height() / snapDpr));
-    painter.end();
-    mFramebuffer->release();
+    const QImage image = mSnapshot.convertToFormat(QImage::Format_RGBA8888);
+    mTextureSize = image.size();
+
+    glBindTexture(GL_TEXTURE_2D, mSceneTexture);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
+    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
+    glPixelStorei(GL_UNPACK_ALIGNMENT, 1);
+    glTexImage2D(GL_TEXTURE_2D, 0, GL_RGBA, image.width(), image.height(), 0,
+                 GL_RGBA, GL_UNSIGNED_BYTE, image.constBits());
+    glBindTexture(GL_TEXTURE_2D, 0);
+    return true;
 }
 
 void FinalPostProcessWidget::drawPostProcessed()
 {
-    if (!mFramebuffer || !mProgramReady || !mProgram) return;
+    if (!mSceneTexture || mTextureSize.isEmpty() || !mProgramReady || !mProgram) return;
 
     glViewport(0, 0, std::max(1, int(width() * devicePixelRatioF())), std::max(1, int(height() * devicePixelRatioF())));
     glClearColor(0.f, 0.f, 0.f, 1.f);
@@ -380,13 +377,13 @@ void FinalPostProcessWidget::drawPostProcessed()
 
     mProgram->bind();
     glActiveTexture(GL_TEXTURE0);
-    glBindTexture(GL_TEXTURE_2D, mFramebuffer->texture());
+    glBindTexture(GL_TEXTURE_2D, mSceneTexture);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_S, GL_CLAMP_TO_EDGE);
     glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_WRAP_T, GL_CLAMP_TO_EDGE);
     mProgram->setUniformValue("u_scene", 0);
-    mProgram->setUniformValue("u_screen_size", QVector2D(float(mFramebuffer->width()), float(mFramebuffer->height())));
+    mProgram->setUniformValue("u_screen_size", QVector2D(float(mTextureSize.width()), float(mTextureSize.height())));
     mProgram->setUniformValue("u_time", 400.0f + real);
     mProgram->setUniformValue("u_distortion_fac", QVector2D(1.0f + 0.07f * crt01, 1.0f + 0.10f * crt01));
     mProgram->setUniformValue("u_scale_fac", QVector2D(1.0f - 0.008f * crt01, 1.0f - 0.008f * crt01));
@@ -395,7 +392,7 @@ void FinalPostProcessWidget::drawPostProcessed()
     mProgram->setUniformValue("u_noise_fac", 0.001f * crt01);
     mProgram->setUniformValue("u_crt_intensity", 0.16f * crt01);
     mProgram->setUniformValue("u_glitch_intensity", mGlitchAmount);
-    mProgram->setUniformValue("u_scanlines", float(mFramebuffer->height()) * 0.75f);
+    mProgram->setUniformValue("u_scanlines", float(mTextureSize.height()) * 0.75f);
     mProgram->setUniformValue("u_flash_time", mFlashTime);
     mProgram->setUniformValue("u_mid_flash", mFlashActive ? mFlashMid : 0.0f);
     mProgram->setUniformValue("u_vortex_amt", vortex);
@@ -415,8 +412,7 @@ void FinalPostProcessWidget::drawPostProcessed()
 
 void FinalPostProcessWidget::paintGL()
 {
-    ensureFramebuffer();
-    renderSourceToFramebuffer();
-    makeCurrent();
+    if (!mProgramReady || !mProgram) return;
+    if (!uploadSnapshotTexture()) return;
     drawPostProcessed();
 }

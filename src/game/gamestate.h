@@ -272,6 +272,7 @@ signals:
     void handChanged();
     void scoreChanged();
     void goldChanged();
+    void countersChanged();
     void roundWon(int blindReward, int handBonus, int interest);
     void gameOver(bool won);
     void handPlayed();

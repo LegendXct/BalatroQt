@@ -1,10 +1,10 @@
 #include "dynamicbackgrounditem.h"
+
 #include <QSurfaceFormat>
 #include <QVector2D>
 #include <QVector4D>
-#include <QtMath>
-#include <cmath>
 #include <algorithm>
+#include <cmath>
 
 namespace {
 static int clamp255(double v)
@@ -41,8 +41,6 @@ void main()
 }
 )GLSL";
 
-// 这是原版 resources/shaders/background.fs 的执行方式：全屏 quad + GPU fragment shader。
-// Qt 版只把 Love2D 的 love_ScreenSize/screen_coords 改成普通 uniform/varying，公式保持一致。
 static constexpr const char *kFragmentShader = R"GLSL(
 #ifdef GL_ES
 precision highp float;
@@ -93,21 +91,14 @@ void main()
     highp vec4 ret_col = (0.3 / max(contrast, 0.001)) * colour_1
         + (1.0 - 0.3 / max(contrast, 0.001)) * (colour_1 * c1p + colour_2 * c2p + vec4(c3p * colour_3.rgb, c3p * colour_1.a));
 
-    // 轻微暗角/扫描线感，接近原版后续 CRT pass 的一点气质，但不额外开第二个全屏 pass。
-    highp vec2 centered = v_pos - vec2(0.5);
-    highp float vignette = smoothstep(0.85, 0.18, length(centered));
-    highp float scan = 1.0 - 0.025 * step(0.5, fract(screen_coords.y * 0.25));
-    ret_col.rgb *= mix(0.82, 1.0, vignette) * scan;
-
     gl_FragColor = ret_col;
 }
 )GLSL";
-}
+} // namespace
 
 DynamicBackgroundItem::DynamicBackgroundItem(QWidget *parent)
     : QOpenGLWidget(parent)
 {
-    // 原游戏用 GPU shader。这里也把背景放到 GPU，不再用 CPU 生成整张图。
     QSurfaceFormat fmt;
     fmt.setRenderableType(QSurfaceFormat::DefaultRenderableType);
     fmt.setSwapBehavior(QSurfaceFormat::DoubleBuffer);
@@ -115,6 +106,7 @@ DynamicBackgroundItem::DynamicBackgroundItem(QWidget *parent)
     setFormat(fmt);
 
     setAutoFillBackground(false);
+    setAttribute(Qt::WA_NoSystemBackground, true);
     setUpdateBehavior(QOpenGLWidget::PartialUpdate);
 
     updateTargets();
@@ -127,10 +119,7 @@ DynamicBackgroundItem::DynamicBackgroundItem(QWidget *parent)
 
     mClock.start();
     mLastTick = 0.0;
-    // 背景着色器原本以 60 FPS (16 ms) 更新，在很多机器上是全程卡顿的主因之一：
-    // 它会触发整个 QGraphicsView 的视口重绘，叠加上小丑牌/计分火焰的 shader 更新就抢满主线程。
-    // 降到 ~30 FPS 视觉差异极小，CPU/GPU 占用约减半。
-    mTimer.setTimerType(Qt::CoarseTimer);
+    mTimer.setTimerType(Qt::PreciseTimer);
     connect(&mTimer, &QTimer::timeout, this, [this]() {
         const double now = mClock.elapsed() / 1000.0;
         const double dt = std::max(0.001, std::min(0.080, now - mLastTick));
@@ -140,9 +129,7 @@ DynamicBackgroundItem::DynamicBackgroundItem(QWidget *parent)
         easeVisuals(dt);
         update();
     });
-    // 用户仍反馈卡顿严重（尤其是 CPU 路径无 GL 加速时，full screen GLSL 全靠 CPU 渲染）。
-    // 背景视觉变化极慢——再降到 ~16 FPS（60 ms），路演场景看不出区别但 CPU 再砍 33%。
-    mTimer.start(60);
+    mTimer.start(16);
 }
 
 DynamicBackgroundItem::~DynamicBackgroundItem()
@@ -178,10 +165,9 @@ void DynamicBackgroundItem::initializeGL()
     glDisable(GL_BLEND);
 
     mProgram = std::make_unique<QOpenGLShaderProgram>();
-    const bool ok = mProgram->addShaderFromSourceCode(QOpenGLShader::Vertex, kVertexShader)
+    mProgramReady = mProgram->addShaderFromSourceCode(QOpenGLShader::Vertex, kVertexShader)
                  && mProgram->addShaderFromSourceCode(QOpenGLShader::Fragment, kFragmentShader)
                  && mProgram->link();
-    mProgramReady = ok;
 }
 
 void DynamicBackgroundItem::resizeGL(int w, int h)
@@ -234,51 +220,58 @@ QColor DynamicBackgroundItem::baseA() const
 {
     const QColor black = rgb(0x37, 0x42, 0x44);
     const QColor red = rgb(0xFE, 0x5F, 0x55);
+    const QColor blindSmall = rgb(0x50, 0x84, 0x6e);
+    const QColor boss = rgb(0xb4, 0x44, 0x30);
     switch (mMood) {
     case Mood::Tarot:       return scaleColour(black, 0.80);
     case Mood::Spectral:    return scaleColour(black, 0.80);
     case Mood::Standard:    return red;
     case Mood::Buffoon:     return black;
     case Mood::Celestial:   return scaleColour(black, 0.90);
-    case Mood::Shop:        return rgb(78, 43, 42);
-    case Mood::BlindSelect: return scaleColour(rgb(0x50, 0x84, 0x6e), 0.90);
-    // Boss 盲注：底色取自原版 globals.lua:BLIND.Boss = HEX("b44430")。
-    case Mood::Boss:        return scaleColour(rgb(0xb4, 0x44, 0x30), 0.55);
-    case Mood::Default:     return scaleColour(rgb(0x50, 0x84, 0x6e), 0.90);
+    case Mood::Shop:        return scaleColour(blindSmall, 0.90);
+    case Mood::BlindSelect: return scaleColour(blindSmall, 0.90);
+    case Mood::Boss:        return boss;
+    case Mood::Default:     return scaleColour(blindSmall, 0.90);
     }
-    return scaleColour(rgb(0x50, 0x84, 0x6e), 0.90);
+    return scaleColour(blindSmall, 0.90);
 }
 
 QColor DynamicBackgroundItem::baseB() const
 {
+    const QColor black = rgb(0x37, 0x42, 0x44);
+    const QColor blindSmall = rgb(0x50, 0x84, 0x6e);
+    const QColor bossNew = rgb(0x6d, 0x55, 0x51);
     switch (mMood) {
     case Mood::Tarot:       return scaleColour(rgb(0x88, 0x67, 0xa5), 1.30);
     case Mood::Spectral:    return scaleColour(rgb(0x45, 0x84, 0xfa), 1.30);
     case Mood::Standard:    return scaleColour(rgb(0x2c, 0x35, 0x36), 1.30);
     case Mood::Buffoon:     return scaleColour(rgb(0xff, 0x9a, 0x00), 1.30);
-    case Mood::Celestial:   return scaleColour(rgb(0x37, 0x42, 0x44), 1.30);
-    case Mood::Shop:        return rgb(126, 88, 62);
-    case Mood::BlindSelect: return scaleColour(rgb(0x50, 0x84, 0x6e), 1.30);
-    case Mood::Boss:        return scaleColour(rgb(0xb4, 0x44, 0x30), 1.20);
-    case Mood::Default:     return scaleColour(rgb(0x50, 0x84, 0x6e), 1.30);
+    case Mood::Celestial:   return scaleColour(black, 1.30);
+    case Mood::Shop:        return scaleColour(blindSmall, 1.30);
+    case Mood::BlindSelect: return scaleColour(blindSmall, 1.30);
+    case Mood::Boss:        return scaleColour(bossNew, 1.30);
+    case Mood::Default:     return scaleColour(blindSmall, 1.30);
     }
-    return scaleColour(rgb(0x50, 0x84, 0x6e), 1.30);
+    return scaleColour(blindSmall, 1.30);
 }
 
 QColor DynamicBackgroundItem::accent() const
 {
+    const QColor black = rgb(0x37, 0x42, 0x44);
+    const QColor blindSmall = rgb(0x50, 0x84, 0x6e);
+    const QColor bossNew = rgb(0x6d, 0x55, 0x51);
     switch (mMood) {
     case Mood::Tarot:       return scaleColour(rgb(0x88, 0x67, 0xa5), 0.40);
     case Mood::Spectral:    return scaleColour(rgb(0x45, 0x84, 0xfa), 0.40);
     case Mood::Standard:    return scaleColour(rgb(0x2c, 0x35, 0x36), 0.40);
     case Mood::Buffoon:     return scaleColour(rgb(0xff, 0x9a, 0x00), 0.40);
-    case Mood::Celestial:   return scaleColour(rgb(0x37, 0x42, 0x44), 0.70);
-    case Mood::Shop:        return rgb(34, 44, 46);
-    case Mood::BlindSelect: return scaleColour(rgb(0x50, 0x84, 0x6e), 0.70);
-    case Mood::Boss:        return scaleColour(rgb(0xb4, 0x44, 0x30), 0.40);
-    case Mood::Default:     return scaleColour(rgb(0x50, 0x84, 0x6e), 0.70);
+    case Mood::Celestial:   return scaleColour(black, 0.70);
+    case Mood::Shop:        return scaleColour(blindSmall, 0.70);
+    case Mood::BlindSelect: return scaleColour(blindSmall, 0.70);
+    case Mood::Boss:        return scaleColour(bossNew, 0.40);
+    case Mood::Default:     return scaleColour(blindSmall, 0.70);
     }
-    return scaleColour(rgb(0x50, 0x84, 0x6e), 0.70);
+    return scaleColour(blindSmall, 0.70);
 }
 
 double DynamicBackgroundItem::targetContrast() const
@@ -289,9 +282,9 @@ double DynamicBackgroundItem::targetContrast() const
     case Mood::Standard:    return 3.0;
     case Mood::Buffoon:     return 2.0;
     case Mood::Celestial:   return 3.0;
-    case Mood::Shop:        return 1.35;
+    case Mood::Shop:        return 1.0;
     case Mood::BlindSelect: return 1.0;
-    case Mood::Boss:        return 2.4;     // 比正常对战略高的对比度，渲染 boss 紧张感
+    case Mood::Boss:        return 2.0;
     case Mood::Default:     return 1.0;
     }
     return 1.0;

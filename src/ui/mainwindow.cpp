@@ -10,6 +10,7 @@
 #include <algorithm>
 #include <functional>
 #include <QTimer>
+#include <QElapsedTimer>
 #include <QGuiApplication>
 #include <QScreen>
 #include <QMenuBar>
@@ -23,6 +24,7 @@
 #include <QStringList>
 #include "shopsignwidget.h"
 #include "deckselectwidget.h"
+#include "balatrographicsview.h"
 #include "scoreeffectsoverlays.h"   // FlameTile（底框+离屏火焰）
 #include <QParallelAnimationGroup>
 #include <QGraphicsOpacityEffect>
@@ -51,8 +53,12 @@
 #include <QFrame>
 #include <QAbstractItemView>
 #include <QRandomGenerator>
+#include <QSet>
+#include <QTransform>
+#include <QtMath>
 #include <cmath>
 #include <limits>
+#include "../utils/balatromotion.h"
 #include "../utils/shadereffects.h"
 #include "../utils/gpueffectsrenderer.h"
 #include "../audio/audiomanager.h"
@@ -105,6 +111,11 @@ static int uiPx(int px)
     // 原来为了视觉效果整体放大约 1.55 倍；这里再乘设备缩放系数，
     // 这样 1366×768 会整体缩小，2K/4K 会整体放大。
     return qMax(1, int(std::round(px * 1.55 * gUiScale)));
+}
+
+static BalatroGraphicsView *balatroGraphicsView(QGraphicsView *view)
+{
+    return qobject_cast<BalatroGraphicsView *>(view);
 }
 
 static int overlappedCardStep(int totalW, int cardW, int count, int maxStep)
@@ -624,8 +635,21 @@ void MainWindow::loadFonts() {
     if (qApp) qApp->setFont(mCNFont);
 }
 
+static QString balatroHoverColour(const QString &bg)
+{
+    QColor c(bg);
+    if (!c.isValid()) return bg;
+    // 原版 G.C.UI.HOVER = HEX("00000055")：在按钮底色上叠半透明黑色。
+    c.setRed((c.red() * 170) / 255);
+    c.setGreen((c.green() * 170) / 255);
+    c.setBlue((c.blue() * 170) / 255);
+    return c.name();
+}
+
 static QPushButton *makeBtn(const QString &text, const QString &bg, const QString &hover, const QFont &font, QWidget *parent, int h = 50) {
+    Q_UNUSED(hover);
     QPushButton *btn = new QPushButton(text, parent);
+    const QString hoverBg = balatroHoverColour(bg);
     btn->setFixedHeight(h);
     btn->setFont(font);
     btn->setCursor(Qt::PointingHandCursor);
@@ -640,7 +664,7 @@ static QPushButton *makeBtn(const QString &text, const QString &bg, const QStrin
                            "}"
                            "QPushButton:pressed { background:%1; padding-top:8px; }"
                            "QPushButton:disabled { background:#2b3032; color:#758083; border:2px solid #3b4447; }"
-                           ).arg(bg, hover).arg(uiPx(16)));
+                           ).arg(bg, hoverBg).arg(uiPx(16)));
     return btn;
 }
 
@@ -659,7 +683,7 @@ protected:
     void paintEvent(QPaintEvent *) override {
         QPainter p(this);
         p.setRenderHint(QPainter::Antialiasing);
-        QRectF r = rect().adjusted(1.0, 1.0, -1.0, -1.0);  // 内缩 1px 给边框留位
+        QRectF r = rect().adjusted(2.0, 2.0, -2.0, -2.0);
         const qreal radius = r.height() / 2.0;
         QPainterPath pill;
         pill.addRoundedRect(r, radius, radius);
@@ -1010,10 +1034,6 @@ MainWindow::MainWindow(QWidget *parent)
         auto *l = new QVBoxLayout(mPlayPage);
         l->setContentsMargins(0, 0, 0, 0);
         l->addWidget(mView);
-        if (mDynamicBg) {
-            mDynamicBg->setGeometry(mPlayPage->rect());
-            mDynamicBg->lower();
-        }
         if (mView) mView->raise();
         mSplashOverlay = new SplashShaderOverlay(mPlayPage);
         mSplashOverlay->setGeometry(mPlayPage->rect());
@@ -1027,9 +1047,8 @@ MainWindow::MainWindow(QWidget *parent)
     // 只给根容器本身上背景色，避免样式表向左侧面板里的普通 QWidget 级联，形成一块块黑色底框。
     container->setStyleSheet("QWidget#RootContainer { background:#11181b; }");
     auto *cl = new QHBoxLayout(container);
-    cl->setContentsMargins(dp(8), dp(8), 0, dp(8));
+    cl->setContentsMargins(0, 0, 0, 0);
     cl->setSpacing(0);
-    cl->addWidget(mLeftPanel);
     cl->addWidget(mPlayPage, 1);
     setCentralWidget(container);
 
@@ -1243,15 +1262,16 @@ void MainWindow::setupLeftPanel() {
 
     // ── 回合分数 + 目标进度条 ──
     QWidget *scoreBox = new QWidget(mLeftPanel);
-    scoreBox->setFixedHeight(dp(142));
+    scoreBox->setFixedHeight(dp(170));
     scoreBox->setAttribute(Qt::WA_StyledBackground, true);
     scoreBox->setStyleSheet("background:#334044; border:none; border-radius:16px;");
 
     auto *scoreVBox = new QVBoxLayout(scoreBox);
     scoreVBox->setContentsMargins(dp(12), dp(8), dp(12), dp(10));
-    scoreVBox->setSpacing(dp(6));
+    scoreVBox->setSpacing(dp(8));
 
     QWidget *scoreTop = new QWidget(scoreBox);
+    scoreTop->setFixedHeight(dp(86));
     auto *sbl = new QHBoxLayout(scoreTop);
     sbl->setContentsMargins(0, 0, 0, 0);
     sbl->setSpacing(dp(6));
@@ -1288,18 +1308,15 @@ void MainWindow::setupLeftPanel() {
     mScoreProgressBar = new PillScoreProgressBar(scoreBox);
     mScoreProgressBar->setRange(0, 1000);
     mScoreProgressBar->setValue(0);
-    mScoreProgressBar->setFixedHeight(dp(34));
+    mScoreProgressBar->setFixedHeight(dp(32));
     mScoreProgressBar->setTextVisible(true);
     mScoreProgressBar->setFormat("0%");
     mScoreProgressBar->setAlignment(Qt::AlignCenter);
     QFont pbf = mPixelFont; pbf.setPixelSize(uiPx(17));
     mScoreProgressBar->setFont(pbf);
     // 自绘进度条不读 stylesheet 的 QProgressBar::chunk —— 颜色 / 边框统一由 paintEvent 控。
-    mScoreProgressGlow = new QGraphicsDropShadowEffect(mScoreProgressBar);
-    mScoreProgressGlow->setBlurRadius(16);
-    mScoreProgressGlow->setOffset(0, 0);
-    mScoreProgressGlow->setColor(QColor(35, 230, 255, 120));
-    mScoreProgressBar->setGraphicsEffect(mScoreProgressGlow);
+    mScoreProgressGlow = nullptr;
+    scoreVBox->addSpacing(dp(8));
     scoreVBox->addWidget(mScoreProgressBar);
     // PillScoreProgressBar 自己的 paintEvent 已经在画层里把彩色填充 clip 到药丸路径里，
     // 之前那套 QBitmap mask + eventFilter 不再需要。
@@ -2318,7 +2335,6 @@ void MainWindow::startNewRunFromOptions()
     refreshGold();
 
     if (mView) mView->viewport()->update();
-    if (mDynamicBg) mDynamicBg->update();
     update();
     hideOptionsOverlay();
     // 选项菜单可能叠在主菜单上打开（主菜单 "选项" 不再隐藏主菜单），开新局要一并收掉。
@@ -2831,6 +2847,12 @@ QPixmap tiltedCollectionPixmap(const QPixmap &src, const QSize &target, double r
     return out;
 }
 
+class CollectionImageLabel;
+
+QSet<CollectionImageLabel*> sCollectionMotionLabels;
+QTimer *sCollectionMotionTimer = nullptr;
+QElapsedTimer sCollectionMotionClock;
+
 class CollectionImageLabel : public QLabel
 {
 public:
@@ -2839,6 +2861,59 @@ public:
     {
         setMouseTracking(true);
         setCursor(Qt::OpenHandCursor);
+    }
+
+    ~CollectionImageLabel() override
+    {
+        sCollectionMotionLabels.remove(this);
+    }
+
+    void setBalatroMotionEnabled(bool enabled, double ambientTilt = 0.2)
+    {
+        mBalatroMotionEnabled = enabled;
+        mAmbientTiltStrength = ambientTilt;
+        if (enabled && mAmbientId == 0)
+            mAmbientId = BalatroMotion::nextCardLikeId();
+        if (enabled) {
+            ensureCollectionMotionTimer();
+            sCollectionMotionLabels.insert(this);
+            updateMotionPixmap(sCollectionMotionClock.isValid()
+                ? sCollectionMotionClock.elapsed() / 1000.0
+                : 0.0);
+        } else {
+            sCollectionMotionLabels.remove(this);
+            if (!mBasePixmap.isNull()) QLabel::setPixmap(mBasePixmap);
+        }
+    }
+
+    void setCollectionPixmap(const QPixmap &pm)
+    {
+        mBasePixmap = pm;
+        if (pm.isNull()) {
+            QLabel::clear();
+            return;
+        }
+        if (mBalatroMotionEnabled) {
+            updateMotionPixmap(sCollectionMotionClock.isValid()
+                ? sCollectionMotionClock.elapsed() / 1000.0
+                : 0.0);
+        } else {
+            QLabel::setPixmap(pm);
+        }
+    }
+
+    void clearCollectionPixmap()
+    {
+        mBasePixmap = QPixmap();
+        QLabel::clear();
+    }
+
+    void updateMotionPixmap(double seconds)
+    {
+        if (!mBalatroMotionEnabled || mBasePixmap.isNull() || mDragging || !isVisible()) return;
+        if (mAmbientId == 0) mAmbientId = BalatroMotion::nextCardLikeId();
+        const QPointF tilt = BalatroMotion::ambientTiltDegrees(mAmbientId, seconds, mAmbientTiltStrength);
+        QLabel::setPixmap(renderTiltedPixmap(mBasePixmap, tilt));
     }
 
 protected:
@@ -3068,18 +3143,96 @@ private:
     QPointer<QLabel> mDragProxy;
     QPointer<QPropertyAnimation> mProxyAnim;
     QPixmap mDragSourcePixmap;
+    QPixmap mBasePixmap;
+    bool mBalatroMotionEnabled = false;
+    double mAmbientTiltStrength = 0.2;
+    quint64 mAmbientId = 0;
+
+    static void ensureCollectionMotionTimer()
+    {
+        if (sCollectionMotionTimer) return;
+        sCollectionMotionClock.start();
+        sCollectionMotionTimer = new QTimer(QCoreApplication::instance());
+        sCollectionMotionTimer->setTimerType(Qt::CoarseTimer);
+        QObject::connect(sCollectionMotionTimer, &QTimer::timeout, []() {
+            const double seconds = sCollectionMotionClock.elapsed() / 1000.0;
+            const auto labels = sCollectionMotionLabels.values();
+            for (CollectionImageLabel *label : labels) {
+                if (label) label->updateMotionPixmap(seconds);
+            }
+        });
+        sCollectionMotionTimer->start(33);
+    }
+
+    QPixmap renderTiltedPixmap(const QPixmap &src, const QPointF &tilt) const
+    {
+        if (src.isNull()) return QPixmap();
+        QPixmap out(size());
+        out.fill(Qt::transparent);
+
+        QPainter painter(&out);
+        painter.setRenderHint(QPainter::SmoothPixmapTransform, true);
+        painter.setRenderHint(QPainter::Antialiasing, false);
+
+        const qreal cx = width() / 2.0;
+        const qreal cy = height() / 2.0;
+        const qreal tiltY = qDegreesToRadians(tilt.x());
+        const qreal tiltX = qDegreesToRadians(tilt.y());
+        const qreal cosY = std::cos(tiltY);
+        const qreal cosX = std::cos(tiltX);
+        const qreal sinY = std::sin(tiltY);
+        const qreal sinX = std::sin(tiltX);
+
+        QTransform transform;
+        transform.translate(cx, cy);
+        QTransform perspective;
+        perspective.setMatrix(
+            cosY,           sinY * sinX,    0.0048 * sinY,
+            0,              cosX,           0.0048 * sinX,
+            0,              0,              1
+        );
+        transform = perspective * transform;
+        transform.translate(-cx, -cy);
+        painter.setTransform(transform);
+
+        const QPointF topLeft((width() - src.width()) / 2.0,
+                              (height() - src.height()) / 2.0);
+        painter.drawPixmap(topLeft, src);
+        return out;
+    }
 };
 
 QLabel *makeCollectionImage(QWidget *parent, const QPixmap &pm, const QSize &iconSize,
-                            const QString &tooltip = QString())
+                            const QString &tooltip = QString(),
+                            bool cardMotion = true,
+                            double ambientTilt = 0.2)
 {
     auto *img = new CollectionImageLabel(parent);
     img->setFixedSize(iconSize);
     img->setAlignment(Qt::AlignCenter);
     img->setStyleSheet(QStringLiteral("background:transparent; border:none;"));
     if (!tooltip.isEmpty()) img->setToolTip(tooltip);
-    if (!pm.isNull()) img->setPixmap(pm);
+    img->setBalatroMotionEnabled(cardMotion, ambientTilt);
+    if (!pm.isNull()) img->setCollectionPixmap(pm);
     return img;
+}
+
+void setCollectionImagePixmap(QLabel *label, const QPixmap &pm)
+{
+    if (auto *img = dynamic_cast<CollectionImageLabel*>(label)) {
+        img->setCollectionPixmap(pm);
+    } else {
+        label->setPixmap(pm);
+    }
+}
+
+void clearCollectionImagePixmap(QLabel *label)
+{
+    if (auto *img = dynamic_cast<CollectionImageLabel*>(label)) {
+        img->clearCollectionPixmap();
+    } else {
+        label->clear();
+    }
 }
 
 int originalUiUnit();
@@ -3929,7 +4082,7 @@ void MainWindow::showCollectionJokersOverlay()
             const int idx = (*page) * perPage + i;
             if (!slot) continue;
             if (idx >= order.size()) {
-                slot->clear();
+                clearCollectionImagePixmap(slot);
                 slot->setToolTip(QString());
                 slot->setEnabled(false);
                 slot->setVisible(true);
@@ -3945,7 +4098,7 @@ void MainWindow::showCollectionJokersOverlay()
                      collectionPlainText(joker.description));
             slot->setVisible(true);
             slot->setEnabled(true);
-            slot->setPixmap(collectionJokerPixmap(type, iconSize));
+            setCollectionImagePixmap(slot, collectionJokerPixmap(type, iconSize));
             slot->setToolTip(tip);
         }
         pageLabel->setText(QStringLiteral("页 %1/%2").arg((*page) + 1).arg(pageCount));
@@ -4058,7 +4211,7 @@ void MainWindow::showCollectionConsumablesOverlay(ConsumableKind kind)
             if (!slot) continue;
             const int idx = (*page) * perPage + i;
             if (idx >= order.size()) {
-                slot->clear();
+                clearCollectionImagePixmap(slot);
                 slot->setToolTip(QString());
                 slot->setEnabled(false);
                 continue;
@@ -4069,7 +4222,7 @@ void MainWindow::showCollectionConsumablesOverlay(ConsumableKind kind)
                 .arg(consumable.name,
                      QString::number(consumable.sellValue),
                      collectionPlainText(consumable.description));
-            slot->setPixmap(collectionConsumablePixmap(type, iconSize));
+            setCollectionImagePixmap(slot, collectionConsumablePixmap(type, iconSize));
             slot->setToolTip(tip);
             slot->setEnabled(true);
         }
@@ -4180,7 +4333,7 @@ void MainWindow::showCollectionVouchersOverlay()
             if (!slot) continue;
             const int idx = (*page) * perPage + i;
             if (idx >= order.size()) {
-                slot->clear();
+                clearCollectionImagePixmap(slot);
                 slot->setToolTip(QString());
                 slot->setEnabled(false);
                 continue;
@@ -4189,9 +4342,9 @@ void MainWindow::showCollectionVouchersOverlay()
             const int rowLocal = i % perRow;
             const double radians = 0.2 * (-perRow / 2.0 - 0.5 + rowLocal + 1.0) / perRow
                                    + ((rowLocal + 1) % 2 == 0 ? 1.0 : -1.0) * 0.08;
-            slot->setPixmap(tiltedCollectionPixmap(collectionVoucherPixmap(order[idx], iconSize),
-                                                   slotSize,
-                                                   radians));
+            setCollectionImagePixmap(slot, tiltedCollectionPixmap(collectionVoucherPixmap(order[idx], iconSize),
+                                                                  slotSize,
+                                                                  radians));
             slot->setToolTip(QString("%1\n$%2\n%3").arg(vd.name,
                                                         QString::number(vd.cost),
                                                         vd.description));
@@ -4258,7 +4411,8 @@ void MainWindow::showCollectionTagsOverlay()
         cellL->setSpacing(0);
         cellL->setAlignment(Qt::AlignCenter);
         cellL->addWidget(makeCollectionImage(cell, pix, iconSize,
-                                             QString("%1\n%2").arg(td.name, td.description)),
+                                             QString("%1\n%2").arg(td.name, td.description),
+                                             false),
                          0, Qt::AlignCenter);
         grid->addWidget(cell, i / cols, i % cols, Qt::AlignCenter);
     }
@@ -4352,14 +4506,14 @@ void MainWindow::showCollectionPacksOverlay()
             if (!slot) continue;
             const int idx = (*page) * perPage + i;
             if (idx >= order.size()) {
-                slot->clear();
+                clearCollectionImagePixmap(slot);
                 slot->setToolTip(QString());
                 slot->setEnabled(false);
                 continue;
             }
             const CollectionPackEntry entry = order[idx];
             const QString name = packDisplayName(entry.kind, entry.size);
-            slot->setPixmap(collectionPackPixmap(entry, iconSize));
+            setCollectionImagePixmap(slot, collectionPackPixmap(entry, iconSize));
             slot->setToolTip(QString("%1\n$%2\n变体 %3")
                                  .arg(name,
                                       QString::number(collectionPackCost(entry.size)),
@@ -4472,7 +4626,8 @@ void MainWindow::showCollectionBlindsOverlay()
         };
         if (k == 6 || k == 16 || k == 26) addGroupSpacer();
         cellH->addWidget(makeCollectionImage(cell, pix, iconSize,
-                                             QString("%1\n%2").arg(entry.name, entry.description)),
+                                             QString("%1\n%2").arg(entry.name, entry.description),
+                                             false),
                          0, Qt::AlignCenter);
         if (k == 5 || k == 15 || k == 25) addGroupSpacer();
         grid->addWidget(cell, i / cols, i % cols, Qt::AlignCenter);
@@ -4594,16 +4749,16 @@ void MainWindow::showCollectionEnhancementsOverlay()
             if (!slot) continue;
             const int idx = (*page) * perPage + i;
             if (idx >= order.size()) {
-                slot->clear();
+                clearCollectionImagePixmap(slot);
                 slot->setToolTip(QString());
                 slot->setEnabled(false);
                 continue;
             }
             const CollectionCardModifierEntry entry = order[idx];
-            slot->setPixmap(collectionPlayingCardPixmap(entry.enhancement,
-                                                        entry.seal,
-                                                        entry.edition,
-                                                        iconSize));
+            setCollectionImagePixmap(slot, collectionPlayingCardPixmap(entry.enhancement,
+                                                                       entry.seal,
+                                                                       entry.edition,
+                                                                       iconSize));
             slot->setToolTip(QString("%1\n%2").arg(entry.name, entry.description));
             slot->setEnabled(true);
         }
@@ -4800,7 +4955,7 @@ void MainWindow::showCollectionDecksOverlay()
     auto refresh = [=]() {
         const CollectionDeckEntry entry = order.value(*idx);
         const QPixmap deckStack = collectionDeckStackPixmap(entry, preview->size());
-        if (!deckStack.isNull()) preview->setPixmap(deckStack);
+        if (!deckStack.isNull()) setCollectionImagePixmap(preview, deckStack);
         preview->setToolTip(QString("%1\n%2").arg(entry.name, entry.description));
         preview->setEnabled(true);
         name->setText(entry.name);
@@ -5120,7 +5275,9 @@ void MainWindow::showMainMenuOverlay()
 
     auto makeBtn = [&](const QString &text, const QString &bg, const QString &dark,
                        const QString &hover, int w, int h, int fontPx, bool enabled) {
+        Q_UNUSED(hover);
         auto *b = new QPushButton(text, panel);
+        const QString hoverBg = balatroHoverColour(bg);
         QFont f = mCNFont; f.setPixelSize(fontPx); f.setBold(true);
         b->setFont(f);
         b->setFixedSize(w, h);
@@ -5135,7 +5292,7 @@ void MainWindow::showMainMenuOverlay()
             "QPushButton:pressed { border-bottom:2px solid %2; margin-top:%6px; }"
             "QPushButton:disabled { background:#46555a; color:#88969b;"
             " border-bottom:%5px solid #3a4a4d; }"
-        ).arg(bg, dark, hover).arg(dp(12)).arg(dp(6)).arg(dp(4)));
+        ).arg(bg, dark, hoverBg).arg(dp(12)).arg(dp(6)).arg(dp(4)));
         prow->addWidget(b, 0, Qt::AlignVCenter);
         return b;
     };
@@ -5254,15 +5411,9 @@ void MainWindow::hideMainMenuOverlay()
 }
 
 void MainWindow::setupScene() {
-    mDynamicBg = new DynamicBackgroundItem(mPlayPage);
-    mDynamicBg->setGeometry(mPlayPage ? mPlayPage->rect() : QRect(0, 0, mSceneW, mSceneH));
-    mDynamicBg->setSceneSize(mDynamicBg->width() > 0 ? mDynamicBg->width() : mSceneW,
-                             mDynamicBg->height() > 0 ? mDynamicBg->height() : mSceneH);
-    mDynamicBg->setMood(DynamicBackgroundItem::Mood::Default);
-    mDynamicBg->show();
-    mDynamicBg->lower();
-
-    mView = new QGraphicsView(mScene, mPlayPage);
+    auto *graphicsView = new BalatroGraphicsView(mScene, mPlayPage);
+    graphicsView->setMood(BalatroGraphicsView::Mood::Default);
+    mView = graphicsView;
     mView->setHorizontalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     mView->setVerticalScrollBarPolicy(Qt::ScrollBarAlwaysOff);
     mView->setRenderHints(QPainter::Antialiasing | QPainter::SmoothPixmapTransform);
@@ -5279,12 +5430,18 @@ void MainWindow::setupScene() {
     mView->setCursor(Qt::ArrowCursor);
     mView->viewport()->setCursor(Qt::ArrowCursor);
 
-    mView->setViewportUpdateMode(QGraphicsView::BoundingRectViewportUpdate);
+    mView->setViewportUpdateMode(QGraphicsView::FullViewportUpdate);
     mView->setOptimizationFlag(QGraphicsView::DontAdjustForAntialiasing, true);
     mView->setOptimizationFlag(QGraphicsView::DontSavePainterState, true);
 
-    mScene->setSceneRect(0, 0, mSceneW, mSceneH);
+    mScene->setSceneRect(-mLeftW, 0, mLeftW + mSceneW, mSceneH);
     mScene->setBackgroundBrush(QBrush(Qt::NoBrush));
+    if (mLeftPanel) {
+        mLeftPanel->setFixedSize(mLeftW, mSceneH);
+        mLeftPanelProxy = mScene->addWidget(mLeftPanel);
+        mLeftPanelProxy->setPos(-mLeftW, 0);
+        mLeftPanelProxy->setZValue(200);
+    }
     QTimer::singleShot(0, this, [this]() { updateSceneSize(); });
 
     mJokerCountLabel = mScene->addText("0/5");
@@ -5466,15 +5623,20 @@ void MainWindow::updateSceneSize() {
     const int designW = DESIGN_SCENE_W;
     const int minW = int(designW * 0.85);
     const int maxW = int(designW * 1.70);
-    int newSceneW = qBound(minW, int(std::round(designH * aspect)), maxW);
+    int newSceneW = qBound(minW, int(std::round(designH * aspect)) - mLeftW, maxW);
     int newSceneH = designH;
     if (newSceneW == mSceneW && newSceneH == mSceneH) {
+        mScene->setSceneRect(-mLeftW, 0, mLeftW + mSceneW, mSceneH);
+        if (mLeftPanel) mLeftPanel->setFixedSize(mLeftW, mSceneH);
+        if (mLeftPanelProxy) mLeftPanelProxy->setPos(-mLeftW, 0);
         fitSceneToView();
         return;
     }
     mSceneW = newSceneW;
     mSceneH = newSceneH;
-    mScene->setSceneRect(0, 0, mSceneW, mSceneH);
+    mScene->setSceneRect(-mLeftW, 0, mLeftW + mSceneW, mSceneH);
+    if (mLeftPanel) mLeftPanel->setFixedSize(mLeftW, mSceneH);
+    if (mLeftPanelProxy) mLeftPanelProxy->setPos(-mLeftW, 0);
 
     // 同步所有依赖 mSceneW/mSceneH 的元素位置。
     mHandYNormal  = mSceneH - CARD_H - 190;
@@ -5630,6 +5792,7 @@ void MainWindow::setupConnections() {
     connect(mGameState, &GameState::handChanged, this, &MainWindow::refreshHand);
     connect(mGameState, &GameState::scoreChanged, this, &MainWindow::refreshScore);
     connect(mGameState, &GameState::goldChanged, this, &MainWindow::refreshGold);
+    connect(mGameState, &GameState::countersChanged, this, &MainWindow::refreshCounters);
     connect(mGameState, &GameState::handPlayed, this, &MainWindow::onHandPlayed);
     connect(mGameState, &GameState::endRoundCardTriggered, this, [this](const QVector<ScoreEvent> &events) {
         mEndRoundAnimationDelay = qMax(260, 260 + events.size() * 150);
@@ -7441,11 +7604,6 @@ void MainWindow::resizeEvent(QResizeEvent *event)
 
     if (mPlayPage) {
         QRect r = mPlayPage->rect();
-        if (mDynamicBg) {
-            mDynamicBg->setGeometry(r);
-            mDynamicBg->setSceneSize(r.width(), r.height());
-            mDynamicBg->lower();
-        }
         fitSceneToView();
         if (mBlindSelectWidget) { mBlindSelectWidget->setGeometry(lowerOverlayRect()); if (mBlindSelectWidget->isVisible()) mBlindSelectWidget->raise(); }
         if (mRoundEndOverlay)   { mRoundEndOverlay  ->setGeometry(r);                 if (mRoundEndOverlay->isVisible())   mRoundEndOverlay->raise(); }
@@ -8487,8 +8645,10 @@ void MainWindow::animateConsumableUseThen(int idx, std::function<void()> after)
     const bool shopShouldSlide = isPlanetLike && mShopWidget && mShopWidget->isVisible();
     const QPoint shopHome = shopShouldSlide ? mShopWidget->pos() : QPoint();
     if (shopShouldSlide) {
+        if (mView) mView->raise();
+        item->setZValue(2400);
         auto *shopDown = new QPropertyAnimation(mShopWidget, "pos", this);
-        shopDown->setDuration(scaledDelay(260));
+        shopDown->setDuration(scaledDelay(150));
         shopDown->setStartValue(mShopWidget->pos());
         shopDown->setEndValue(QPoint(mShopWidget->x(), mPlayPage ? mPlayPage->height() + 20 : mShopWidget->y() + 500));
         shopDown->setEasingCurve(QEasingCurve::InCubic);
@@ -8617,7 +8777,7 @@ void MainWindow::spawnShopPlanetUseFloater(int consumableType, const QPoint &glo
     const QPoint viewPt = mView->mapFromGlobal(globalCenter);
     const QPointF scenePt = mView->mapToScene(viewPt);
     floater->setPos(scenePt - QPointF(TOP_SLOT_W / 2.0, TOP_SLOT_H / 2.0));
-    floater->setZValue(800);
+    floater->setZValue(2400);
     floater->setEnabled(false);
     floater->setAcceptedMouseButtons(Qt::NoButton);
     floater->setAcceptHoverEvents(false);
@@ -8627,8 +8787,9 @@ void MainWindow::spawnShopPlanetUseFloater(int consumableType, const QPoint &glo
     const bool shopShouldSlide = mShopWidget && mShopWidget->isVisible();
     const QPoint shopHome = shopShouldSlide ? mShopWidget->pos() : QPoint();
     if (shopShouldSlide) {
+        if (mView) mView->raise();
         auto *shopDown = new QPropertyAnimation(mShopWidget, "pos", this);
-        shopDown->setDuration(scaledDelay(260));
+        shopDown->setDuration(scaledDelay(150));
         shopDown->setStartValue(mShopWidget->pos());
         shopDown->setEndValue(QPoint(mShopWidget->x(), mPlayPage ? mPlayPage->height() + 20 : mShopWidget->y() + 500));
         shopDown->setEasingCurve(QEasingCurve::InCubic);
@@ -8975,12 +9136,18 @@ void MainWindow::onLeaveShopClicked()
 QRect MainWindow::lowerOverlayRect() const
 {
     if (!mPlayPage) return QRect();
-    const int y = dp(JOKER_Y + JOKER_H + 10);
+    const qreal yScene = JOKER_Y + JOKER_H + 10;
     // 牌组在场景里贴右边，按 fitInView 的实际缩放比例换算到 widget 像素宽度。
     // 之前用固定 dp(CARD_W + 150)，在卡牌放大后会把 BlindSelect 的右侧 Boss 卡裁掉。
-    const double sceneScale = mSceneH > 0 ? double(mPlayPage->height()) / mSceneH : 1.0;
+    QRect base = sceneRectOnPlayPage(QPointF(0, yScene), QSizeF(mSceneW, mSceneH - yScene));
+    if (!base.isValid() || base.width() <= 1 || base.height() <= 1) {
+        const int rightX = int(std::round(double(mLeftW) * double(mPlayPage->width()) / double(qMax(1, mLeftW + mSceneW))));
+        const int y = dp(JOKER_Y + JOKER_H + 10);
+        base = QRect(rightX, y, qMax(1, mPlayPage->width() - rightX), qMax(1, mPlayPage->height() - y));
+    }
+    const double sceneScale = (mSceneH - yScene) > 0 ? double(base.height()) / double(mSceneH - yScene) : 1.0;
     const int deckReserve = qMax(0, int(std::round((CARD_W + 60) * sceneScale))) + dp(16);
-    return QRect(0, y, qMax(dp(560), mPlayPage->width() - deckReserve), qMax(0, mPlayPage->height() - y));
+    return QRect(base.x(), base.y(), qMax(dp(560), base.width() - deckReserve), qMax(0, base.height()));
 }
 
 QRect MainWindow::shopOverlayRect() const
@@ -8995,7 +9162,7 @@ QRect MainWindow::shopOverlayRect() const
     const QRect base = lowerOverlayRect();
     const int leftMargin = dp(12);
     const int rightMargin = dp(8);
-    const int x = leftMargin;
+    const int x = base.x() + leftMargin;
     const int y = base.y();
     const int w = qMax(dp(640), base.width() - leftMargin - rightMargin);
     const int h = qMax(0, base.height());
@@ -9009,7 +9176,8 @@ void MainWindow::showShopOverlay()
     QTimer::singleShot(320, this, []() {
         AudioManager::instance()->play(QStringLiteral("cardFan2"), 1.0, 1.0);
     });
-    if (mDynamicBg) mDynamicBg->setMood(DynamicBackgroundItem::Mood::Shop);
+    if (auto *bgView = balatroGraphicsView(mView))
+        bgView->setMood(BalatroGraphicsView::Mood::Shop);
 
     // 用户期望：进商店后侧栏分数清零、出牌/弃牌显示成下一回合即将的开局值。
     // 原版商店阶段确实把面板上的"本回合数字"切到"下一回合预览"。手动把显示值刷掉，
@@ -9159,11 +9327,6 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev)
     // 的 Paint 事件用 BalatroShaders::paintFlame 走 CPU 渲染，现在不再需要。
     if (obj == mPlayPage && ev->type() == QEvent::Resize) {
         QRect r = mPlayPage->rect();
-        if (mDynamicBg) {
-            mDynamicBg->setGeometry(r);
-            mDynamicBg->setSceneSize(r.width(), r.height());
-            mDynamicBg->lower();
-        }
         updateSceneSize();
         if (mBlindSelectWidget) { mBlindSelectWidget->setGeometry(lowerOverlayRect()); if (mBlindSelectWidget->isVisible()) mBlindSelectWidget->raise(); }
         if (mRoundEndOverlay)   { mRoundEndOverlay  ->setGeometry(r);                 if (mRoundEndOverlay->isVisible())   mRoundEndOverlay->raise(); }
@@ -9183,37 +9346,43 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev)
 
 void MainWindow::setBackgroundMoodForPhase()
 {
-    if (!mDynamicBg || !mGameState) return;
+    auto *bgView = balatroGraphicsView(mView);
+    if (!bgView || !mGameState) return;
     switch (mGameState->phase()) {
     case GamePhase::BlindSelect:
-        mDynamicBg->setMood(DynamicBackgroundItem::Mood::BlindSelect);
+        bgView->setMood(BalatroGraphicsView::Mood::BlindSelect);
         break;
     case GamePhase::Shop:
-        mDynamicBg->setMood(DynamicBackgroundItem::Mood::Shop);
+        bgView->setMood(BalatroGraphicsView::Mood::Shop);
         break;
     case GamePhase::Blind:
-        // Boss 盲注用专属红色底（对齐原版 G.C.BLIND.Boss）；
+        // Boss 背景按具体 Boss 颜色走原版 ease_background_colour_blind；
         // 大/小盲注沿用默认绿色。
-        if (mGameState->blindType() == BlindType::Boss)
-            mDynamicBg->setMood(DynamicBackgroundItem::Mood::Boss);
-        else
-            mDynamicBg->setMood(DynamicBackgroundItem::Mood::Default);
+        if (mGameState->blindType() == BlindType::Boss) {
+            bgView->setBossEffect(mGameState->bossEffect());
+            bgView->setMood(BalatroGraphicsView::Mood::Boss);
+        } else {
+            bgView->setBossEffect(BossEffect::None);
+            bgView->setMood(BalatroGraphicsView::Mood::Default);
+        }
         break;
     default:
-        mDynamicBg->setMood(DynamicBackgroundItem::Mood::Default);
+        bgView->setBossEffect(BossEffect::None);
+        bgView->setMood(BalatroGraphicsView::Mood::Default);
         break;
     }
 }
 
 void MainWindow::setBackgroundMoodForPack(PackKind kind)
 {
-    if (!mDynamicBg) return;
+    auto *bgView = balatroGraphicsView(mView);
+    if (!bgView) return;
     switch (kind) {
-    case PackKind::Arcana:    mDynamicBg->setMood(DynamicBackgroundItem::Mood::Tarot); break;
-    case PackKind::Spectral:  mDynamicBg->setMood(DynamicBackgroundItem::Mood::Spectral); break;
-    case PackKind::Celestial: mDynamicBg->setMood(DynamicBackgroundItem::Mood::Celestial); break;
-    case PackKind::Buffoon:   mDynamicBg->setMood(DynamicBackgroundItem::Mood::Buffoon); break;
-    case PackKind::Standard:  mDynamicBg->setMood(DynamicBackgroundItem::Mood::Standard); break;
+    case PackKind::Arcana:    bgView->setMood(BalatroGraphicsView::Mood::Tarot); break;
+    case PackKind::Spectral:  bgView->setMood(BalatroGraphicsView::Mood::Spectral); break;
+    case PackKind::Celestial: bgView->setMood(BalatroGraphicsView::Mood::Celestial); break;
+    case PackKind::Buffoon:   bgView->setMood(BalatroGraphicsView::Mood::Buffoon); break;
+    case PackKind::Standard:  bgView->setMood(BalatroGraphicsView::Mood::Standard); break;
     }
 }
 
@@ -9298,7 +9467,8 @@ void MainWindow::consumeImmediateTagPack(PackKind kind)
 
 void MainWindow::showBlindSelectAfterTagPack()
 {
-    if (mDynamicBg) mDynamicBg->setMood(DynamicBackgroundItem::Mood::BlindSelect);
+    if (auto *bgView = balatroGraphicsView(mView))
+        bgView->setMood(BalatroGraphicsView::Mood::BlindSelect);
     if (mBlindSelectWidget && mPlayPage) {
         mBlindSelectWidget->refresh();
         mBlindSelectWidget->setGeometry(lowerOverlayRect());
@@ -9312,7 +9482,8 @@ void MainWindow::onBlindSelectEntered()
 {
     AudioManager::instance()->setPitchMod(1.0);
     AudioManager::instance()->setDesiredMusic(QStringLiteral("music1"));
-    if (mDynamicBg) mDynamicBg->setMood(DynamicBackgroundItem::Mood::BlindSelect);
+    if (auto *bgView = balatroGraphicsView(mView))
+        bgView->setMood(BalatroGraphicsView::Mood::BlindSelect);
     setContextPage(0);
     setPlayPhaseVisible(false);
     clearPlayedCards();
@@ -9365,7 +9536,7 @@ void MainWindow::onBlindStarted()
         playSoundLater(this, 500, QStringLiteral("cardSlide1"), 1.0, 1.0);
     }
     // Boss 盲注切到专属红底；其余沿用默认绿底。
-    if (mDynamicBg) setBackgroundMoodForPhase();
+    setBackgroundMoodForPhase();
     clearFloatingScores();
     // 原版（tag.lua）：tag 在 inventory 持有，等真正的"使用时机"才消耗。
     // 之前在这里 clearObtainedTags() 会把所有未触发的 tag 一齐抹掉——
@@ -9472,6 +9643,7 @@ void MainWindow::onRoundWon(int blindReward, int handBonus, int interest)
 {
     AudioManager::instance()->play(QStringLiteral("cardFan2"), 1.0, 1.0);
     refreshGold();
+    refreshCounters();
 
     int chipRow = 0;
     switch (mGameState->blindType()) {
@@ -9504,13 +9676,9 @@ void MainWindow::onRoundWon(int blindReward, int handBonus, int interest)
     QTimer::singleShot(delay, this, [this]() {
         animateCollectRoundCardsThen([this]() {
             if (!mRoundEndOverlay || !mPlayPage) return;
-            // 让结算面板水平居中时避开右下角牌堆按钮（≈ scene.CARD_W+80，按 scale 换算到 widget 像素）。
-            const double scaleW = (mSceneW > 0)
-                                      ? double(mPlayPage->width()) / double(mSceneW)
-                                      : 1.0;
-            const int deckReserve = int(std::round((CARD_W + 80) * scaleW));
-            mRoundEndOverlay->setRightReserve(deckReserve);
-            mRoundEndOverlay->showFromBottom(mPlayPage->rect());
+            QRect playArea = mPlayPage->rect();
+            mRoundEndOverlay->setRightReserve(0);
+            mRoundEndOverlay->showFromBottom(playArea);
         });
     });
 }
@@ -9596,7 +9764,8 @@ void MainWindow::resetTransientOverlaysForNewRun()
     resetScoreFlame();
     AudioManager::instance()->setPitchMod(1.0);
     AudioManager::instance()->setDesiredMusic(QStringLiteral("music1"));
-    if (mDynamicBg) mDynamicBg->setMood(DynamicBackgroundItem::Mood::BlindSelect);
+    if (auto *bgView = balatroGraphicsView(mView))
+        bgView->setMood(BalatroGraphicsView::Mood::BlindSelect);
 }
 
 void MainWindow::setContextPage(int page)
@@ -10170,7 +10339,6 @@ void MainWindow::showGameOverOverlay(bool won)
             refreshConsumableSlots();
             refreshScore();
             if (mView) mView->viewport()->update();
-            if (mDynamicBg) mDynamicBg->update();
             update();
         });
         connect(restart, &QPushButton::clicked, this, [this]() {
@@ -10185,7 +10353,6 @@ void MainWindow::showGameOverOverlay(bool won)
             refreshConsumableSlots();
             refreshScore();
             if (mView) mView->viewport()->update();
-            if (mDynamicBg) mDynamicBg->update();
             update();
         });
         connect(quit, &QPushButton::clicked, this, &MainWindow::close);

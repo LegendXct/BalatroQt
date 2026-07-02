@@ -34,7 +34,6 @@
 #include <functional>
 #include "floatingscore.h"
 #include "deckviewwidget.h"
-#include "dynamicbackgrounditem.h"
 #include "splashshaderoverlay.h"
 #include "animatedblindchip.h"
 
@@ -71,6 +70,7 @@ private:
     QFont mCNFont; // NotoSansSC
 
     QWidget *mLeftPanel = nullptr;
+    QGraphicsProxyWidget *mLeftPanelProxy = nullptr;
 
     QLabel *mLblBlind = nullptr; // 大/小/Boss 盲注名称
     QLabel *mLblTarget = nullptr; // 目标分数
@@ -165,7 +165,6 @@ private:
 
     PackOpenWidget *mPackOpenWidget = nullptr;
     DeckViewWidget *mDeckViewWidget = nullptr;
-    DynamicBackgroundItem *mDynamicBg = nullptr;
     SplashShaderOverlay *mSplashOverlay = nullptr;
     PackContent     mPendingPack;        // 当前正在打开的包
     QVector<CardData> mPendingPackHand;  // 开包界面临时翻出的一手牌

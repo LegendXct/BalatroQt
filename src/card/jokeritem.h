@@ -46,6 +46,7 @@ public:
     const Joker &joker() const { return mJoker; }
     void juiceUp(double scaleAmount = 1.15, int durationMs = 200);
     void moveTo(const QPointF &target, int durationMs = 180);
+    void setAmbientTiltStrength(double strength) { mAmbientTiltStrength = strength; }
 
     qreal shadowLift() const { return mShadowLift; }
     void setShadowLift(qreal v);
@@ -77,6 +78,10 @@ private:
     qreal mRestZ = 0;
     double mHoverTiltX = 0.0;
     double mHoverTiltY = 0.0;
+    double mAmbientTiltX = 0.0;
+    double mAmbientTiltY = 0.0;
+    double mAmbientTiltStrength = 0.2;
+    quint64 mAmbientId = 0;
     // 拖拽水平速度倾斜，与 CardItem 用同一套折算公式，让小丑/塔罗/星球 也具备甩动手感。
     double mDragTilt = 0.0;
     // 重排移动倾斜：被其它牌挤动而 moveTo 滑向新位置时，朝运动方向倾斜（对齐原版 move_r）。
@@ -91,6 +96,8 @@ private:
     bool mScoringLifted = false;
     CardShadowItem *mShadow = nullptr;
     void applyHoverTransform();
+    void updateAmbientTilt(double seconds);
+    static void ensureAmbientTimer();
     void animateScale(qreal target, int durationMs = 120);
     void animateShadowLift(qreal target, int durationMs = 120);
     void triggerHoverJitter();

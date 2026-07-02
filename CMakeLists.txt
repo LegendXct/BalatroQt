@@ -15,6 +15,7 @@ qt_add_executable(BalatroQt
     src/utils/constants.h
     src/utils/shadereffects.h src/utils/shadereffects.cpp
     src/utils/gpueffectsrenderer.h src/utils/gpueffectsrenderer.cpp
+    src/utils/balatromotion.h src/utils/balatromotion.cpp
     src/card/carddata.h src/card/carddata.cpp
     src/card/joker.h src/card/joker.cpp
     src/game/deck.h src/game/deck.cpp
@@ -37,10 +38,10 @@ qt_add_executable(BalatroQt
     src/ui/packopenwidget.h src/ui/packopenwidget.cpp
     src/ui/blindselectwidget.h src/ui/blindselectwidget.cpp
     src/ui/floatingscore.h src/ui/floatingscore.cpp
+    src/ui/balatrographicsview.h src/ui/balatrographicsview.cpp
     src/ui/shopsignwidget.h src/ui/shopsignwidget.cpp
     src/ui/deckviewwidget.h src/ui/deckviewwidget.cpp
     src/ui/deckselectwidget.h src/ui/deckselectwidget.cpp
-    src/ui/dynamicbackgrounditem.h src/ui/dynamicbackgrounditem.cpp
     src/ui/splashshaderoverlay.h src/ui/splashshaderoverlay.cpp
     src/ui/animatedblindchip.h src/ui/animatedblindchip.cpp
     src/ui/balatroinfopanel.h src/ui/balatroinfopanel.cpp

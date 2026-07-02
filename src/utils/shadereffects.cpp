@@ -345,11 +345,8 @@ static V4 shaderPixel(const QImage &src, ShaderKind kind, int x, int y, double s
         return dissolveMask(tex, uv, w, h, dissolve, seedTime, false, burn1, burn2);
     }
     case ShaderKind::Debuff: {
-        // 原版 debuff.fs 会把 sprite 自身变灰红并画两条对角叉。
-        // Qt 这里是离屏生成 pixmap，如果照搬 alpha=0.3，牌面会在普通 QWidget/QLabel
-        // 背景上显得“透明漏底”，完整牌组预览里尤其明显。
-        // 因此保留原版 HSL 变色和叉线宽度，但保持牌面 alpha，不再把非叉区域打穿。
-        const double origA = tex.a;
+        // 原版 card.lua 先正常绘制卡牌，再把 debuff.fs 作为半透明 overlay 叠上去；
+        // 非叉区域 alpha=0.3 不代表卡牌本体透明，不能把这个结果当作最终牌面替换。
         V4 sat = HSL(add(mul(tex, 0.8), {0.2, 0.0, 0.0, tex.a * 0.2}));
         sat.g = 0.5;
         const double width = 0.1;
@@ -359,15 +356,14 @@ static V4 shaderPixel(const QImage &src, ShaderKind kind, int x, int y, double s
             sat.r = 1.0;
             sat.g = 0.7;
             sat.b = 0.8 * sat.b;
-            V4 crossCol = RGB(sat);
-            tex = mix(tex, crossCol, 0.78);
+            tex = RGB(sat);
         } else {
             sat.g *= 0.5;
             sat.b *= 0.7;
-            V4 dimCol = RGB(sat);
-            tex = mix(tex, dimCol, 0.62);
+            tex = RGB(sat);
+            tex.a *= 0.3;
         }
-        tex.a = origA * intensity;
+        tex.a *= intensity;
         return dissolveMask(tex, uv, w, h, dissolve, seedTime, false, burn1, burn2);
     }
     case ShaderKind::Played: {

@@ -281,9 +281,10 @@ void RoundEndOverlay::showFromBottom(const QRect &finalGeometry)
     const int panelH  = mPanel->height();
     int overlayX = (availW - panelW) / 2;
     if (overlayX < 0) overlayX = 0;
+    overlayX += finalGeometry.x();
     // 终点 Y：与 parent 底贴齐。
-    const int overlayEndY   = qMax(0, parentH - panelH);
-    const int overlayStartY = parentH;   // 起点：刚好从下方屏外滑入
+    const int overlayEndY   = finalGeometry.y() + qMax(0, parentH - panelH);
+    const int overlayStartY = finalGeometry.y() + parentH;   // 起点：刚好从下方屏外滑入
 
     // 让 overlay widget 直接代替 mPanel 进行 slide：geometry 动画整体上滑 / 下滑。
     mPanel->move(0, 0);

@@ -222,13 +222,29 @@ static bool sameSmearedColor(Suit a, Suit b)
 
 // 花色匹配（对齐原版 Card:is_suit 的简化版，用于弃牌/期望值估算等非同花场景）：
 // 被禁用牌不计、石头牌无花色、百搭牌算任意花色，模糊小丑把同色视为同花色。
-static bool cardIsSuitLikeOriginal(const CardData &card, Suit suit, bool smeared)
+static bool cardIsSuitLikeOriginal(const CardData &card, Suit suit, bool smeared,
+                                   bool bypassDebuff = false, bool flushCalc = false)
 {
-    if (card.isDebuffed) return false;
+    if (flushCalc) {
+        if (card.enhancement == Enhancement::Stone) return false;
+        if (card.enhancement == Enhancement::Wild && !card.isDebuffed) return true;
+        if (smeared && sameSmearedColor(card.suit, suit)) return true;
+        return card.suit == suit;
+    }
+
+    if (card.isDebuffed && !bypassDebuff) return false;
     if (card.enhancement == Enhancement::Stone) return false;
     if (card.enhancement == Enhancement::Wild) return true;
     if (smeared && sameSmearedColor(card.suit, suit)) return true;
     return card.suit == suit;
+}
+
+static bool cardIsFaceLikeOriginal(const CardData &card, bool pareidolia, bool fromBoss)
+{
+    if (card.isDebuffed && !fromBoss) return false;
+    if (pareidolia) return true;
+    if (card.enhancement == Enhancement::Stone) return false;
+    return card.rank == Rank::Jack || card.rank == Rank::Queen || card.rank == Rank::King;
 }
 
 static bool isToDoListVisibleHand(HandType hand)
@@ -325,16 +341,19 @@ static bool jokerUsesCardRankOrSuit(JokerType type)
     }
 }
 
-static bool bossDebuffsCard(BossEffect effect, const CardData &c)
+static bool bossDebuffsCard(BossEffect effect, const CardData &c, bool smeared, bool pareidolia)
 {
     // 石头牌没有花色和点数，不能被花色/人头类 Boss 盲注按旧底牌属性限制。
-    if (c.enhancement == Enhancement::Stone) return false;
-    if (effect == BossEffect::TheClub  && c.suit == Suit::Clubs)    return true;
-    if (effect == BossEffect::TheGoad  && c.suit == Suit::Spades)   return true;
-    if (effect == BossEffect::TheHead  && c.suit == Suit::Hearts)   return true;
-    if (effect == BossEffect::TheWindow&& c.suit == Suit::Diamonds) return true;
-    if (effect == BossEffect::ThePlant &&
-        (c.rank == Rank::Jack || c.rank == Rank::Queen || c.rank == Rank::King)) return true;
+    if (effect == BossEffect::TheClub
+        && cardIsSuitLikeOriginal(c, Suit::Clubs, smeared, true)) return true;
+    if (effect == BossEffect::TheGoad
+        && cardIsSuitLikeOriginal(c, Suit::Spades, smeared, true)) return true;
+    if (effect == BossEffect::TheHead
+        && cardIsSuitLikeOriginal(c, Suit::Hearts, smeared, true)) return true;
+    if (effect == BossEffect::TheWindow
+        && cardIsSuitLikeOriginal(c, Suit::Diamonds, smeared, true)) return true;
+    if (effect == BossEffect::ThePlant
+        && cardIsFaceLikeOriginal(c, pareidolia, true)) return true;
     return false;
 }
 
@@ -515,9 +534,12 @@ QVector<CardData> GameState::remainingDeckCards() const
 {
     QVector<CardData> out = mDeck.drawPile();
     bool bossDisabled = hasJokerType(JokerType::Chicot);
+    const bool smeared = hasJokerType(JokerType::SmearedJoker);
+    const bool pareidolia = hasJokerType(JokerType::Pareidolia);
     for (CardData &c : out) {
         c.faceUp = true;
-        c.isDebuffed = (mPhase == GamePhase::Blind) && !bossDisabled && bossDebuffsCard(mBossEffect, c);
+        c.isDebuffed = (mPhase == GamePhase::Blind) && !bossDisabled
+            && bossDebuffsCard(mBossEffect, c, smeared, pareidolia);
     }
     return out;
 }
@@ -526,13 +548,17 @@ QVector<CardData> GameState::fullDeckCards() const
 {
     QVector<CardData> out = mDeck.allKnownCards();
     bool bossDisabled = hasJokerType(JokerType::Chicot);
+    const bool smeared = hasJokerType(JokerType::SmearedJoker);
+    const bool pareidolia = hasJokerType(JokerType::Pareidolia);
     for (CardData &c : out) {
         c.faceUp = true;
-        c.isDebuffed = (mPhase == GamePhase::Blind) && !bossDisabled && bossDebuffsCard(mBossEffect, c);
+        c.isDebuffed = (mPhase == GamePhase::Blind) && !bossDisabled
+            && bossDebuffsCard(mBossEffect, c, smeared, pareidolia);
     }
     for (CardData c : mHand) {
         c.faceUp = true;
-        c.isDebuffed = (mPhase == GamePhase::Blind) && !bossDisabled && bossDebuffsCard(mBossEffect, c);
+        c.isDebuffed = (mPhase == GamePhase::Blind) && !bossDisabled
+            && bossDebuffsCard(mBossEffect, c, smeared, pareidolia);
         out.append(c);
     }
     return out;
@@ -1328,6 +1354,7 @@ void GameState::finalizePlayedHand()
     const HandResult result = mLastResult;
     mScore += mPendingHandScore;
     mHandsLeft--;
+    emit countersChanged();
 
     // 公牛(The Ox)：打出当前最常用牌型时，金币归零。
     if (mBossEffect == BossEffect::TheOx && !hasJokerType(JokerType::Chicot)) {
@@ -1786,6 +1813,7 @@ void GameState::discardCards(const QVector<int> &indices)
 
     syncShallowLinks();
     mDiscardLeft--;
+    emit countersChanged();
     dealCards(DrawContext::AfterDiscard);
     applyBossDebuffs();
 
@@ -1906,8 +1934,10 @@ void GameState::rerollShop() {
 
 void GameState::applyBossDebuffs() {
     bool bossDisabled = hasJokerType(JokerType::Chicot);
+    const bool smeared = hasJokerType(JokerType::SmearedJoker);
+    const bool pareidolia = hasJokerType(JokerType::Pareidolia);
     for (CardData &c : mHand) {
-        bool d = !bossDisabled && bossDebuffsCard(mBossEffect, c);
+        bool d = !bossDisabled && bossDebuffsCard(mBossEffect, c, smeared, pareidolia);
         // 支柱(The Pillar)：本 Ante 之前打出过的牌被禁用。
         if (!bossDisabled && mBossEffect == BossEffect::ThePillar
             && mCardsPlayedThisAnte.contains(c.uid))
@@ -3416,6 +3446,7 @@ void GameState::startGame()
     mDiscardLeft = qMax(0, Constants::INITIAL_DISCARDS - (mStake >= 5 ? 1 : 0));
     mBlindStartingHands = mHandsLeft;
     mBlindStartingDiscards = mDiscardLeft;
+    emit countersChanged();
     mTargetScore = 0;
     mJokers.clear();
     mShop = Shop();
@@ -3717,6 +3748,7 @@ void GameState::startBlind(BlindType type)
 
     applyBossDebuffs();
 
+    emit countersChanged();
     emit handChanged();
     emit blindStarted();
 }

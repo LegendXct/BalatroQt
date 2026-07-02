@@ -36,6 +36,7 @@ public:
     qreal shadowLift() const { return mShadowLift; }
     void setShadowLift(qreal v);
     void setScoringLifted(bool lifted);
+    void setAmbientTiltStrength(double strength) { mAmbientTiltStrength = strength; }
 
 signals:
     void clicked(ConsumableItem *self, Qt::MouseButton button);
@@ -62,6 +63,10 @@ private:
     qreal mRestZ = 0.0;
     double mHoverTiltX = 0.0;
     double mHoverTiltY = 0.0;
+    double mAmbientTiltX = 0.0;
+    double mAmbientTiltY = 0.0;
+    double mAmbientTiltStrength = 0.2;
+    quint64 mAmbientId = 0;
     // 拖拽水平速度倾斜——参数与 CardItem 一致，让消耗品也有甩动手感（用户反馈9）。
     double mDragTilt = 0.0;
     // 重排移动倾斜：被挤动 moveTo 滑向新位置时朝运动方向倾斜（对齐原版 move_r）。
@@ -74,6 +79,8 @@ private:
     bool mScoringLifted = false;
     CardShadowItem *mShadow = nullptr;
     void applyHoverTransform();
+    void updateAmbientTilt(double seconds);
+    static void ensureAmbientTimer();
     void animateScale(qreal target, int durationMs = 120);
     void animateShadowLift(qreal target, int durationMs = 120);
     qreal currentShadowTarget() const;

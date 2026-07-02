@@ -2,21 +2,22 @@
 #define FINALPOSTPROCESSWIDGET_H
 
 #include <QElapsedTimer>
+#include <QImage>
 #include <QOpenGLFunctions>
 #include <QOpenGLShaderProgram>
 #include <QOpenGLWidget>
 #include <QPointer>
+#include <QSize>
 #include <QTimer>
 #include <QVector>
 #include <memory>
 
 class QWidget;
-class QOpenGLFramebufferObject;
 
-// 原版 game.lua 的最后阶段是：先把完整游戏画面画到 G.CANVAS，
-// 再把 G.CANVAS 送进 CRT.fs / flash.fs / vortex.fs 这类全屏 shader pass。
-// 这个 widget 做同一件事：抓取统一 source widget 的最终画面，写入 OpenGL FBO，
-// 然后用全屏网格跑 post-process shader，最后输出到窗口。
+// Original game.lua draws the complete scene to G.CANVAS first, then sends that
+// final frame through CRT.fs / flash.fs / vortex.fs as a full-screen pass.
+// This widget mirrors that pipeline: capture one complete Qt frame, upload it
+// as a texture, then draw the post-processed result over the window.
 class FinalPostProcessWidget : public QOpenGLWidget, protected QOpenGLFunctions
 {
     Q_OBJECT
@@ -25,8 +26,8 @@ public:
     ~FinalPostProcessWidget() override;
 
     void setSourceWidget(QWidget *source);
-    void setCrtAmount(float amount100);      // 对齐 G.SETTINGS.GRAPHICS.crt，默认 70。
-    void setBloomOption(float option);       // 对齐 G.SETTINGS.GRAPHICS.bloom，默认 1。
+    void setCrtAmount(float amount100);
+    void setBloomOption(float option);
     void setGlitchAmount(float amount);
     void triggerFlash(float midFlash = 1.0f, int durationMs = 900);
     void triggerVortex(float amount = 2.0f, int durationMs = 650);
@@ -37,18 +38,21 @@ protected:
     void paintGL() override;
 
 private:
-    void ensureFramebuffer();
     void rebuildMesh();
-    void renderSourceToFramebuffer();
+    void captureSourceSnapshot();
+    bool uploadSnapshotTexture();
     void drawPostProcessed();
+
     QVector<float> mPositions;
     QVector<float> mTexCoords;
 
     QPointer<QWidget> mSource;
+    QImage mSnapshot;
+    QSize mTextureSize;
     QTimer mTimer;
     QElapsedTimer mClock;
-    std::unique_ptr<QOpenGLFramebufferObject> mFramebuffer;
     std::unique_ptr<QOpenGLShaderProgram> mProgram;
+    unsigned int mSceneTexture = 0;
     bool mProgramReady = false;
 
     float mCrtAmount = 70.0f;

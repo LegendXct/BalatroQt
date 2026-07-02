@@ -67,6 +67,7 @@ public:
     // 控制是否允许拖拽；牌堆右下角的"查看牌组"卡牌需要 false，禁用拖动行为。
     void setDraggable(bool d) { mDraggable = d; }
     bool isDraggable() const { return mDraggable; }
+    void setAmbientTiltStrength(double strength) { mAmbientTiltStrength = strength; }
     // 关闭跟随鼠标的 3D 倾斜——牌堆按钮 / 计分时的 played 卡需要静态展示。
     void setHoverTiltEnabled(bool enabled) { mHoverTiltEnabled = enabled; }
     // boundingRect 默认 (-12, -78, W+24, H+92) 比可见牌面更大（给悬浮标签预留位置）。
@@ -108,6 +109,10 @@ private:
     bool mHoverTiltEnabled = true;
     bool mStrictHoverShape = false;
     QPointF mPressScenePos;
+    double mAmbientTiltX = 0.0;
+    double mAmbientTiltY = 0.0;
+    double mAmbientTiltStrength = 0.2;
+    quint64 mAmbientId = 0;
 
     double mBaseRotation = 0.0;       // Z 轴旋转(扇形)
     double mHoverTiltX  = 0.0;        // 绕 X 轴倾斜(度,-25 ~ +25)
@@ -140,6 +145,8 @@ private:
     void paintFront(QPainter *painter);
     void paintBack(QPainter *painter);
     void paintLinkTag(QPainter *painter);
+    void updateAmbientTilt(double seconds);
+    static void ensureAmbientTimer();
     static QFont sLinkTagFont;
 
     static QPixmap *sDeckSheet;

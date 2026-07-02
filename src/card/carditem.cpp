@@ -7,6 +7,7 @@
 #include <QSequentialAnimationGroup>
 #include <QLineF>
 #include <QDateTime>
+#include <QElapsedTimer>
 #include <QTimer>
 #include <QPainterPath>
 #include <QCoreApplication>
@@ -20,6 +21,7 @@
 #include <QVariantAnimation>
 #include <cmath>
 #include "../audio/audiomanager.h"
+#include "../utils/balatromotion.h"
 #include "../utils/shadereffects.h"
 #include "cardshadow.h"
 #include "deckskin.h"
@@ -35,6 +37,9 @@ QPixmap *CardItem::sCustomBackPixmap = nullptr;
 namespace {
 QSet<CardItem*> sAnimatedCards;
 QTimer *sCardShaderTimer = nullptr;
+QSet<CardItem*> sAmbientCards;
+QTimer *sCardAmbientTimer = nullptr;
+QElapsedTimer sCardAmbientClock;
 
 bool cardNeedsShaderTick(const CardData &d)
 {
@@ -102,6 +107,9 @@ CardItem::CardItem(const CardData &data, QGraphicsItem *parent)
     mShadow = new CardShadowItem(WIDTH, HEIGHT, [this]() { return mShadowLift; });
     mShadow->setZValue(-1000.0);
     QObject::connect(this, &QObject::destroyed, [ptr = this]() { sAnimatedCards.remove(ptr); });
+    mAmbientId = BalatroMotion::nextCardLikeId();
+    ensureAmbientTimer();
+    sAmbientCards.insert(this);
 
     if (cardNeedsShaderTick(mData)) {
         ensureCardShaderTimer();
@@ -111,6 +119,8 @@ CardItem::CardItem(const CardData &data, QGraphicsItem *parent)
 
 CardItem::~CardItem()
 {
+    sAnimatedCards.remove(this);
+    sAmbientCards.remove(this);
     if (mShadow) {
         if (auto *s = mShadow->scene()) s->removeItem(mShadow);
         delete mShadow;
@@ -271,8 +281,6 @@ void CardItem::paintFront(QPainter *painter)
 
         if (mData.edition != Edition::None)
             body = BalatroShaders::renderEditionPixmap(body, mData.edition);
-        if (mData.isDebuffed)
-            body = BalatroShaders::renderDebuffedPixmap(body);
 
         {
             QPainter fp(&finalPix);
@@ -295,6 +303,10 @@ void CardItem::paintFront(QPainter *painter)
                     sealPix = BalatroShaders::renderVoucherPixmap(sealPix, 1.0);
                 }
                 fp.drawPixmap(cacheRect, sealPix);
+            }
+            if (mData.isDebuffed) {
+                const QPixmap debuffOverlay = BalatroShaders::renderDebuffedPixmap(body);
+                fp.drawPixmap(cacheRect, debuffOverlay);
             }
         }
 
@@ -672,8 +684,14 @@ void CardItem::applyTransform()
     qreal cy = HEIGHT / 2.0;
 
     // 透视参数:鼠标越往边缘,倾斜越大,深度感越明显
-    qreal tiltX = qDegreesToRadians(mHoverTiltX);
-    qreal tiltY = qDegreesToRadians(mHoverTiltY);
+    const double totalTiltX = mHoverTiltEnabled
+        ? (mHovered ? mHoverTiltX : mAmbientTiltX)
+        : 0.0;
+    const double totalTiltY = mHoverTiltEnabled
+        ? (mHovered ? mHoverTiltY : mAmbientTiltY)
+        : 0.0;
+    qreal tiltX = qDegreesToRadians(totalTiltX);
+    qreal tiltY = qDegreesToRadians(totalTiltY);
     qreal zRot  = qDegreesToRadians(mBaseRotation);
 
     // 步骤:平移到中心 → 绕 Y 倾斜 → 绕 X 倾斜 → 绕 Z 扇形 → 平移回去
@@ -721,8 +739,8 @@ void CardItem::triggerHoverJitter()
     // 这里把峰值放大到 ±2.4°，并把回弹做成 over-shoot（先回到 -0.8° 反弹再回 0），
     // 同时同步一只快速 scale 脉冲（×1.06 → ×1.0）让卡片有"被指尖戳了一下"的弹性。
     const double dir = (QRandomGenerator::global()->bounded(2) == 0) ? -1.0 : 1.0;
-    const double peakRot = 2.4 * dir;
-    const double overshoot = -0.6 * dir;
+    const double peakRot = 0.7 * dir;
+    const double overshoot = -0.18 * dir;
 
     auto *rotOut = new QVariantAnimation(this);
     rotOut->setDuration(70);
@@ -766,17 +784,42 @@ void CardItem::triggerHoverJitter()
     auto *up = new QPropertyAnimation(this, "scale");
     up->setDuration(60);
     up->setStartValue(scale());
-    up->setEndValue(qMax(scale() + 0.04, 1.08));
+    up->setEndValue(qMax(scale() + 0.012, 1.052));
     up->setEasingCurve(QEasingCurve::OutQuad);
     auto *down = new QPropertyAnimation(this, "scale");
     down->setDuration(150);
-    down->setStartValue(qMax(scale() + 0.04, 1.08));
+    down->setStartValue(qMax(scale() + 0.012, 1.052));
     down->setEndValue(1.04);
     down->setEasingCurve(QEasingCurve::OutQuad);
     scaleAnim->addAnimation(up);
     scaleAnim->addAnimation(down);
     up->setParent(scaleAnim); down->setParent(scaleAnim);
     scaleAnim->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+void CardItem::ensureAmbientTimer()
+{
+    if (sCardAmbientTimer) return;
+    sCardAmbientClock.start();
+    sCardAmbientTimer = new QTimer(QCoreApplication::instance());
+    sCardAmbientTimer->setTimerType(Qt::CoarseTimer);
+    QObject::connect(sCardAmbientTimer, &QTimer::timeout, []() {
+        const double seconds = sCardAmbientClock.elapsed() / 1000.0;
+        const auto items = sAmbientCards.values();
+        for (CardItem *item : items) {
+            if (item) item->updateAmbientTilt(seconds);
+        }
+    });
+    sCardAmbientTimer->start(33);
+}
+
+void CardItem::updateAmbientTilt(double seconds)
+{
+    if (!mHoverTiltEnabled || mHovered || mDragging || !scene() || !isVisible()) return;
+    const QPointF tilt = BalatroMotion::ambientTiltDegrees(mAmbientId, seconds, mAmbientTiltStrength);
+    mAmbientTiltY = tilt.x();
+    mAmbientTiltX = tilt.y();
+    applyTransform();
 }
 
 void CardItem::animateScale(qreal target, int durationMs) {

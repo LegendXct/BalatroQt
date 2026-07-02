@@ -1,12 +1,12 @@
 #ifndef DYNAMICBACKGROUNDITEM_H
 #define DYNAMICBACKGROUNDITEM_H
 
-#include <QOpenGLWidget>
+#include <QColor>
+#include <QElapsedTimer>
 #include <QOpenGLFunctions>
 #include <QOpenGLShaderProgram>
-#include <QColor>
+#include <QOpenGLWidget>
 #include <QTimer>
-#include <QElapsedTimer>
 #include <memory>
 
 class DynamicBackgroundItem : public QOpenGLWidget, protected QOpenGLFunctions
@@ -22,7 +22,7 @@ public:
         Buffoon,
         Standard,
         BlindSelect,
-        Boss,           // Boss 盲注期间用 G.C.BLIND.Boss (#b44430) 调底色
+        Boss,
     };
 
     explicit DynamicBackgroundItem(QWidget *parent = nullptr);
@@ -30,7 +30,6 @@ public:
 
     void setSceneSize(qreal w, qreal h);
     void setMood(Mood mood);
-    // 暂停/恢复背景动画（打开比赛信息/选项/牌组时用）。
     void setPaused(bool p) {
         if (p) mTimer.stop();
         else if (!mTimer.isActive()) { mLastTick = mClock.elapsed() / 1000.0; mTimer.start(16); }
