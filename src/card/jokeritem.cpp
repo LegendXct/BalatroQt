@@ -773,8 +773,8 @@ void JokerItem::hoverMoveEvent(QGraphicsSceneHoverEvent *e)
     const qreal ly = qBound<qreal>(0.0, e->pos().y(), qreal(HEIGHT));
     const qreal nx = lx / WIDTH - 0.5;
     const qreal ny = ly / HEIGHT - 0.5;
-    mHoverTiltY = qBound(-3.0, nx * 6.0, 3.0);
-    mHoverTiltX = qBound(-3.0, ny * 6.0, 3.0);
+    mHoverTiltY = qBound(-7.0, nx * 14.0, 7.0);
+    mHoverTiltX = qBound(-7.0, ny * 14.0, 7.0);
     applyHoverTransform();
     QGraphicsObject::hoverMoveEvent(e);
 }

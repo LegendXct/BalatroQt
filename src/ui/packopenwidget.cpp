@@ -4,7 +4,9 @@
 #include "../card/jokeritem.h"
 #include "../card/consumableitem.h"
 #include "../utils/shadereffects.h"
+#include "../utils/balatromotion.h"
 #include "balatroinfopanel.h"
+#include <QElapsedTimer>
 #include "cardtooltipformat.h"
 #include <QVBoxLayout>
 #include <QHBoxLayout>
@@ -12,6 +14,8 @@
 #include <QLabel>
 #include <QPushButton>
 #include <QPainter>
+#include <QTransform>
+#include <QHoverEvent>
 #include <QGraphicsScene>
 #include <QGraphicsView>
 #include <QStringList>
@@ -32,6 +36,73 @@
 #ifndef M_PI
 #define M_PI 3.14159265358979323846
 #endif
+
+// 开包选项卡的图像标签：复刻原版卡牌的伪 3D hover 倾斜——鼠标在卡面上的位置驱动
+// 一个透视变换（tiltY 绕 Y 轴、tiltX 绕 X 轴），与 CardItem / JokerItem / ShopCardButton
+// 使用完全相同的透视矩阵。保持对鼠标透明：倾斜量由父卡 ou.card 的 HoverMove 注入。
+class TiltCardLabel : public QLabel
+{
+public:
+    explicit TiltCardLabel(QWidget *parent = nullptr) : QLabel(parent)
+    {
+        // idle 漂浮：未 hover 时用与场景卡一致的 BalatroMotion 环境倾斜持续轻微浮动。
+        mAmbientId = BalatroMotion::nextCardLikeId();
+        auto *amb = new QTimer(this);
+        amb->setTimerType(Qt::CoarseTimer);
+        connect(amb, &QTimer::timeout, this, [this]() {
+            if (mHovered || pixmap().isNull() || !isVisible()) return;
+            const QPointF t = BalatroMotion::ambientTiltDegrees(mAmbientId, ambientSeconds(), 0.45);
+            setTilt(t.y(), t.x());
+        });
+        amb->start(33);
+    }
+    static double ambientSeconds()
+    {
+        static QElapsedTimer clk;
+        if (!clk.isValid()) clk.start();
+        return clk.elapsed() / 1000.0;
+    }
+    // hover 时由父卡的 HoverMove 驱动 tilt；离开时恢复 idle 漂浮。
+    void setHovered(bool h) { mHovered = h; if (!h) setTilt(0.0, 0.0); }
+    void setTilt(qreal tiltXDeg, qreal tiltYDeg)
+    {
+        if (qFuzzyCompare(mTiltX, tiltXDeg) && qFuzzyCompare(mTiltY, tiltYDeg)) return;
+        mTiltX = tiltXDeg;
+        mTiltY = tiltYDeg;
+        update();
+    }
+protected:
+    void paintEvent(QPaintEvent *ev) override
+    {
+        const QPixmap pm = pixmap();
+        if (pm.isNull()) { QLabel::paintEvent(ev); return; }
+        QPainter p(this);
+        p.setRenderHint(QPainter::Antialiasing, true);
+        p.setRenderHint(QPainter::SmoothPixmapTransform, true);
+
+        // QLabel 默认按原始尺寸居中绘制（未开 scaledContents）——这里保持同样的尺寸/居中，
+        // 只在其上叠加透视，避免改变原有观感。
+        const QSizeF isz = pm.deviceIndependentSize();
+        const QRectF pr(-isz.width() / 2.0, -isz.height() / 2.0, isz.width(), isz.height());
+        p.translate(width() / 2.0, height() / 2.0);
+
+        const qreal tx = mTiltX * M_PI / 180.0;
+        const qreal ty = mTiltY * M_PI / 180.0;
+        const qreal cosY = std::cos(ty), sinY = std::sin(ty);
+        const qreal cosX = std::cos(tx), sinX = std::sin(tx);
+        QTransform persp;
+        persp.setMatrix(cosY,        sinY * sinX, 0.005 * sinY,
+                        0,           cosX,        0.005 * sinX,
+                        0,           0,           1);
+        p.setTransform(persp, true);
+        p.drawPixmap(pr, pm, QRectF(0, 0, pm.width(), pm.height()));
+    }
+private:
+    qreal mTiltX = 0.0;
+    qreal mTiltY = 0.0;
+    quint64 mAmbientId = 0;
+    bool mHovered = false;
+};
 
 static bool consumableNeedsFreeJokerSlot(ConsumableType type)
 {
@@ -157,7 +228,7 @@ void PackOpenWidget::buildUi()
         // liftImageY：上移 28 px 让出底部空间给按钮。
         const int liftImageY = qMax(2, restImageY - 28);
 
-        ou.imageLbl = new QLabel(ou.card);
+        ou.imageLbl = new TiltCardLabel(ou.card);
         ou.imageLbl->setAlignment(Qt::AlignCenter);
         ou.imageLbl->setStyleSheet("background:transparent;");
         ou.imageLbl->setAttribute(Qt::WA_TransparentForMouseEvents, true);
@@ -508,6 +579,25 @@ void PackOpenWidget::onPackCardHoverChanged(CardItem *card, bool hovered)
 
 bool PackOpenWidget::eventFilter(QObject *obj, QEvent *e)
 {
+    // 鼠标在选项卡上移动 → 驱动图像的伪 3D 透视倾斜（与场景 / 商店卡完全同款）。
+    if (e->type() == QEvent::HoverMove) {
+        for (int i = 0; i < mOptUi.size(); ++i) {
+            if (mOptUi[i].card == obj && mOptUi[i].imageLbl) {
+                if (auto *tl = static_cast<TiltCardLabel*>(mOptUi[i].imageLbl)) {
+                    const QRect g = tl->geometry();
+                    if (g.width() > 0 && g.height() > 0) {
+                        const QPointF pos = static_cast<QHoverEvent*>(e)->position();
+                        const qreal nx = (pos.x() - g.x()) / g.width()  - 0.5;
+                        const qreal ny = (pos.y() - g.y()) / g.height() - 0.5;
+                        tl->setTilt(qBound(-7.0, ny * 14.0, 7.0),
+                                    qBound(-7.0, nx * 14.0, 7.0));
+                    }
+                }
+                break;
+            }
+        }
+    }
+
     // 选项卡（QWidget）上 Enter/Leave 进出时显隐描述浮窗；点击则切换聚焦态。
     if (e->type() == QEvent::Enter || e->type() == QEvent::Leave
         || e->type() == QEvent::MouseButtonPress) {
@@ -515,6 +605,8 @@ bool PackOpenWidget::eventFilter(QObject *obj, QEvent *e)
             if (mOptUi[i].card == obj) {
                 if (e->type() == QEvent::Enter) {
                     showOptionTooltip(i);
+                    if (mOptUi[i].imageLbl)
+                        static_cast<TiltCardLabel*>(mOptUi[i].imageLbl)->setHovered(true);
                     // 与槽位 / 商店里的 JokerItem hover 一致的"弹一下"feedback——给开包里的
                     // 选项卡也加上视觉抖动。focus 中的选项跳过，避免几何动画冲突。
                     if (mFocusedOptIdx != i && i < optionCount() && !optionAlreadyChosen(i)
@@ -538,7 +630,11 @@ bool PackOpenWidget::eventFilter(QObject *obj, QEvent *e)
                         seq->start(QAbstractAnimation::DeleteWhenStopped);
                     }
                 }
-                else if (e->type() == QEvent::Leave) hideTooltip();
+                else if (e->type() == QEvent::Leave) {
+                    hideTooltip();
+                    if (mOptUi[i].imageLbl)
+                        static_cast<TiltCardLabel*>(mOptUi[i].imageLbl)->setHovered(false);
+                }
                 else if (e->type() == QEvent::MouseButtonPress) {
                     if (i < optionCount() && !optionAlreadyChosen(i) && !mFinishing) {
                         if (mFocusedOptIdx == i) {

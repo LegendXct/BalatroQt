@@ -654,6 +654,7 @@ void GameState::dealCards(DrawContext ctx) {
                          && ctx != DrawContext::BlindStart;
     const int toDraw = serpent ? 3 : (handSize() - mHand.size());
 
+    mLastDrawnUids.clear();   // 记录本次抽牌顺序（牌堆顶先出），排序前保存，供 UI 逐张飞入
     for (int i = 0; i < toDraw && !mDeck.isEmpty(); ++i) {
         CardData c = mDeck.draw();
         if (!chicot) {
@@ -679,6 +680,7 @@ void GameState::dealCards(DrawContext ctx) {
                 faceDown = true;
             if (faceDown) c.faceUp = false;
         }
+        mLastDrawnUids.append(c.uid);
         mHand.append(c);
     }
     if (mSortMode == HandSortMode::ByRank)

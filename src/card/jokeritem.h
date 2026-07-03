@@ -80,7 +80,7 @@ private:
     double mHoverTiltY = 0.0;
     double mAmbientTiltX = 0.0;
     double mAmbientTiltY = 0.0;
-    double mAmbientTiltStrength = 0.2;
+    double mAmbientTiltStrength = 0.45;   // idle 漂浮幅度（与 CardItem 一致）
     quint64 mAmbientId = 0;
     // 拖拽水平速度倾斜，与 CardItem 用同一套折算公式，让小丑/塔罗/星球 也具备甩动手感。
     double mDragTilt = 0.0;

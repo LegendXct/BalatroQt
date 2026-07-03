@@ -65,7 +65,7 @@ private:
     double mHoverTiltY = 0.0;
     double mAmbientTiltX = 0.0;
     double mAmbientTiltY = 0.0;
-    double mAmbientTiltStrength = 0.2;
+    double mAmbientTiltStrength = 0.45;   // idle 漂浮幅度（与 CardItem 一致）
     quint64 mAmbientId = 0;
     // 拖拽水平速度倾斜——参数与 CardItem 一致，让消耗品也有甩动手感（用户反馈9）。
     double mDragTilt = 0.0;

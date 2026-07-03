@@ -59,9 +59,33 @@ public:
     void setCardSelected(bool selected);
     bool isCardSelected() const {return mSelected;}
     void moveTo(const QPointF &target, int durationMs = 300);
-    void flip();
+    // 速度保持的弹簧移动（临界阻尼，对齐原版 move_xy 的连续弹簧）：反复改向时不重启动画、
+    // 速度平滑延续，避免每次重定目标都从零速度重新缓动造成的"一顿一顿"。发牌逐张插入用它。
+    void springTo(const QPointF &target);
+    // pivotDir：翻牌 pinch 的枢轴方向。0=绕中心对称收缩；+1=绕右缘收缩(视觉上从右向左扫过翻面)；
+    // -1=绕左缘。发牌入场用 +1 得到"从右边向左边翻转"的方向感。
+    void flip(double pivotDir = 0.0);
+    // 立体翻面（发牌入场用）：以牌面左缘为竖轴、右缘朝观察者方向(屏幕外)转出，
+    // φ 从 0(背面正对)扫到 π(正面正对)，π/2 处换面。复刻原版 pinch.x 宽度收缩 + 透视翻出。
+    void flip3D(int durationMs = 260);
+    // 立即以背面显示、清掉翻面状态——发牌前让排在牌堆顶待发的牌一律背面朝上，
+    // 直到轮到它 dealFlyIn 才在飞行中翻到正面。
+    void showBackImmediate();
     void juiceUp(double scaleAmount = 1.2, int durationMs = 240);
+    // 发牌立体入场：复刻原版从牌库飞入时的"由远及近 + 绕 Y 轴翻面"观感——
+    // scale 由 0.86→1.0、flipXScale 由 0.62→1.0（绕 Y 轴 pinch）在飞行时长内并行播放，
+    // 与 moveTo 的平移/方向倾斜叠加，得到立体飞入而非平面平移。仅对新发到手的牌调用。
+    void playDealFlourish(int durationMs = 300);
+    // 发牌逐张飞入（复刻原版 draw_card）：牌先停在 from（牌库位置）；若 flipUp，则停时"背面朝上"，
+    // 等 delayMs 后用 durationMs 飞到 target，起飞瞬间由远及近(scale)并绕 Y 轴由背面翻到正面(flip)。
+    // 整段用一个 QSequentialAnimationGroup 驱动，不依赖外部定时器，保证一定会飞。
+    void dealFlyIn(const QPointF &from, const QPointF &target, int delayMs, int durationMs,
+                   bool flipUp = true);
     void setBaseRotation(double deg) { mBaseRotation = deg; applyTransform(); }
+    // 飞行速度扭曲（复刻原版 Moveable:move_r：des_r ∝ 水平速度）：开启后，itemChange 每帧
+    // 采样位置增量算出瞬时水平速度，按速度给牌一个朝运动方向的倾斜——飞得越快歪得越多，
+    // 减速/回稳时自动收回。发牌飞入、出牌、弃牌飞出期间开启，得到"随速度扭曲"的立体动感。
+    void setVelocityTiltTracking(bool on);
     // 平滑改变 scale；hover 进入/离开时用它代替 setScale() 的瞬时跳变。
     void animateScale(qreal target, int durationMs = 110);
     // 控制是否允许拖拽；牌堆右下角的"查看牌组"卡牌需要 false，禁用拖动行为。
@@ -111,7 +135,7 @@ private:
     QPointF mPressScenePos;
     double mAmbientTiltX = 0.0;
     double mAmbientTiltY = 0.0;
-    double mAmbientTiltStrength = 0.2;
+    double mAmbientTiltStrength = 0.45;   // idle 漂浮幅度（0.2 太弱几乎不动，提到 0.45 才看得出）
     quint64 mAmbientId = 0;
 
     double mBaseRotation = 0.0;       // Z 轴旋转(扇形)
@@ -127,7 +151,21 @@ private:
     double mMoveTilt = 0.0;
     QPointF mLastDragScenePos;
     qint64  mLastDragTimeMs = 0;
+    // 飞行速度扭曲采样状态：上一帧位置 / 时间戳；mVelTilt 开启时在 itemChange 里更新 mMoveTilt。
+    bool    mVelTilt = false;
+    QPointF mVelLastPos;
+    qint64  mVelLastMs = 0;
+    // 弹簧移动状态（速度保持）：由共享 60Hz 定时器每帧推进。
+    bool    mSpringActive = false;
+    QPointF mSpringTarget;
+    QPointF mSpringVel;
+    void advanceSpring(double dt);
+    static void ensureSpringTimer();
     qreal  mFlipXScale = 1.0;         // 翻牌时的 X 方向缩放(1→0→1)，对齐原版 pinch.x
+    double mFlipPivotDir = 0.0;       // 翻牌 pinch 枢轴方向：0=中心，+1=右缘(右→左翻)，-1=左缘
+    bool   mFlip3D = false;           // 立体翻面进行中（左缘为轴 + 透视翻出），走 applyTransform 专用分支
+    double mFlipAngle = 0.0;          // 立体翻面角度 φ：0=背面正对，π/2=侧棱，π=正面正对
+    bool   mFlipFaceSwapped = false;  // 立体翻面本轮是否已在 π/2 处换过牌面
     qreal  mShadowLift = 0.0;         // 阴影抬升量 0..1，由 hover/press/select/scoring 驱动。
     bool   mScoringLifted = false;    // 计分阶段强制保持最高阴影抬升。
     qreal  mPressRestZ = 0.0;         // 按下前 zValue，release 还原；防止覆盖 layout 给的 z。

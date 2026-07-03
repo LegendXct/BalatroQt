@@ -5,6 +5,7 @@
 #include <QPropertyAnimation>
 #include <QCursor>
 #include <QSequentialAnimationGroup>
+#include <QPointer>
 #include <QLineF>
 #include <QDateTime>
 #include <QElapsedTimer>
@@ -40,6 +41,12 @@ QTimer *sCardShaderTimer = nullptr;
 QSet<CardItem*> sAmbientCards;
 QTimer *sCardAmbientTimer = nullptr;
 QElapsedTimer sCardAmbientClock;
+
+// 弹簧移动（速度保持）共享 60Hz 时基
+QSet<CardItem*> sSpringCards;
+QTimer *sSpringTimer = nullptr;
+QElapsedTimer sSpringClock;
+qint64 sSpringLastMs = 0;
 
 bool cardNeedsShaderTick(const CardData &d)
 {
@@ -121,6 +128,7 @@ CardItem::~CardItem()
 {
     sAnimatedCards.remove(this);
     sAmbientCards.remove(this);
+    sSpringCards.remove(this);
     if (mShadow) {
         if (auto *s = mShadow->scene()) s->removeItem(mShadow);
         delete mShadow;
@@ -149,7 +157,59 @@ QVariant CardItem::itemChange(GraphicsItemChange change, const QVariant &value)
         default: break;
         }
     }
+    // 飞行速度扭曲：位置每变化一次就采样水平速度，按速度给出朝运动方向的倾斜。
+    // 复刻原版 Moveable:move_r（des_r ∝ vel.x）。仅飞行期间开启，拖拽有独立 mDragTilt 不重复。
+    if (change == ItemPositionHasChanged && mVelTilt && !mDragging) {
+        const QPointF np = value.toPointF();
+        const qint64 now = QDateTime::currentMSecsSinceEpoch();
+        if (mVelLastMs != 0) {
+            const double dts = (now - mVelLastMs) / 1000.0;
+            if (dts > 0.0) {
+                const double vx = (np.x() - mVelLastPos.x()) / dts;   // 水平速度 px/s
+                // px/s → 角度并夹在 ±5°；系数 0.005，保持"正常飞入"，倾斜只作轻微点缀。
+                const double targetDeg = qBound(-5.0, vx * 0.005, 5.0);
+                // 指数逼近平滑（对齐 velocity.r 的弹簧收敛），避免逐帧抖动。
+                mMoveTilt = 0.5 * mMoveTilt + 0.5 * targetDeg;
+                applyTransform();
+            }
+        }
+        mVelLastPos = np;
+        mVelLastMs = now;
+    }
     return QGraphicsObject::itemChange(change, value);
+}
+
+void CardItem::setVelocityTiltTracking(bool on)
+{
+    if (on == mVelTilt) {
+        if (on) mVelLastMs = 0;   // 重新开一段飞行：清掉上次的基准帧
+        return;
+    }
+    mVelTilt = on;
+    if (on) {
+        mVelLastMs = 0;           // 首帧只记基准，不算速度
+        mVelLastPos = pos();
+        return;
+    }
+    // 结束追踪：把当前速度倾斜平滑收回 0，避免定格在最后一帧的角度。
+    if (auto *t = findChild<QVariantAnimation*>(QStringLiteral("CardMoveTilt"),
+                                                Qt::FindDirectChildrenOnly))
+        t->stop();
+    if (qFuzzyIsNull(mMoveTilt)) return;
+    auto *settle = new QVariantAnimation(this);
+    settle->setObjectName(QStringLiteral("CardMoveTilt"));
+    settle->setDuration(160);
+    settle->setStartValue(mMoveTilt);
+    settle->setEndValue(0.0);
+    settle->setEasingCurve(QEasingCurve::OutCubic);
+    connect(settle, &QVariantAnimation::valueChanged, this, [this](const QVariant &v) {
+        mMoveTilt = v.toDouble();
+        applyTransform();
+    });
+    connect(settle, &QVariantAnimation::finished, this, [this]() {
+        mMoveTilt = 0.0; applyTransform();
+    });
+    settle->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
 void CardItem::updateShadowZ()
@@ -456,6 +516,12 @@ void CardItem::animateShadowLift(qreal target, int durationMs)
 }
 
 void CardItem::moveTo(const QPointF &target, int durationMs) {
+    // 若正处于弹簧移动中，先退出弹簧，避免弹簧与本动画同时写 pos。
+    if (mSpringActive) {
+        mSpringActive = false;
+        mSpringVel = QPointF();
+        sSpringCards.remove(this);
+    }
     // 复用一只 QPropertyAnimation（之前每次 new 一只造成多动画在同一 property 上互相覆盖，
     // 表现为选牌、弃牌时卡牌"卡一下/抖一下"）。
     QPropertyAnimation *anim = findChild<QPropertyAnimation*>(QStringLiteral("CardMoveAnim"),
@@ -491,11 +557,12 @@ void CardItem::moveTo(const QPointF &target, int durationMs) {
 
     // 重排倾斜（对齐原版 Moveable:move_r：des_r ∝ 水平速度）：被其它牌挤动横向滑动时
     // 朝运动方向倾斜，随到位回正。被拖动的牌走 setPos+mDragTilt，这里跳过避免叠加。
-    if (mDragging) return;
+    // 飞行速度追踪开启时（发牌/出牌/弃牌），由 itemChange 逐帧算真实速度倾斜，这里不再叠加位移倾斜。
+    if (mDragging || mVelTilt) return;
     const double dx = target.x() - current.x();
-    double tiltMax = dx * 0.09;
-    if (tiltMax > 16.0) tiltMax = 16.0;
-    if (tiltMax < -16.0) tiltMax = -16.0;
+    double tiltMax = dx * 0.06;
+    if (tiltMax > 10.0) tiltMax = 10.0;
+    if (tiltMax < -10.0) tiltMax = -10.0;
     QVariantAnimation *tilt = findChild<QVariantAnimation*>(QStringLiteral("CardMoveTilt"),
                                                             Qt::FindDirectChildrenOnly);
     if (qAbs(tiltMax) < 0.2) {
@@ -525,9 +592,11 @@ void CardItem::moveTo(const QPointF &target, int durationMs) {
     tilt->start();
 }
 
-void CardItem::flip() {
+void CardItem::flip(double pivotDir) {
     // 对齐原版 card.lua Card:flip()：触发 pinch.x，使牌宽收缩到 0（绕 Y 轴翻面效果），
     // 然后在 sprite 翻面后再扩张回 1。仅缩 X，不缩 Y，避免出现垂直方向的塌缩。
+    // pivotDir 决定 pinch 的枢轴：+1 绕右缘 → 视觉上"从右向左"翻面。
+    mFlipPivotDir = pivotDir;
     auto *shrink = new QPropertyAnimation(this, "flipXScale", this);
     shrink->setDuration(120);
     shrink->setStartValue(1.0);
@@ -542,10 +611,57 @@ void CardItem::flip() {
         expand->setStartValue(0.0);
         expand->setEndValue(1.0);
         expand->setEasingCurve(QEasingCurve::OutQuad);
+        // 翻面收尾后回到中心枢轴，避免影响后续 hover/juice 变换。
+        connect(expand, &QPropertyAnimation::finished, this, [this]() {
+            mFlipPivotDir = 0.0;
+            applyTransform();
+        });
         expand->start(QAbstractAnimation::DeleteWhenStopped);
     });
 
     shrink->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+void CardItem::flip3D(int durationMs) {
+    // 以牌面左缘为竖轴、右缘朝观察者方向（屏幕外）转出：φ 从 0(背面正对)扫到 π(正面正对)，
+    // 到 π/2（侧棱）时换牌面。applyTransform 的 mFlip3D 分支据此做透视翻面。
+    mFlip3D = true;
+    mFlipAngle = 0.0;
+    mFlipFaceSwapped = false;
+    applyTransform();
+    auto *anim = new QVariantAnimation(this);
+    anim->setDuration(qMax(1, durationMs));
+    anim->setStartValue(0.0);
+    anim->setEndValue(M_PI);
+    // 角度匀速推进：宽度 = |cosφ| 自然给出"两端(整面)停留、正中(侧棱)飞快掠过"的翻面手感，
+    // 对齐原版 pinch.x 的观感，不再额外叠缓动。
+    anim->setEasingCurve(QEasingCurve::Linear);
+    connect(anim, &QVariantAnimation::valueChanged, this, [this](const QVariant &v) {
+        mFlipAngle = v.toDouble();
+        if (!mFlipFaceSwapped && mFlipAngle >= M_PI / 2.0) {
+            mData.faceUp = !mData.faceUp;   // 侧棱处换面：背面 → 正面
+            mFlipFaceSwapped = true;
+            update();
+        }
+        applyTransform();
+    });
+    connect(anim, &QVariantAnimation::finished, this, [this]() {
+        mFlip3D = false;
+        mFlipAngle = 0.0;
+        mFlipFaceSwapped = false;
+        applyTransform();
+    });
+    anim->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+void CardItem::showBackImmediate() {
+    mFlip3D = false;
+    mFlipAngle = 0.0;
+    mFlipFaceSwapped = false;
+    mFlipXScale = 1.0;
+    if (mData.faceUp) mData.faceUp = false;
+    update();
+    applyTransform();
 }
 
 void CardItem::mousePressEvent(QGraphicsSceneMouseEvent *event) {
@@ -677,6 +793,70 @@ void CardItem::juiceUp(double scaleAmount, int durationMs)
     seq->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
+void CardItem::playDealFlourish(int durationMs)
+{
+    setTransformOriginPoint(WIDTH / 2.0, HEIGHT / 2.0);
+
+    // 由远及近：从 0.86 放大到 1.0（缩放属性与 hover/juice 共用 "scale"，入场时不会被 hover 打断）。
+    auto *sc = new QPropertyAnimation(this, "scale", this);
+    sc->setDuration(durationMs);
+    sc->setStartValue(0.86);
+    sc->setEndValue(1.0);
+    sc->setEasingCurve(QEasingCurve::OutCubic);
+
+    // 绕 Y 轴翻面入场：flipXScale 0.62→1.0（applyTransform 里作用为 X 方向 pinch），
+    // 让卡在飞行中像立体翻转过来，而不是平面滑入。OutBack 收尾有轻微回弹更有"落位"感。
+    setFlipXScale(0.62);
+    auto *fx = new QPropertyAnimation(this, "flipXScale", this);
+    fx->setDuration(durationMs);
+    fx->setStartValue(0.62);
+    fx->setEndValue(1.0);
+    fx->setEasingCurve(QEasingCurve::OutBack);
+
+    sc->start(QAbstractAnimation::DeleteWhenStopped);
+    fx->start(QAbstractAnimation::DeleteWhenStopped);
+}
+
+void CardItem::dealFlyIn(const QPointF &from, const QPointF &target, int delayMs, int durationMs,
+                        bool flipUp)
+{
+    setPos(from);
+    // scale 绕牌面中心缩放：否则默认绕 (0,0) 左上角缩，起飞时小牌会偏离牌堆中心。
+    // 让 0.86 的小牌稳稳压在牌堆顶上，视觉上就是"从牌堆顶浮起"。
+    setTransformOriginPoint(WIDTH / 2.0, HEIGHT / 2.0);
+    // 停在牌库时"背面朝上"（像牌堆上一张待发的牌）；起飞时再翻到正面。
+    // 仅当这张牌最终应正面朝上时才这么做——Boss 发的背面牌保持背面、不翻。
+    if (flipUp) {
+        mData.faceUp = false;
+        mFlipXScale = 1.0;
+        update();
+    }
+    // 起飞：用与常规重排同一套 moveTo（"CardMoveAnim"）驱动位移——这样飞行途中若被后续
+    // 发牌挤到新位置，moveTo 能从当前位置平滑改向（复刻原版多张牌同时用弹簧移动、互相让位），
+    // 而不是各自跑一段互不相干的动画产生打架。伴随由远及近(scale)、绕 Y 轴翻面(flip)、速度扭曲。
+    QPointer<CardItem> self = this;
+    auto launch = [self, target, durationMs, flipUp]() {
+        if (!self) return;
+        auto *sc = new QPropertyAnimation(self, "scale", self);
+        sc->setDuration(qMax(1, durationMs - 20));
+        sc->setStartValue(0.86);
+        sc->setEndValue(1.0);
+        sc->setEasingCurve(QEasingCurve::OutCubic);
+        sc->start(QAbstractAnimation::DeleteWhenStopped);
+        self->setVelocityTiltTracking(true);          // 起飞即开启速度扭曲追踪
+        self->springTo(target);                       // 速度保持弹簧：被后续发牌改向也丝滑
+        // 背面朝上飞入 → 在"即将落位"时才翻面：翻面与飞行末段收尾重叠进行，落位即翻完，
+        // 不再是"落定 → 停一拍 → 才翻"，消掉明显的后摇。
+        QTimer::singleShot(durationMs * 55 / 100, self, [self, flipUp]() {
+            if (!self) return;
+            self->setVelocityTiltTracking(false);     // 收回速度倾斜
+            if (flipUp) self->flip3D(170);            // 临近落位翻到正面
+        });
+    };
+    if (delayMs > 0) QTimer::singleShot(delayMs, this, launch);
+    else launch();
+}
+
 void CardItem::applyTransform()
 {
     // 中心点
@@ -693,6 +873,25 @@ void CardItem::applyTransform()
     qreal tiltX = qDegreesToRadians(totalTiltX);
     qreal tiltY = qDegreesToRadians(totalTiltY);
     qreal zRot  = qDegreesToRadians(mBaseRotation);
+
+    // ── 翻面分支（发牌入场）──────────────────────────────────
+    // 100% 对齐原版 pinch.x：move_wh 只收 VT.w、VT.x(左缘) 不动 → 卡牌以【左缘为轴】做纯水平
+    // 收缩。牌始终保持矩形（只是变窄），收到 0 宽换面再展开，绝不产生透视梯形那种别扭形状。
+    if (mFlip3D) {
+        const double w = std::abs(std::cos(mFlipAngle));   // 宽度比例 1→0→1（对齐 VT.w/T.w）
+        // 绕左缘(局部 x=0)的水平收缩：右缘向左收拢、左缘不动，矩形保持矩形。
+        QTransform pinch; pinch.scale(w, 1.0);
+        // 扇形 Z 旋转（+抖动/速度倾斜）绕牌面中心，叠在收缩之后。
+        QTransform Bpre;  Bpre.translate(-cx, -cy);
+        QTransform R;     R.rotateRadians(zRot + qDegreesToRadians(mJitterRot + mDragTilt + mMoveTilt));
+        QTransform Bpost; Bpost.translate(cx, cy);
+        setTransform(pinch * (Bpre * R * Bpost));
+        if (mShadow) {
+            mShadow->setTransformOriginPoint(WIDTH / 2.0, HEIGHT / 2.0);
+            mShadow->setRotation(mBaseRotation + mJitterRot + mDragTilt + mMoveTilt);
+        }
+        return;
+    }
 
     // 步骤:平移到中心 → 绕 Y 倾斜 → 绕 X 倾斜 → 绕 Z 扇形 → 平移回去
     QTransform t;
@@ -717,9 +916,18 @@ void CardItem::applyTransform()
     // 应用 Z 轴扇形旋转 + 悬浮抖动 + 拖拽速度倾斜 + 重排移动倾斜叠加。
     t.rotateRadians(zRot + qDegreesToRadians(mJitterRot + mDragTilt + mMoveTilt));
 
-    // 翻牌时的水平 pinch（仅 X 缩放），围绕中心 → 模拟绕 Y 轴翻面，对齐原版 pinch.x。
+    // 翻牌时的水平 pinch（仅 X 缩放）→ 模拟绕 Y 轴翻面，对齐原版 pinch.x。
+    // 当前局部坐标系原点在牌面中心，右缘 = +cx、左缘 = -cx。
+    // mFlipPivotDir=+1 时把枢轴移到右缘：牌向右缘收拢/展开，视觉上呈"从右向左"扫过翻面。
     if (mFlipXScale != 1.0) {
-        t.scale(mFlipXScale, 1.0);
+        const qreal pivot = mFlipPivotDir * cx;
+        if (!qFuzzyIsNull(pivot)) {
+            t.translate(pivot, 0.0);
+            t.scale(mFlipXScale, 1.0);
+            t.translate(-pivot, 0.0);
+        } else {
+            t.scale(mFlipXScale, 1.0);
+        }
     }
 
     t.translate(-cx, -cy);
@@ -813,6 +1021,59 @@ void CardItem::ensureAmbientTimer()
     sCardAmbientTimer->start(33);
 }
 
+void CardItem::springTo(const QPointF &target)
+{
+    // 停掉基于 QPropertyAnimation 的位移动画，避免与弹簧同时写 pos。
+    if (auto *old = findChild<QPropertyAnimation*>(QStringLiteral("CardMoveAnim"),
+                                                   Qt::FindDirectChildrenOnly))
+        old->stop();
+    mSpringTarget = target;
+    if (!mSpringActive) {
+        mSpringActive = true;
+        sSpringCards.insert(this);
+        ensureSpringTimer();
+    }
+    // 已在弹簧中：只更新目标，速度自然延续 → 改向平滑，不重启缓动。
+}
+
+void CardItem::advanceSpring(double dt)
+{
+    if (dt <= 0.0) return;
+    if (dt > 0.05) dt = 0.05;                 // 掉帧后限制单步，避免一大跳
+    const double omega = 18.0;                // 角频率：临界阻尼下 settle ≈ 0.22s（收尾更利落、后摇更小）
+    QPointF x = pos();
+    QPointF d = mSpringTarget - x;
+    // 临界阻尼弹簧（半隐式，速度保持）：v += (ω²·d − 2ω·v)·dt；x += v·dt
+    mSpringVel += (d * (omega * omega) - mSpringVel * (2.0 * omega)) * dt;
+    x += mSpringVel * dt;
+    if (QLineF(x, mSpringTarget).length() < 0.4 &&
+        std::hypot(mSpringVel.x(), mSpringVel.y()) < 6.0) {
+        mSpringVel = QPointF();
+        mSpringActive = false;
+        sSpringCards.remove(this);
+        setPos(mSpringTarget);                 // 收敛：精确落到目标
+        return;
+    }
+    setPos(x);
+}
+
+void CardItem::ensureSpringTimer()
+{
+    if (sSpringTimer) return;
+    sSpringClock.start();
+    sSpringLastMs = sSpringClock.elapsed();
+    sSpringTimer = new QTimer(QCoreApplication::instance());
+    sSpringTimer->setTimerType(Qt::PreciseTimer);   // 位移要顺，用精确时基
+    QObject::connect(sSpringTimer, &QTimer::timeout, []() {
+        const qint64 now = sSpringClock.elapsed();
+        double dt = (now - sSpringLastMs) / 1000.0;
+        sSpringLastMs = now;
+        const auto items = sSpringCards.values();
+        for (CardItem *item : items) if (item) item->advanceSpring(dt);
+    });
+    sSpringTimer->start(16);                          // ~60Hz
+}
+
 void CardItem::updateAmbientTilt(double seconds)
 {
     if (!mHoverTiltEnabled || mHovered || mDragging || !scene() || !isVisible()) return;
@@ -841,9 +1102,10 @@ void CardItem::animateScale(qreal target, int durationMs) {
 
 void CardItem::hoverEnterEvent(QGraphicsSceneHoverEvent *event) {
     mHovered = true;
+    // paper1 是很短很轻的纸声，原版 0.35 在我们的混音里几乎听不到——提到 0.8 让悬浮反馈清晰可闻。
     AudioManager::instance()->play(QStringLiteral("paper1"),
                                    0.9 + QRandomGenerator::global()->generateDouble() * 0.2,
-                                   0.35);
+                                   0.8);
     // 不再直接 setScale 让放大瞬切——平滑过渡 90ms，避免选中升起动画同时遇上瞬间缩放产生顿挫感。
     animateScale(1.04, 90);
     // 对齐 card.lua 中 Card:hover() 的 self:juice_up(0.05, 0.03)：进入悬浮时
@@ -866,10 +1128,10 @@ void CardItem::hoverMoveEvent(QGraphicsSceneHoverEvent *event) {
     qreal ly = qBound<qreal>(0.0, event->pos().y(), qreal(HEIGHT));
     qreal nx = (lx / WIDTH)  - 0.5;     // [-0.5, 0.5]
     qreal ny = (ly / HEIGHT) - 0.5;
-    // 原版 card.lua 的 tilt_factor = 0.3，相比起以前 ±10° 视觉效果上要轻得多；
-    // 这里收敛到 ±5°（边缘）并保留中心几乎无倾斜的手感。
-    mHoverTiltY = qBound(-3.0, nx * 6.0, 3.0);
-    mHoverTiltX = qBound(-3.0, ny * 6.0, 3.0);
+    // hover 时明显的伪 3D 立体倾斜：鼠标在牌面边缘时 ±7°，中心几乎无倾斜。
+    // （之前 ±3° 太弱几乎看不出立体感，用户反馈"没有悬浮效果"。）
+    mHoverTiltY = qBound(-7.0, nx * 14.0, 7.0);
+    mHoverTiltX = qBound(-7.0, ny * 14.0, 7.0);
     applyTransform();
     QGraphicsObject::hoverMoveEvent(event);
 }

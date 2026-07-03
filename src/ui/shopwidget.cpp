@@ -4,7 +4,9 @@
 #include "../card/deckskin.h"
 #include "../card/jokeritem.h"
 #include "../audio/audiomanager.h"
+#include "../utils/balatromotion.h"
 #include "cardtooltipformat.h"
+#include <QElapsedTimer>
 #include "balatroinfopanel.h"
 #include <QRandomGenerator>
 #include <QSequentialAnimationGroup>
@@ -118,6 +120,27 @@ public:
         setAttribute(Qt::WA_NoSystemBackground, true);
         setAutoFillBackground(false);
         setProperty("balatroAudio", QStringLiteral("card1"));
+
+        // idle 漂浮：与场景卡一致——未 hover / 未按下时，用同一套 BalatroMotion 环境倾斜
+        // 让商品也持续轻微浮动，而不是死板静止。
+        mAmbientId = BalatroMotion::nextCardLikeId();
+        auto *amb = new QTimer(this);
+        amb->setTimerType(Qt::CoarseTimer);
+        connect(amb, &QTimer::timeout, this, [this]() {
+            if (mHovered || mPressed || mPixmap.isNull() || !isVisible()) return;
+            const QPointF t = BalatroMotion::ambientTiltDegrees(mAmbientId, ambientSeconds(), 0.45);
+            mTiltY = t.x();
+            mTiltX = t.y();
+            update();
+        });
+        amb->start(33);
+    }
+
+    static double ambientSeconds()
+    {
+        static QElapsedTimer clk;
+        if (!clk.isValid()) clk.start();
+        return clk.elapsed() / 1000.0;
     }
 
     void setDisplayPixmap(const QPixmap &pix)
@@ -260,12 +283,12 @@ protected:
     void mouseMoveEvent(QMouseEvent *event) override
     {
         if (mHovered && !mPixmap.isNull()) {
-            // 和 CardItem / JokerItem 同方向：鼠标在牌面哪个角，牌面就按同一套
-            // 原版顶点倾斜感响应，不再使用 QWidget shear 的反向近似。
+            // 和 CardItem / JokerItem 完全同款：鼠标在牌面的归一化位置驱动伪 3D 透视倾斜
+            // （tiltY 绕 Y 轴 = 水平方向，tiltX 绕 X 轴 = 垂直方向），±3°。
             const qreal nx = event->position().x() / qMax(1, width()) - 0.5;
             const qreal ny = event->position().y() / qMax(1, height()) - 0.5;
-            mTiltY = 0.0;
-            mTiltX = 0.0;
+            mTiltY = qBound(-7.0, nx * 14.0, 7.0);
+            mTiltX = qBound(-7.0, ny * 14.0, 7.0);
         }
         QPushButton::mouseMoveEvent(event);
         update();
@@ -354,6 +377,8 @@ protected:
         QRectF pr(QPointF(-pixSize.width() / 2.0, -pixSize.height() / 2.0), pixSize);
 
         p.save();
+        // 投影(perspective)变换需要平滑采样才能正确/清晰地渲染出立体倾斜，否则可能几乎看不出。
+        p.setRenderHint(QPainter::SmoothPixmapTransform, true);
         p.setOpacity(isEnabled() ? 1.0 : 0.42);
         p.translate(width() / 2.0, height() / 2.0 + ((mHovered && !mDisableHoverLift) ? -8.0 : 0.0));
 
@@ -395,6 +420,7 @@ private:
     bool mUseSilhouetteShadow = false; // true 给 booster 用 (异形)，否则双层圆角矩形 (joker/consumable/voucher)
     qreal mTiltX = 0.0; // degrees, same direction as CardItem/JokerItem
     qreal mTiltY = 0.0;
+    quint64 mAmbientId = 0;   // idle 漂浮的 BalatroMotion 卡片 id
     double mStaticRotDeg = 0.0;
     double mJitterRotDeg = 0.0;
     QSequentialAnimationGroup *mJitterAnim = nullptr;

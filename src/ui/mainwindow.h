@@ -20,6 +20,7 @@
 #include <QAbstractAnimation>
 #include <QPointer>
 #include <QPixmap>
+#include <QColor>
 #include <QSizeF>
 #include "../game/gamestate.h"
 #include "../card/carditem.h"
@@ -101,6 +102,16 @@ private:
 
     QVector<CardItem *> mHandCards; // 手牌
     QVector<CardItem *> mPlayedCards; // 出牌区
+    // 本次 refreshHand 新发到手的牌——layoutHandCards 会对它们做"逐张错开飞入"（每张
+    // 依次延迟起飞 + 各自发一次 card1 音），复刻原版一张一张发牌的节奏。用后即清。
+    QSet<CardItem *> mFreshDealSet;
+    // 正在发牌飞入过程中的牌——期间 layoutHandCards（含 resize 触发的重排）不得再对它们
+    // 发出 moveTo，否则会把飞行中的牌拽回/拽走，出现"先到目标位再瞬移回牌堆"的闪跳。
+    QSet<CardItem *> mDealingCards;
+    // 逐张插入发牌进行中：为 true 时 layoutHandCards 不做整排重排（只更新 z/透明度/标签），
+    // 交给 dealHandStaggered 的定时序列逐张铺开——保证"一张飞入、挤开已有牌、再下一张"的节奏
+    // 不被 resize/选牌等触发的重排打断而直接跳到最终 n 张布局。
+    bool mStaggerDealing = false;
     QSet<int> mShatteredPlayedIndices;
     QSet<int> mShatteredHandUids;
     QVector <int> mSelected; // 选中的手牌下标
@@ -288,6 +299,10 @@ private:
     void refreshCounters();
     void clearPlayedCards();
     void layoutHandCards();
+    // 逐张插入发牌：把本次新发的牌（mFreshDealSet）按手牌顺序一张张飞入，每张到位后
+    // 用增长的可见张数重排——新牌从牌堆飞入其槽位，已在场的牌 moveTo 让位（带速度倾斜），
+    // 复刻原版"插一张、挤开、再插一张"的发牌观感。startX/step 等由 layoutHandCards 传入。
+    void dealHandStaggered(int areaW);
     void layoutPlayedCards();
 
     void onCardClicked(CardItem *card);
@@ -512,6 +527,17 @@ private:
     QPointer<QWidget> mStatsOverlay;
     QPointer<QWidget> mCollectionOverlay;
     QPointer<QWidget> mDeckCustomizeOverlay;
+
+    // 收藏界面（及其它纯 QWidget 覆盖层）里卡片的悬浮描述——复用游戏内同款
+    // BalatroInfoCluster（黑框内嵌白框），替代原生 QToolTip，风格与对局中一致。
+    QPointer<BalatroInfoCluster> mCollectionTip;
+    // 给一个卡片槽挂上游戏风格悬浮描述；name 为空表示清除。badgeText 为空则不画彩色标签。
+    void attachCollectionTip(QWidget *slot, const QString &name, const QString &bodyHtml,
+                             const QString &badgeText = QString(),
+                             const QColor &badgeColor = QColor(),
+                             bool nameHasWhiteBox = false);
+    void showCollectionTipFor(QWidget *slot);
+    void hideCollectionTip();
 
     void hidePlayControlsForScoring();
     void showPlayControlsAfterScoring();

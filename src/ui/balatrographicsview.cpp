@@ -295,6 +295,11 @@ BalatroGraphicsView::BalatroGraphicsView(QGraphicsScene *scene, QWidget *parent)
     glViewport->setFormat(fmt);
     glViewport->setAutoFillBackground(false);
     setViewport(glViewport);
+    // 换成自定义 QOpenGLWidget 视口后，鼠标追踪会被重置为关闭——没有按键的移动事件（hover）
+    // 就不会送达场景里的 QGraphicsItem，导致卡牌 hoverEnter/Move 全部不触发（点击/拖拽正常，
+    // 因为按下时仍有事件）。这里显式打开视口的鼠标追踪，恢复卡牌悬浮（tilt/信息框/paper1 音）。
+    glViewport->setMouseTracking(true);
+    setMouseTracking(true);
 
     updateTargets();
     mCurrentA = mTargetA;

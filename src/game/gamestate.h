@@ -70,6 +70,9 @@ public:
     void discardCards(const QVector<int> &indices);
     void nextBlind();
     const QVector<CardData> &hand() const {return mHand;}
+    // 上一次 dealCards 抽到的牌的 uid，按"抽牌顺序"（牌堆顶先出）排列——mHand 会被排序，
+    // 抽牌顺序会丢失；UI 逐张飞入需要它来还原"牌堆顶那张先飞入"，落定后再整体排序。
+    const QVector<int> &lastDrawnUids() const { return mLastDrawnUids; }
     const QVector<Joker> &jokers() const {return mJokers;}
     bool hasJokerType(JokerType t) const;
     int gold() const {return mGold;}
@@ -111,6 +114,9 @@ public:
     int handsLeft() const {return mHandsLeft;}
     int discardLeft() const {return mDiscardLeft;}
     double score() const {return mScore;}
+    // 计入本手待结算分（mScore 要到 finalizePlayedHand 才真正加上）——用于在牌飞向弃牌堆之前
+    // 就判断本回合是否已通过盲注。
+    double projectedScore() const {return mScore + mPendingHandScore;}
     double targetScore() const {return mTargetScore;}
     int ante() const {return mAnte;}
     int jokerSlots() const;
@@ -289,6 +295,7 @@ private:
     // 游戏牌组（多态）：规则修正集中在 GameDeckType 派生类，开局前由 UI 注入。
     std::unique_ptr<GameDeckType> mGameDeck = createGameDeck(GameDeckId::Red);
     QVector<CardData> mHand;
+    QVector<int> mLastDrawnUids;   // 最近一次 dealCards 的抽牌顺序（牌堆顶先），供 UI 逐张飞入
     QVector<Joker> mJokers;
     // Default initializers prevent uninitialized reads before startBlind().
     // 没有它们时，"开始新的一局" 后 refreshCounters() 会读到栈/堆垃圾值（曾出现巨大负数）。

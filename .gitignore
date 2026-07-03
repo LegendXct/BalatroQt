@@ -83,6 +83,7 @@ CMakeLists.txt.user*
 
 # 原版 Lua 参考源码：仅本地保留供查阅，不纳入版本库
 /balatro_original_code/
+/origin_code/
 
 # IDE / 编辑器工具文件（本地生成，不纳入版本库）
 /.qtc_clangd/
