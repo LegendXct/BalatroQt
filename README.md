@@ -1,6 +1,6 @@
 <div align="center">
 
-# 🃏 BalatroQt
+# BalatroQt
 
 **一款基于 Qt 6 / C++ 打造的扑克构筑 Roguelike 单机游戏**
 
