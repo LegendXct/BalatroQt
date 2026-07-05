@@ -42,6 +42,8 @@ public:
 
     QRectF boundingRect() const override;
     void paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) override;
+    // 在非绘制期（构造 / shader 定时器）预渲染当前帧的显示位图与阴影剪影。
+    void ensureDisplayPixmap();
 
     const Joker &joker() const { return mJoker; }
     void juiceUp(double scaleAmount = 1.15, int durationMs = 200);
@@ -90,6 +92,11 @@ private:
     QString mShadowSilKey;
     // 异形小丑按实际内容垂直居中的下移量（场景像素），随 key 变化时重算。
     qreal mContentDyScreen = 0.0;
+    // 预渲染的显示位图与其 key。所有位图/剪影构建都在 ensureDisplayPixmap() 里完成，
+    // 且只在非绘制期调用（构造 / shader 定时器）——绝不能在 paint() 内建 QPainter，
+    // 否则会污染 QOpenGLWidget 视口的当前 GL 上下文并崩溃。
+    QPixmap mDisplayPix;
+    QString mDisplayKey;
     QPointF mLastDragScenePos;
     qint64  mLastDragTimeMs = 0;
     qreal mShadowLift = 0.0;

@@ -52,7 +52,8 @@ void ensureJokerShaderTimer()
     sJokerShaderTimer->setTimerType(Qt::CoarseTimer);
     QObject::connect(sJokerShaderTimer, &QTimer::timeout, []() {
         const auto items = sAnimatedJokers.values();
-        for (JokerItem *item : items) if (item) item->update();
+        // 先在非绘制期重建当前 shader 帧的位图，再触发重绘（paint 只 drawPixmap）。
+        for (JokerItem *item : items) if (item) { item->ensureDisplayPixmap(); item->update(); }
     });
     // 100ms (10FPS)：原本 67ms 在装满 6 张小丑 + 多张带版本 shader 的演示局里
     // 触发肉眼可见的卡顿；降到 10FPS 几乎看不出动画差，但 CPU/GPU 负载减半。
@@ -396,6 +397,10 @@ JokerItem::JokerItem(const Joker &j, QGraphicsItem *parent)
         sAnimatedJokers.insert(this);
         QObject::connect(this, &QObject::destroyed, [ptr = this]() { sAnimatedJokers.remove(ptr); });
     }
+
+    // 预渲染首帧位图。构造发生在 refreshJokerSlots（非绘制期），可安全创建嵌套 QPainter；
+    // 之后 paint() 只负责 drawPixmap，绝不在绘制期构建位图。
+    ensureDisplayPixmap();
 }
 
 void JokerItem::applyStakeStickerOverlay(QPixmap &pixmap, bool eternal,
@@ -484,11 +489,8 @@ static qreal jokerContentDySrc(const QPixmap &pix)
     return img.height() / 2.0 - (minY + maxY) / 2.0;
 }
 
-void JokerItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) {
-    p->setRenderHint(QPainter::SmoothPixmapTransform, false);
-
+void JokerItem::ensureDisplayPixmap() {
     // 阴影由 mShadow（sibling CardShadowItem）单独绘制——z=-1000 落到所有牌之下。
-
     const bool floatingAnimated = jokerNeedsShaderTick(mJoker);
     const int frame = floatingAnimated ? shaderCacheFrame() : -1;
     const QString key = QString::number(int(mJoker.type)) + QLatin1Char('|')
@@ -498,6 +500,9 @@ void JokerItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) 
                       + QString::number(mJoker.perishable ? 1 : 0) + QLatin1Char('|')
                       + QString::number(mJoker.rental ? 1 : 0) + QLatin1Char('|')
                       + QString::number(frame);
+    if (key == mDisplayKey && !mDisplayPix.isNull())
+        return;   // 已是当前帧，无需重建
+
     static QHash<QString, QPixmap> cache;
     static QStringList order;
 
@@ -536,6 +541,9 @@ void JokerItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) 
         order.append(key);
         while (order.size() > 160) cache.remove(order.takeFirst());
     }
+    mDisplayPix = pix;
+    mDisplayKey = key;
+
     // 外形变了（type/edition/debuff）才重算：垂直居中偏移 + 阴影黑色剪影。
     const QString silKey = QString::number(int(mJoker.type)) + QLatin1Char('|')
                          + QString::number(int(mJoker.edition)) + QLatin1Char('|')
@@ -559,13 +567,20 @@ void JokerItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) 
         }
         mShadowSilKey = silKey;
     }
+}
 
+void JokerItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) {
+    // 关键：paint() 内绝不构建位图/不创建嵌套 QPainter。在 QOpenGLWidget 视口下，
+    // paint 期间开一个 QPixmap 的 QPainter 会打断/污染当前 GL 上下文，随后
+    // p->setRenderHint() 会触发 QOpenGL2PaintEngineEx::renderHintsChanged ->
+    // QOpenGLContext::isOpenGLES() 对空上下文解引用而崩溃（买入小丑后首帧必现）。
+    // 位图统一在 ensureDisplayPixmap()（构造 / shader 定时器等非绘制期）预渲染。
+    if (mDisplayPix.isNull())
+        return;   // 理论上构造时已建好；未建好则本帧不画，绝不在此构建。
     p->setRenderHint(QPainter::SmoothPixmapTransform, true);
     // 异形小丑：直接画完整 sprite（原版美术里 j_half / j_wee 等本身就把"撕碎/微缩"画进卡面），
     // 并按实际内容垂直居中（下移 mContentDyScreen），不再贴在槽位最上方。
-    p->drawPixmap(QRectF(0, mContentDyScreen, WIDTH, HEIGHT), pix, QRectF(0, 0, SRC_W, SRC_H));
-
-    // 不再画 hover 选中轮廓——它是固定的 WIDTH×HEIGHT 圆角矩形，与异形小丑大小对不上。
+    p->drawPixmap(QRectF(0, mContentDyScreen, WIDTH, HEIGHT), mDisplayPix, QRectF(0, 0, SRC_W, SRC_H));
 }
 
 void JokerItem::mousePressEvent(QGraphicsSceneMouseEvent *e)

@@ -31,6 +31,9 @@ public:
     ~ConsumableItem() override;
     QRectF boundingRect() const override { return {0, 0, WIDTH, HEIGHT}; }
     void paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) override;
+    // 在非绘制期（构造 / shader 定时器）预渲染显示位图与阴影剪影，避免在 paint() 内
+    // 创建嵌套 QPainter 污染 QOpenGLWidget 视口的 GL 上下文而崩溃。
+    void ensureDisplayPixmap();
     const Consumable &consumable() const { return mC; }
 
     qreal shadowLift() const { return mShadowLift; }
@@ -73,6 +76,9 @@ private:
     double mMoveTilt = 0.0;
     // 上次喂给阴影的剪影 key（type|negative），变了才重算阴影剪影。
     QString mShadowSilKey;
+    // 预渲染的显示位图与其 key（见 ensureDisplayPixmap）。paint() 只 drawPixmap。
+    QPixmap mDisplayPix;
+    QString mDisplayKey;
     QPointF mLastDragScenePos;
     qint64  mLastDragTimeMs = 0;
     qreal mShadowLift = 0.0;

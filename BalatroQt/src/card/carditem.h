@@ -101,6 +101,10 @@ protected:
 private:
     CardData mData;
     QString mLinkTag;          // 浅拷贝共享地址角标文案（空 = 不绘制）
+    // 预渲染的牌面位图与其 key（见 ensureFrontPixmap）。paint() 只 drawPixmap。
+    // QPixmap 隐式共享，mFrontPix 指向静态缓存条目，不额外占内存。
+    QPixmap mFrontPix;
+    QString mFrontKey;
     bool mSelected = false;
     bool mHovered = false;
     bool mPressed = false;
@@ -145,6 +149,11 @@ private:
     void paintFront(QPainter *painter);
     void paintBack(QPainter *painter);
     void paintLinkTag(QPainter *painter);
+    // 在非绘制期（构造 / setCardData / shader 定时器）预渲染牌面位图。绝不能在 paint()
+    // 内构建：那会在 QOpenGLWidget 视口下开嵌套 QPainter 污染当前 GL 上下文而崩溃。
+public:
+    void ensureFrontPixmap();
+private:
     void updateAmbientTilt(double seconds);
     static void ensureAmbientTimer();
     static QFont sLinkTagFont;

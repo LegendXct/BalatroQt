@@ -55,7 +55,8 @@ void ensureCardShaderTimer()
     sCardShaderTimer->setTimerType(Qt::CoarseTimer);
     QObject::connect(sCardShaderTimer, &QTimer::timeout, []() {
         const auto items = sAnimatedCards.values();
-        for (CardItem *item : items) if (item) item->update();
+        // 先在非绘制期重建当前 shader 帧的位图，再触发重绘（paint 只 drawPixmap）。
+        for (CardItem *item : items) if (item) { item->ensureFrontPixmap(); item->update(); }
     });
     sCardShaderTimer->start(67);
 }
@@ -115,6 +116,9 @@ CardItem::CardItem(const CardData &data, QGraphicsItem *parent)
         ensureCardShaderTimer();
         sAnimatedCards.insert(this);
     }
+
+    // 预渲染牌面位图（构造在非绘制期，可安全建位图）；paint() 只 drawPixmap。
+    ensureFrontPixmap();
 }
 
 CardItem::~CardItem()
@@ -235,12 +239,11 @@ QRect CardItem::sealSrcRect() const {
     }
 }
 
-void CardItem::paintFront(QPainter *painter)
+void CardItem::ensureFrontPixmap()
 {
     // 缓存按图集原始 142×190 渲染，绘制时再放大到场景显示尺寸 WIDTH×HEIGHT。
     // 这样切换显示尺寸只改 WIDTH/HEIGHT，不会让缓存全部失效或采样越界。
     QRect cacheRect(0, 0, SRC_W, SRC_H);
-    QRectF dst(0, 0, WIDTH, HEIGHT);
 
     const bool animated = cardNeedsShaderTick(mData);
     const int frame = animated ? cardShaderCacheFrame() : -1;
@@ -253,6 +256,9 @@ void CardItem::paintFront(QPainter *painter)
                       + QString::number(frame) + QLatin1Char('|')
                       // 掺入换肤代数：切换定制牌组后旧缓存条目自然失效，J/Q/K/A 立即换面。
                       + QString::number(DeckSkin::generation());
+
+    if (key == mFrontKey && !mFrontPix.isNull())
+        return;   // 已是当前数据/帧，无需重建
 
     static QHash<QString, QPixmap> cache;
     static QStringList order;
@@ -315,8 +321,19 @@ void CardItem::paintFront(QPainter *painter)
         while (order.size() > 256) cache.remove(order.takeFirst());
     }
 
+    // QPixmap 隐式共享：mFrontPix 指向缓存条目底层数据，不额外拷贝像素。
+    mFrontPix = finalPix;
+    mFrontKey = key;
+}
+
+void CardItem::paintFront(QPainter *painter)
+{
+    // paint() 内绝不构建位图（见 ensureFrontPixmap 注释）。位图已在构造 / setCardData /
+    // shader 定时器等非绘制期预渲染好；此处只做一次 drawPixmap。
+    if (mFrontPix.isNull())
+        return;
     painter->setRenderHint(QPainter::SmoothPixmapTransform, true);
-    painter->drawPixmap(dst, finalPix, QRectF(cacheRect));
+    painter->drawPixmap(QRectF(0, 0, WIDTH, HEIGHT), mFrontPix, QRectF(0, 0, SRC_W, SRC_H));
 }
 
 void CardItem::paintBack(QPainter *painter) {
@@ -402,6 +419,7 @@ void CardItem::setCardData(const CardData &data) {
     } else if (!nowAnimated && wasAnimated) {
         sAnimatedCards.remove(this);
     }
+    ensureFrontPixmap();   // 数据变了，非绘制期重建牌面位图
     update();
 }
 
