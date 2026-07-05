@@ -776,7 +776,7 @@ void ShopWidget::showOfferInfo(QWidget *source)
             QString desc = tmp.description;
             if (offer->joker == JokerType::Throwback && mGS) {
                 const double x = 1.0 + 0.25 * qMax(0, mGS->totalSkipsThisRun());
-                desc += QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
+                desc += QStringLiteral("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
                             .arg(x, 0, 'f', 2);
             }
             bodyHtml = CardTooltipFormat::fromLuaMarkup(desc);
@@ -1360,7 +1360,7 @@ void ShopWidget::refresh()
 {
     if (mVoucherPurchaseAnimating) return;
 
-    if (mLblGold) mLblGold->setText(QString("$%1").arg(mGS->gold()));
+    if (mLblGold) mLblGold->setText(QStringLiteral("$%1").arg(mGS->gold()));
 
     auto fillSlot = [this](OfferUi &ou, const ShopOffer &o, bool canBuy, bool isBooster) {
         Q_UNUSED(isBooster);
@@ -1393,7 +1393,7 @@ void ShopWidget::refresh()
             body = tmp.description;
             if (o.joker == JokerType::Throwback && mGS) {
                 const double x = 1.0 + 0.25 * qMax(0, mGS->totalSkipsThisRun());
-                body += QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
+                body += QStringLiteral("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
                             .arg(x, 0, 'f', 2);
             }
             if (!ed.isEmpty()) body += "\n" + editionDescription(o.jokerEdition);
@@ -1418,12 +1418,12 @@ void ShopWidget::refresh()
         ou.cardBtn->setProperty("infoTitle", name);
         ou.cardBtn->setProperty("infoBody", body);
         ou.nameLbl->setText(name);
-        ou.priceLbl->setText(QString("$%1").arg(o.cost));
+        ou.priceLbl->setText(QStringLiteral("$%1").arg(o.cost));
 
         // 卡图由 ShopCardButton 自己绘制，保留原始像素清晰度，并在 hover 时做原版式顶点透视。
         // 关键：选中切换 / 价格刷新都会触发 refresh()，但 offer 本身没变时不要重渲卡图，
         // 否则带 shader 的牌面（Foil/Holographic 等）每次会产生轻微色差，看上去就是"光泽闪一下"。
-        const QString offerHash = QString("%1|j%2|e%3|c%4|p%5|s%6|pv%7|v%8|r%9|u%10|h%11|d%12|l%13|b%14|sold%15|et%16|pe%17|re%18")
+        const QString offerHash = QStringLiteral("%1|j%2|e%3|c%4|p%5|s%6|pv%7|v%8|r%9|u%10|h%11|d%12|l%13|b%14|sold%15|et%16|pe%17|re%18")
                                       .arg(int(o.kind))
                                       .arg(int(o.joker))
                                       .arg(int(o.jokerEdition))
@@ -1581,13 +1581,13 @@ void ShopWidget::refresh()
     }
 
     int rcost = mGS->shop().rerollCost();
-    mBtnReroll->setText(QString("重抽\n$%1").arg(rcost));
+    mBtnReroll->setText(QStringLiteral("重抽\n$%1").arg(rcost));
     // 混沌小丑：每次进商店首次重摇免费（rcost 在 hasFreeReroll() 时不应阻挡按钮）。
     // CreditCard：允许透支购买，重摇同样走 spendableGold()。
     const int effRerollCost = mGS->hasFreeShopReroll() ? 0 : rcost;
     mBtnReroll->setEnabled(mGS->spendableGold() >= effRerollCost);
     if (mGS->hasFreeShopReroll() && rcost > 0)
-        mBtnReroll->setText(QString("重抽\n免费"));
+        mBtnReroll->setText(QStringLiteral("重抽\n免费"));
 
     // 槽位变化（如 Overstock 优惠券新增槽位）后，外层 ou.card 会被 QHBoxLayout
     // 重新分配位置，但内部 cardBtn 不会收到 Move 事件，eventFilter 也就不会触发
