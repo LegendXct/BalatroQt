@@ -47,7 +47,8 @@ void ensureConsumableShaderTimer()
     sConsumableShaderTimer->setTimerType(Qt::CoarseTimer);
     QObject::connect(sConsumableShaderTimer, &QTimer::timeout, []() {
         const auto items = sAnimatedConsumables.values();
-        for (ConsumableItem *item : items) if (item) item->update();
+        // 先在非绘制期重建当前 shader 帧的位图，再触发重绘（paint 只 drawPixmap）。
+        for (ConsumableItem *item : items) if (item) { item->ensureDisplayPixmap(); item->update(); }
     });
     sConsumableShaderTimer->start(67);
 }
@@ -229,6 +230,9 @@ ConsumableItem::ConsumableItem(const Consumable &c, QGraphicsItem *parent)
         sAnimatedConsumables.insert(this);
         QObject::connect(this, &QObject::destroyed, [ptr = this]() { sAnimatedConsumables.remove(ptr); });
     }
+
+    // 预渲染首帧位图（构造在非绘制期，可安全建位图）；paint() 只 drawPixmap。
+    ensureDisplayPixmap();
 }
 
 ConsumableItem::~ConsumableItem()
@@ -271,22 +275,38 @@ void ConsumableItem::updateShadowZ()
     mShadow->setZValue(-1000.0);
 }
 
-void ConsumableItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) {
-    // 阴影由 mShadow（sibling CardShadowItem）单独绘制——z=-1000 落到所有牌之下。
+void ConsumableItem::ensureDisplayPixmap() {
+    // 缓存渲染在 SRC_W×SRC_H，paint() 时再平滑放大到 WIDTH×HEIGHT。
+    // 灵魂/负片是逐 shader 帧变化的，用与 renderPixmap 一致的 key 判断是否需要重建。
+    const bool animated = (mC.type == ConsumableType::Spectral_Soul) || mC.negative;
+    const int frame = animated ? int(BalatroShaders::shaderTime() * 15.0) : -1;
+    const QString key = QString::number(int(mC.type)) + QLatin1Char('|')
+                      + QString::number(mC.negative ? 1 : 0) + QLatin1Char('|')
+                      + QString::number(frame);
+    if (key == mDisplayKey && !mDisplayPix.isNull())
+        return;
 
-    // 缓存渲染在 SRC_W×SRC_H，在场景里平滑放大到 WIDTH×HEIGHT。
-    const QPixmap pix = renderPixmap(mC.type, mC.negative);
+    // renderPixmap 内部会创建嵌套 QPainter/离屏渲染——必须在非绘制期调用（构造 / shader
+    // 定时器），绝不能在 paint() 里，否则会污染 QOpenGLWidget 视口的当前 GL 上下文而崩溃。
+    mDisplayPix = renderPixmap(mC.type, mC.negative);
+    mDisplayKey = key;
 
     // 阴影按真实轮廓投影：外形变了才重算黑色剪影喂给阴影。
     const QString silKey = QString::number(int(mC.type)) + QLatin1Char('|')
                          + QString::number(mC.negative ? 1 : 0);
     if (mShadow && silKey != mShadowSilKey) {
-        mShadow->setSilhouette(CardShadowItem::makeSilhouette(pix));
+        mShadow->setSilhouette(CardShadowItem::makeSilhouette(mDisplayPix));
         mShadowSilKey = silKey;
     }
+}
 
+void ConsumableItem::paint(QPainter *p, const QStyleOptionGraphicsItem *, QWidget *) {
+    // 阴影由 mShadow（sibling CardShadowItem）单独绘制——z=-1000 落到所有牌之下。
+    // paint() 内绝不构建位图/不开嵌套 QPainter（见 ensureDisplayPixmap 注释）。
+    if (mDisplayPix.isNull())
+        return;
     p->setRenderHint(QPainter::SmoothPixmapTransform, true);
-    p->drawPixmap(QRectF(0, 0, WIDTH, HEIGHT), pix, QRectF(0, 0, SRC_W, SRC_H));
+    p->drawPixmap(QRectF(0, 0, WIDTH, HEIGHT), mDisplayPix, QRectF(0, 0, SRC_W, SRC_H));
 }
 
 void ConsumableItem::mousePressEvent(QGraphicsSceneMouseEvent *e)
