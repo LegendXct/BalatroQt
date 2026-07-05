@@ -32,6 +32,8 @@ private:
     static QString stakeName(int stake);
     static QString stakeDescription(int stake);
     QPixmap deckStackPixmap(const QPixmap &back) const;
+    // 按需构建并缓存某个牌组的预览牌堆图（避免打开界面时一次性建好全部牌组）。
+    QPixmap deckPreviewFor(int index);
 
     GameDeckId mSelected = GameDeckId::Red;
     QVector<QPair<GameDeckId, QPixmap>> mDeckOptions;
