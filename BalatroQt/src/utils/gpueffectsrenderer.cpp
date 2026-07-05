@@ -540,7 +540,7 @@ void main() {
     speed = u_time * 6.0 * u_vort_speed + 1033.0;
     vec2 uv2 = vec2(sv.x + sv.y);
 
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 5; ++i) {
         uv2 += sin(max(sv.x, sv.y)) + sv;
         sv  += 0.5 * vec2(cos(5.1123314 + 0.353 * uv2.y + speed * 0.131121), sin(uv2.x - 0.113 * speed));
         sv  -= 1.0 * cos(sv.x + sv.y) - 1.0 * sin(sv.x * 0.711 - sv.y);
@@ -910,7 +910,7 @@ void main() {
     float speed = mod(20.781 * u_id, 100.0) + sin(u_time + u_id) * cos(u_time * 0.151 + u_id);
     vec2 sv2 = vec2(0.0, 0.0);
 
-    for (int i = 0; i < 5; i++) {
+    for (int i = 0; i < 5; ++i) {
         sv2 += sv + 0.05 * sv2.yx * (mod(float(i), 2.0) > 1.0 ? -1.0 : 1.0) + 0.3 * (cos(length(sv) * 0.411) + 0.3344 * sin(length(sv)) - 0.23 * cos(length(sv)));
         sv += 0.5 * vec2(
             cos(cos(sv2.y) + speed * 0.0812) * sin(3.22 + sv2.x - speed * 0.1531),

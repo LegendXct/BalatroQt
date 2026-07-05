@@ -385,7 +385,7 @@ void PackOpenWidget::refreshAll()
 {
     int remain = qMax(0, mContent.choicesAllowed - mChoicesUsed);
     mLblTitle->setText(packDisplayName(mContent.kind, mContent.size));
-    mLblChoose->setText(QString("选择 %1 / %2　　剩余 %3 次")
+    mLblChoose->setText(QStringLiteral("选择 %1 / %2　　剩余 %3 次")
                             .arg(mChoicesUsed).arg(mContent.choicesAllowed).arg(remain));
     if (mHandView) mHandView->setVisible(packUsesHandSelection());
     refreshHandUi();

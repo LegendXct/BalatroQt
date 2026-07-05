@@ -764,7 +764,7 @@ static QString formatScoreNumber(double num)
     if (num >= 1e10) {
         int exp = int(std::floor(std::log10(std::max(num, 1.0))));
         double mantissa = num / std::pow(10.0, exp);
-        return QString("%1%2e%3").arg(neg ? "-" : "")
+        return QStringLiteral("%1%2e%3").arg(neg ? "-" : "")
                                   .arg(QString::number(mantissa, 'f', 2))
                                   .arg(exp);
     }
@@ -956,7 +956,7 @@ static QString cardTooltipBody(const CardData &c) {
     } else {
         int chips = c.chipValue() + c.permanentBonusChips;
         if (c.enhancement == Enhancement::Bonus) chips += 30;
-        lines << QString("+%1筹码").arg(chips);
+        lines << QStringLiteral("+%1筹码").arg(chips);
 
         switch (c.enhancement) {
         case Enhancement::Mult: lines << "+4倍率"; break;
@@ -982,7 +982,7 @@ static QLabel *makeLabel(const QString &text, int px, const QString &color, cons
     lbl->setAlignment(Qt::AlignCenter);
     QFont f = font; f.setPixelSize(uiPx(px));
     lbl->setFont(f);
-    lbl->setStyleSheet(QString("color:%1; background:transparent; border:none;").arg(color));
+    lbl->setStyleSheet(QStringLiteral("color:%1; background:transparent; border:none;").arg(color));
     return lbl;
 }
 
@@ -1013,7 +1013,7 @@ MainWindow::MainWindow(QWidget *parent)
                        << "physicalApprox =" << int(std::round(sg.width() * dpr)) << "x" << int(std::round(sg.height() * dpr))
                        << "scale =" << QString::number(gUiScale, 'f', 3)
                        << "leftW =" << mLeftW
-                       << "scene =" << QString("%1x%2").arg(mSceneW).arg(mSceneH);
+                       << "scene =" << QStringLiteral("%1x%2").arg(mSceneW).arg(mSceneH);
 
     loadFonts();
     CardItem::setLinkTagFont(mPixelFont);   // 浅拷贝地址角标用像素字体
@@ -1517,21 +1517,21 @@ void MainWindow::setupLeftPanel() {
     connect(btnInfo, &QPushButton::clicked, this, [this]() {
         auto handName = [](HandType t) {
             switch (t) {
-            case HandType::HighCard: return QString("高牌");
-            case HandType::Pair: return QString("对子");
-            case HandType::TwoPair: return QString("两对");
-            case HandType::ThreeOfAKind: return QString("三条");
-            case HandType::Straight: return QString("顺子");
-            case HandType::Flush: return QString("同花");
-            case HandType::FullHouse: return QString("葫芦");
-            case HandType::FourOfAKind: return QString("四条");
-            case HandType::StraightFlush: return QString("同花顺");
-            case HandType::RoyalFlush: return QString("皇家同花顺");
-            case HandType::FiveOfAKind: return QString("五条");
-            case HandType::FlushHouse: return QString("同花葫芦");
-            case HandType::FlushFive: return QString("同花五条");
+            case HandType::HighCard: return QStringLiteral("高牌");
+            case HandType::Pair: return QStringLiteral("对子");
+            case HandType::TwoPair: return QStringLiteral("两对");
+            case HandType::ThreeOfAKind: return QStringLiteral("三条");
+            case HandType::Straight: return QStringLiteral("顺子");
+            case HandType::Flush: return QStringLiteral("同花");
+            case HandType::FullHouse: return QStringLiteral("葫芦");
+            case HandType::FourOfAKind: return QStringLiteral("四条");
+            case HandType::StraightFlush: return QStringLiteral("同花顺");
+            case HandType::RoyalFlush: return QStringLiteral("皇家同花顺");
+            case HandType::FiveOfAKind: return QStringLiteral("五条");
+            case HandType::FlushHouse: return QStringLiteral("同花葫芦");
+            case HandType::FlushFive: return QStringLiteral("同花五条");
             }
-            return QString("未知");
+            return QStringLiteral("未知");
         };
         auto baseScore = [](HandType t) -> QPair<int,int> {
             switch (t) {
@@ -1662,7 +1662,7 @@ void MainWindow::setupLeftPanel() {
                 QFont f = mCNFont; f.setPixelSize(uiPx(16)); f.setBold(true);
                 l->setFont(f); l->setAlignment(Qt::AlignCenter);
                 l->setFixedWidth(w);
-                l->setStyleSheet(QString("background:%1; color:white; border-radius:10px; padding:3px 8px;").arg(bg));
+                l->setStyleSheet(QStringLiteral("background:%1; color:white; border-radius:10px; padding:3px 8px;").arg(bg));
                 h->addWidget(l);
                 return l;
             };
@@ -1670,7 +1670,7 @@ void MainWindow::setupLeftPanel() {
             // 原版 UI_definitions.lua:3047-3048: level 1 文本用深色，其它用浅色——这里统一用深色更清晰。
             const QString lvlBg = handLevelColor(levelNum);
             addPill(level, lvlBg, 92)->setStyleSheet(
-                QString("background:%1; color:#23584f; border-radius:10px; padding:3px 8px;").arg(lvlBg));
+                QStringLiteral("background:%1; color:#23584f; border-radius:10px; padding:3px 8px;").arg(lvlBg));
             QLabel *n = new QLabel(name, row);
             QFont nf = mCNFont; nf.setPixelSize(uiPx(17)); nf.setBold(true);
             n->setFont(nf); n->setAlignment(Qt::AlignCenter); n->setStyleSheet("color:white; background:transparent;");
@@ -1687,9 +1687,9 @@ void MainWindow::setupLeftPanel() {
         auto makeInfoTile = [&](QWidget *parent, const QString &title, const QString &body, const QString &accent) {
             QWidget *tile = new QWidget(parent);
             tile->setAttribute(Qt::WA_StyledBackground, true);
-            tile->setStyleSheet(QString("background:rgba(14,23,25,215); border:3px solid %1; border-radius:13px;").arg(accent));
+            tile->setStyleSheet(QStringLiteral("background:rgba(14,23,25,215); border:3px solid %1; border-radius:13px;").arg(accent));
             auto *v = new QVBoxLayout(tile); v->setContentsMargins(12,8,12,8); v->setSpacing(5);
-            QLabel *t = new QLabel(title, tile); QFont tf2=mCNFont; tf2.setPixelSize(uiPx(19)); tf2.setBold(true); t->setFont(tf2); t->setAlignment(Qt::AlignCenter); t->setStyleSheet(QString("color:%1;").arg(accent)); v->addWidget(t);
+            QLabel *t = new QLabel(title, tile); QFont tf2=mCNFont; tf2.setPixelSize(uiPx(19)); tf2.setBold(true); t->setFont(tf2); t->setAlignment(Qt::AlignCenter); t->setStyleSheet(QStringLiteral("color:%1;").arg(accent)); v->addWidget(t);
             QLabel *b = new QLabel(body, tile); QFont bf=mCNFont; bf.setPixelSize(uiPx(15)); bf.setBold(true); b->setFont(bf); b->setAlignment(Qt::AlignCenter); b->setWordWrap(true); b->setStyleSheet("color:#f4fbfb;"); v->addWidget(b,1);
             return tile;
         };
@@ -1707,7 +1707,7 @@ void MainWindow::setupLeftPanel() {
             HandLevel lv = levels.value(t);
             auto b = baseScore(t);
             handV->addWidget(makeHandRow(handPage,
-                                         QString("等级%1").arg(lv.level),
+                                         QStringLiteral("等级%1").arg(lv.level),
                                          lv.level,
                                          handName(t),
                                          formatScoreNumber(b.first + lv.chipsBonus),
@@ -1749,7 +1749,7 @@ void MainWindow::setupLeftPanel() {
             auto *header = new QLabel(title, tile);
             QFont hf = mCNFont; hf.setPixelSize(uiPx(20)); hf.setBold(true);
             header->setFont(hf); header->setAlignment(Qt::AlignCenter);
-            header->setStyleSheet(QString("color:%1; background:transparent; border:none;").arg(accent));
+            header->setStyleSheet(QStringLiteral("color:%1; background:transparent; border:none;").arg(accent));
             v->addWidget(header);
 
             if (!subtitle.isEmpty()) {
@@ -1825,7 +1825,7 @@ void MainWindow::setupLeftPanel() {
 
         const auto redeemed = mGameState->redeemedVouchers();
         QLabel *voucherTitle = new QLabel(
-            QString("本赛局兑换的优惠券　×%1").arg(redeemed.size()),
+            QStringLiteral("本赛局兑换的优惠券　×%1").arg(redeemed.size()),
             voucherPage);
         QFont vtf=mCNFont; vtf.setPixelSize(uiPx(22)); vtf.setBold(true);
         voucherTitle->setFont(vtf); voucherTitle->setAlignment(Qt::AlignCenter);
@@ -1920,7 +1920,7 @@ void MainWindow::setupLeftPanel() {
         QLabel *stakeTitle = new QLabel(stakeName, stakeText);
         QFont sff=mCNFont; sff.setPixelSize(uiPx(22)); sff.setBold(true);
         stakeTitle->setFont(sff); stakeTitle->setAlignment(Qt::AlignCenter);
-        stakeTitle->setStyleSheet(QString("color:%1; background:transparent; border:none;").arg(stakeColor.name()));
+        stakeTitle->setStyleSheet(QStringLiteral("color:%1; background:transparent; border:none;").arg(stakeColor.name()));
         stakeTextV->addWidget(stakeTitle);
         QLabel *stakeBody = new QLabel(stakeDisplayDescription(currentStake), stakeText);
         QFont sbf=mCNFont; sbf.setPixelSize(uiPx(14)); sbf.setBold(true);
@@ -1965,25 +1965,25 @@ void MainWindow::setupLeftPanel() {
             QLabel *val = new QLabel(value, cell);
             QFont vf = mCNFont; vf.setPixelSize(uiPx(20)); vf.setBold(true);
             val->setFont(vf); val->setAlignment(Qt::AlignCenter);
-            val->setStyleSheet(QString("color:%1; background:transparent; border:none;").arg(color));
+            val->setStyleSheet(QStringLiteral("color:%1; background:transparent; border:none;").arg(color));
             cv->addWidget(val);
             return cell;
         };
 
         grid->addWidget(makeStatCell("赌注", stakeName, stakeColor.name()), 0, 0);
         grid->addWidget(makeStatCell("金币",
-                                     QString("$%1").arg(mGameState->gold()),
+                                     QStringLiteral("$%1").arg(mGameState->gold()),
                                      "#eac058"), 0, 1);
         grid->addWidget(makeStatCell("小丑",
-                                     QString("%1/%2").arg(mGameState->jokers().size())
+                                     QStringLiteral("%1/%2").arg(mGameState->jokers().size())
                                                      .arg(mGameState->jokerSlots()),
                                      "#fe5f55"), 0, 2);
         grid->addWidget(makeStatCell("消耗牌",
-                                     QString("%1/%2").arg(mGameState->consumables().size())
+                                     QStringLiteral("%1/%2").arg(mGameState->consumables().size())
                                                      .arg(mGameState->consumableSlots()),
                                      "#a782d1"), 0, 3);
         grid->addWidget(makeStatCell("牌堆",
-                                     QString("%1/%2").arg(mGameState->deckRemaining())
+                                     QStringLiteral("%1/%2").arg(mGameState->deckRemaining())
                                                      .arg(mGameState->deckTotal()),
                                      "#009dff"), 1, 0);
         grid->addWidget(makeStatCell("出牌",
@@ -3825,17 +3825,17 @@ void MainWindow::showStatsOverlay()
         p.second->addWidget(line);
     };
 
-    addStat("当前 Ante",          QString("%1 / 8").arg(mGameState->ante()));
-    addStat("当前金币",            QString("$%1").arg(mGameState->gold()));
+    addStat("当前 Ante",          QStringLiteral("%1 / 8").arg(mGameState->ante()));
+    addStat("当前金币",            QStringLiteral("$%1").arg(mGameState->gold()));
     addStat("本局已打出手数",      QString::number(mGameState->totalHandsPlayedThisRun()));
     addStat("本局已跳过盲注",      QString::number(mGameState->totalSkipsThisRun()));
     addStat("本局累计弃牌（剩余）",QString::number(mGameState->unusedDiscardsThisRun()));
     addStat("已兑换优惠券数",      QString::number(mGameState->redeemedVouchers().size()));
-    addStat("持有小丑",            QString("%1 / %2").arg(mGameState->jokers().size())
+    addStat("持有小丑",            QStringLiteral("%1 / %2").arg(mGameState->jokers().size())
                                                      .arg(mGameState->jokerSlots()));
-    addStat("持有消耗牌",          QString("%1 / %2").arg(mGameState->consumables().size())
+    addStat("持有消耗牌",          QStringLiteral("%1 / %2").arg(mGameState->consumables().size())
                                                      .arg(mGameState->consumableSlots()));
-    addStat("牌堆余 / 总",         QString("%1 / %2").arg(mGameState->deckRemaining())
+    addStat("牌堆余 / 总",         QStringLiteral("%1 / %2").arg(mGameState->deckRemaining())
                                                      .arg(mGameState->deckTotal()));
 
     auto *back = new QPushButton("返回");
@@ -3881,7 +3881,7 @@ void MainWindow::showCollectionOverlay()
             "QPushButton:hover { background:%4; }"
             "QPushButton:pressed { border-bottom:2px solid rgba(0,0,0,110); margin-top:%5px; }"
         ).arg(bg, QString::number(dp(10)), QString::number(dp(5)), hover, QString::number(dp(3))));
-        b->setText(count.isEmpty() ? name : QString("%1\n%2").arg(name, count));
+        b->setText(count.isEmpty() ? name : QStringLiteral("%1\n%2").arg(name, count));
         b->setFont(tileFont);
         return b;
     };
@@ -4090,7 +4090,7 @@ void MainWindow::showCollectionJokersOverlay()
             }
             const JokerType type = order[idx];
             const Joker joker = createJoker(type);
-            const QString tip = QString("%1\n%2 · $%3 / 售价 $%4\n%5")
+            const QString tip = QStringLiteral("%1\n%2 · $%3 / 售价 $%4\n%5")
                 .arg(joker.name,
                      collectionRarityName(jokerRarity(type)),
                      QString::number(jokerBaseCost(type)),
@@ -4218,7 +4218,7 @@ void MainWindow::showCollectionConsumablesOverlay(ConsumableKind kind)
             }
             const ConsumableType type = order[idx];
             const Consumable consumable = createConsumable(type);
-            const QString tip = QString("%1\n售价 $%2\n%3")
+            const QString tip = QStringLiteral("%1\n售价 $%2\n%3")
                 .arg(consumable.name,
                      QString::number(consumable.sellValue),
                      collectionPlainText(consumable.description));
@@ -4345,7 +4345,7 @@ void MainWindow::showCollectionVouchersOverlay()
             setCollectionImagePixmap(slot, tiltedCollectionPixmap(collectionVoucherPixmap(order[idx], iconSize),
                                                                   slotSize,
                                                                   radians));
-            slot->setToolTip(QString("%1\n$%2\n%3").arg(vd.name,
+            slot->setToolTip(QStringLiteral("%1\n$%2\n%3").arg(vd.name,
                                                         QString::number(vd.cost),
                                                         vd.description));
             slot->setEnabled(true);
@@ -4411,7 +4411,7 @@ void MainWindow::showCollectionTagsOverlay()
         cellL->setSpacing(0);
         cellL->setAlignment(Qt::AlignCenter);
         cellL->addWidget(makeCollectionImage(cell, pix, iconSize,
-                                             QString("%1\n%2").arg(td.name, td.description),
+                                             QStringLiteral("%1\n%2").arg(td.name, td.description),
                                              false),
                          0, Qt::AlignCenter);
         grid->addWidget(cell, i / cols, i % cols, Qt::AlignCenter);
@@ -4514,7 +4514,7 @@ void MainWindow::showCollectionPacksOverlay()
             const CollectionPackEntry entry = order[idx];
             const QString name = packDisplayName(entry.kind, entry.size);
             setCollectionImagePixmap(slot, collectionPackPixmap(entry, iconSize));
-            slot->setToolTip(QString("%1\n$%2\n变体 %3")
+            slot->setToolTip(QStringLiteral("%1\n$%2\n变体 %3")
                                  .arg(name,
                                       QString::number(collectionPackCost(entry.size)),
                                       QString::number(entry.variant + 1)));
@@ -4577,7 +4577,7 @@ void MainWindow::showCollectionBlindsOverlay()
         auto *label = new QLabel(text, antePanel);
         label->setFont(font);
         label->setAlignment(align);
-        label->setStyleSheet(QString("color:%1; background:transparent; border:none;").arg(color));
+        label->setStyleSheet(QStringLiteral("color:%1; background:transparent; border:none;").arg(color));
         anteGrid->addWidget(label, row, col);
     };
     addAnteLabel(QStringLiteral("底注"), 0, 0, headerFont, "#9bb3b7", Qt::AlignCenter);
@@ -4626,7 +4626,7 @@ void MainWindow::showCollectionBlindsOverlay()
         };
         if (k == 6 || k == 16 || k == 26) addGroupSpacer();
         cellH->addWidget(makeCollectionImage(cell, pix, iconSize,
-                                             QString("%1\n%2").arg(entry.name, entry.description),
+                                             QStringLiteral("%1\n%2").arg(entry.name, entry.description),
                                              false),
                          0, Qt::AlignCenter);
         if (k == 5 || k == 15 || k == 25) addGroupSpacer();
@@ -4663,7 +4663,7 @@ static void addCollectionCardModifierCells(QWidget *content, QGridLayout *grid,
                                                                          entry.edition,
                                                                          iconSize),
                                              iconSize,
-                                             QString("%1\n%2").arg(entry.name, entry.description)));
+                                             QStringLiteral("%1\n%2").arg(entry.name, entry.description)));
         }
         grid->addWidget(makeCollectionCardArea(content, cards, cols, iconSize, false,
                                                collectionCardAreaUiSize(cols + 0.25, 1.03)),
@@ -4759,7 +4759,7 @@ void MainWindow::showCollectionEnhancementsOverlay()
                                                                        entry.seal,
                                                                        entry.edition,
                                                                        iconSize));
-            slot->setToolTip(QString("%1\n%2").arg(entry.name, entry.description));
+            slot->setToolTip(QStringLiteral("%1\n%2").arg(entry.name, entry.description));
             slot->setEnabled(true);
         }
         pageLabel->setText(QStringLiteral("页 %1/%2").arg((*page) + 1).arg(pageCount));
@@ -4840,7 +4840,7 @@ void MainWindow::showCollectionEditionsOverlay()
                                                                iconSize,
                                                                entry.edition),
                                          iconSize,
-                                         QString("%1\n%2").arg(entry.name, entry.description)));
+                                         QStringLiteral("%1\n%2").arg(entry.name, entry.description)));
     }
     auto *row = new QVBoxLayout(content);
     const int contentPad = int(std::round(0.1 * U));
@@ -4956,7 +4956,7 @@ void MainWindow::showCollectionDecksOverlay()
         const CollectionDeckEntry entry = order.value(*idx);
         const QPixmap deckStack = collectionDeckStackPixmap(entry, preview->size());
         if (!deckStack.isNull()) setCollectionImagePixmap(preview, deckStack);
-        preview->setToolTip(QString("%1\n%2").arg(entry.name, entry.description));
+        preview->setToolTip(QStringLiteral("%1\n%2").arg(entry.name, entry.description));
         preview->setEnabled(true);
         name->setText(entry.name);
         desc->setText(entry.description);
@@ -5986,7 +5986,7 @@ void MainWindow::layoutHandCards() {
     int startX = (areaW - totalW) / 2;              // 在手牌区(不含右侧 deck/tag 区)居中
 
     mHandCountLabel->setPlainText(
-        QString("%1/%2").arg(n).arg(mGameState->handSize()));
+        QStringLiteral("%1/%2").arg(n).arg(mGameState->handSize()));
     QRectF hcr = mHandCountLabel->boundingRect();
     const qreal labelTargetX = areaW / 2.0 - hcr.width() / 2.0;
     // 把 8/8 放在"手牌底沿 → 出牌按钮顶端"的中点，避免贴着按钮看上去拥挤。
@@ -6116,7 +6116,7 @@ void MainWindow::updateScoreProgressBar(double displayedScore, bool animate)
 
     const int barValue = qBound(0, int(std::round(std::min(ratio, 1.0) * 1000.0)), 1000);
     const int percent = qBound(0, int(std::round(std::min(ratio, 1.0) * 100.0)), 100);
-    mScoreProgressBar->setFormat(QString("%1%").arg(percent));
+    mScoreProgressBar->setFormat(QStringLiteral("%1%").arg(percent));
 
     // 自绘进度条：颜色直接走 setter，paint 时即可读到最新值，绕过 stylesheet 那套
     // 部分驱动下会让彩色矩形戳出药丸的 bug。
@@ -6146,13 +6146,13 @@ void MainWindow::updateScoreProgressBar(double displayedScore, bool animate)
 }
 
 void MainWindow::refreshGold() {
-    mLblGold->setText(QString("$%1").arg(mGameState->gold()));
+    mLblGold->setText(QStringLiteral("$%1").arg(mGameState->gold()));
 }
 
 void MainWindow::refreshCounters() {
     mLblHands->setText(QString::number(mGameState->handsLeft()));
     mLblDiscards->setText(QString::number(mGameState->discardLeft()));
-    mLblAnte->setText(QString("%1<font color='white'>/8</font>")
+    mLblAnte->setText(QStringLiteral("%1<font color='white'>/8</font>")
                           .arg(mGameState->ante()));
     if (mStakeChip)
         mStakeChip->setPixmap(stakeChipPixmapForDisplay(mGameState->stake(), dp(34)));
@@ -6177,7 +6177,7 @@ void MainWindow::refreshCounters() {
         break;
     case BlindType::Boss: {
         auto info = mGameState->currentBossInfo();
-        mLblBlind->setText(QString("Boss · %1").arg(info.name));
+        mLblBlind->setText(QStringLiteral("Boss · %1").arg(info.name));
         QString col;
         switch (mGameState->bossEffect()) {
         case BossEffect::TheHook:   col = "#a84024"; break;
@@ -6223,14 +6223,14 @@ void MainWindow::refreshCounters() {
     if (mDeckLabel) {
         // 显示 "剩余/总数"，与原版保持一致。
         mDeckLabel->setPlainText(
-            QString("%1/%2").arg(formatScoreNumber(mGameState->deckRemaining()))
+            QStringLiteral("%1/%2").arg(formatScoreNumber(mGameState->deckRemaining()))
                             .arg(formatScoreNumber(mGameState->deckTotal())));
         QRectF br = mDeckLabel->boundingRect();
         mDeckLabel->setPos(mSceneW - CARD_W - 60 + (CARD_W - br.width()) / 2.0,
                            mHandYScoring + CARD_H + 6);
     }
     if (mJokerCountLabel) {
-        mJokerCountLabel->setPlainText(QString("%1/%2")
+        mJokerCountLabel->setPlainText(QStringLiteral("%1/%2")
                                            .arg(mGameState->jokers().size()).arg(mGameState->jokerSlots()));
         QRectF br = mJokerCountLabel->boundingRect();
         mJokerCountLabel->setPos(40, JOKER_Y + TOP_SLOT_H + 40);
@@ -6756,23 +6756,23 @@ QString MainWindow::jokerRuntimeStateSuffix(int idx) const
     switch (j.type) {
     // ── 传奇 / 已有 ─────────────────────────────────────────────────
     case JokerType::Yorick:
-        return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率，还需弃 {C:attention}%2/23")
+        return QStringLiteral("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率，还需弃 {C:attention}%2/23")
             .arg(mGameState->yorickXMult(), 0, 'f', 1)
             .arg(mGameState->yorickDiscardsRemaining());
     case JokerType::Caino:
-        return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
+        return QStringLiteral("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
             .arg(mGameState->cainoXMult(), 0, 'f', 1);
     case JokerType::DriversLicense: {
         int enhanced = 0;
         for (const CardData &c2 : mGameState->fullDeckCards())
             if (c2.enhancement != Enhancement::None) ++enhanced;
-        return QString("\n{C:inactive}当前增强牌：{C:attention}%1/16{} %2")
+        return QStringLiteral("\n{C:inactive}当前增强牌：{C:attention}%1/16{} %2")
             .arg(enhanced)
             .arg(enhanced >= 16 ? QStringLiteral("{X:mult,C:white}X3{} 已生效")
                                  : QStringLiteral("{C:inactive}未生效"));
     }
     case JokerType::IceCream:
-        return QString("\n{C:inactive}当前：{C:chips}+%1{} 筹码").arg(c);
+        return QStringLiteral("\n{C:inactive}当前：{C:chips}+%1{} 筹码").arg(c);
     case JokerType::Stuntman:
         return QStringLiteral("\n{C:inactive}当前：{C:chips}+250{} 筹码 / 手牌上限 {C:red}-2");
     case JokerType::DNA:
@@ -6781,115 +6781,115 @@ QString MainWindow::jokerRuntimeStateSuffix(int idx) const
                    : QStringLiteral("\n{C:inactive}仅本盲注第一次且只出 1 张时触发");
     case JokerType::ToDoList: {
         const HandType target = static_cast<HandType>(j.counter);
-        return QString("\n{C:inactive}当前目标：{C:attention}%1")
+        return QStringLiteral("\n{C:inactive}当前目标：{C:attention}%1")
             .arg(HandEvaluator::handTypeName(target));
     }
     case JokerType::Blueprint:
         return (idx + 1 < js.size())
-                   ? QString("\n{C:inactive}指向右侧：{C:attention}%1").arg(js[idx + 1].name)
+                   ? QStringLiteral("\n{C:inactive}指向右侧：{C:attention}%1").arg(js[idx + 1].name)
                    : QStringLiteral("\n{C:inactive}右侧没有可复制小丑");
     case JokerType::Brainstorm:
         return (!js.isEmpty() && idx != 0)
-                   ? QString("\n{C:inactive}指向最左：{C:attention}%1").arg(js.first().name)
+                   ? QStringLiteral("\n{C:inactive}指向最左：{C:attention}%1").arg(js.first().name)
                    : QStringLiteral("\n{C:inactive}没有可复制小丑");
 
     // ── 计数器型：每次触发累积；counter 为当前累积值 ────────────────
     case JokerType::SquareJoker:
-        return QString("\n{C:inactive}当前：{C:chips}+%1{} 筹码").arg(c);
+        return QStringLiteral("\n{C:inactive}当前：{C:chips}+%1{} 筹码").arg(c);
     case JokerType::Runner:
-        return QString("\n{C:inactive}当前：{C:chips}+%1{} 筹码").arg(c);
+        return QStringLiteral("\n{C:inactive}当前：{C:chips}+%1{} 筹码").arg(c);
     case JokerType::Castle:
-        return QString("\n{C:inactive}当前花色：%1{}　{C:chips}+%2{} 筹码")
+        return QStringLiteral("\n{C:inactive}当前花色：%1{}　{C:chips}+%2{} 筹码")
             .arg(suitName(mGameState->castleSuit())).arg(c);
     case JokerType::WeeJoker:
-        return QString("\n{C:inactive}当前：{C:chips}+%1{} 筹码").arg(c);
+        return QStringLiteral("\n{C:inactive}当前：{C:chips}+%1{} 筹码").arg(c);
 
     case JokerType::GreenJoker:
-        return QString("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(j.counter);
+        return QStringLiteral("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(j.counter);
     case JokerType::RideTheBus:
-        return QString("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(c);
+        return QStringLiteral("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(c);
     case JokerType::SpareTrousers:
-        return QString("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(c);
+        return QStringLiteral("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(c);
     case JokerType::FlashCard:
-        return QString("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(c);
+        return QStringLiteral("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(c);
     case JokerType::RedCard:
-        return QString("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(c);
+        return QStringLiteral("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(c);
     case JokerType::FortuneTeller:
-        return QString("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(c);
+        return QStringLiteral("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(c);
     case JokerType::Popcorn:
-        return QString("\n{C:inactive}剩余：{C:mult}+%1{} 倍率（回合结束 -4）").arg(c);
+        return QStringLiteral("\n{C:inactive}剩余：{C:mult}+%1{} 倍率（回合结束 -4）").arg(c);
 
     case JokerType::Hologram:
-        return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
+        return QStringLiteral("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
             .arg(1.0 + 0.25 * c, 0, 'f', 2);
     case JokerType::Constellation:
-        return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
+        return QStringLiteral("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
             .arg(1.0 + 0.1 * c, 0, 'f', 1);
     case JokerType::Vampire:
-        return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
+        return QStringLiteral("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
             .arg(1.0 + 0.1 * c, 0, 'f', 1);
     case JokerType::Madness:
-        return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
+        return QStringLiteral("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
             .arg(1.0 + c / 100.0, 0, 'f', 1);   // counter 每张疯狂 +50 表示 +X0.5
     case JokerType::LuckyCat:
-        return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
+        return QStringLiteral("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
             .arg(1.0 + 0.25 * c, 0, 'f', 2);
     case JokerType::Obelisk:
-        return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
+        return QStringLiteral("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
             .arg(1.0 + 0.2 * c, 0, 'f', 1);
     case JokerType::GlassJoker:
-        return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
+        return QStringLiteral("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
             .arg(1.0 + 0.75 * c, 0, 'f', 2);
     case JokerType::HitTheRoad:
-        return QString("\n{C:inactive}本回合：{X:mult,C:white}X%1{} 倍率")
+        return QStringLiteral("\n{C:inactive}本回合：{X:mult,C:white}X%1{} 倍率")
             .arg(1.0 + 0.5 * c, 0, 'f', 1);
     case JokerType::Throwback:
-        return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
+        return QStringLiteral("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
             .arg(1.0 + 0.25 * c, 0, 'f', 2);
     case JokerType::Campfire:
-        return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
+        return QStringLiteral("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
             .arg(1.0 + 0.25 * c, 0, 'f', 2);
     case JokerType::CeremonialDagger:
-        return QString("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(c);
+        return QStringLiteral("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(c);
     case JokerType::JokerStencil: {
         int stencils = 0;
         for (const Joker &other : js)
             if (!other.isDebuffed && other.type == JokerType::JokerStencil) ++stencils;
         const int xmult = qMax(0, mGameState->jokerSlots() - js.size()) + stencils;
-        return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率").arg(xmult);
+        return QStringLiteral("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率").arg(xmult);
     }
     case JokerType::SteelJoker: {
         const int steel = countDeckCards([](const CardData &card) {
             return card.enhancement == Enhancement::Steel;
         });
-        return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
+        return QStringLiteral("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率")
             .arg(1.0 + 0.2 * steel, 0, 'f', 1);
     }
     case JokerType::StoneJoker: {
         const int stone = countDeckCards([](const CardData &card) {
             return card.enhancement == Enhancement::Stone;
         });
-        return QString("\n{C:inactive}当前：{C:chips}+%1{} 筹码").arg(25 * stone);
+        return QStringLiteral("\n{C:inactive}当前：{C:chips}+%1{} 筹码").arg(25 * stone);
     }
     case JokerType::BlueJoker:
-        return QString("\n{C:inactive}当前：{C:chips}+%1{} 筹码")
+        return QStringLiteral("\n{C:inactive}当前：{C:chips}+%1{} 筹码")
             .arg(2 * mGameState->deckRemaining());
     case JokerType::Erosion:
-        return QString("\n{C:inactive}当前：{C:mult}+%1{} 倍率")
+        return QStringLiteral("\n{C:inactive}当前：{C:mult}+%1{} 倍率")
             .arg(4 * qMax(0, 52 - mGameState->fullDeckCards().size()));
     case JokerType::Bull:
-        return QString("\n{C:inactive}当前：{C:chips}+%1{} 筹码")
+        return QStringLiteral("\n{C:inactive}当前：{C:chips}+%1{} 筹码")
             .arg(2 * qMax(0, mGameState->gold()));
     case JokerType::Bootstraps:
-        return QString("\n{C:inactive}当前：{C:mult}+%1{} 倍率")
+        return QStringLiteral("\n{C:inactive}当前：{C:mult}+%1{} 倍率")
             .arg(2 * (qMax(0, mGameState->gold()) / 5));
     case JokerType::AbstractJoker:
-        return QString("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(3 * js.size());
+        return QStringLiteral("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(3 * js.size());
     case JokerType::Swashbuckler: {
         int sellTotal = 0;
         for (int i = 0; i < js.size(); ++i)
             if (i != idx) sellTotal += qMax(0, js[i].sellValue);
-        return QString("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(sellTotal);
+        return QStringLiteral("\n{C:inactive}当前：{C:mult}+%1{} 倍率").arg(sellTotal);
     }
     case JokerType::BaseballCard: {
         int uncommon = 0;
@@ -6897,7 +6897,7 @@ QString MainWindow::jokerRuntimeStateSuffix(int idx) const
             if (i == idx || js[i].isDebuffed) continue;
             if (jokerRarity(js[i].type) == JokerRarity::Uncommon) ++uncommon;
         }
-        return QString("\n{C:inactive}当前罕见小丑：{C:attention}%1{}，合计 {X:mult,C:white}X%2{} 倍率")
+        return QStringLiteral("\n{C:inactive}当前罕见小丑：{C:attention}%1{}，合计 {X:mult,C:white}X%2{} 倍率")
             .arg(uncommon)
             .arg(std::pow(1.5, uncommon), 0, 'f', 2);
     }
@@ -6905,54 +6905,54 @@ QString MainWindow::jokerRuntimeStateSuffix(int idx) const
         const int nines = countDeckCards([](const CardData &card) {
             return card.enhancement != Enhancement::Stone && card.rank == Rank::Nine;
         });
-        return QString("\n{C:inactive}当前：{C:money}$%1{}").arg(nines);
+        return QStringLiteral("\n{C:inactive}当前：{C:money}$%1{}").arg(nines);
     }
 
     case JokerType::LoyaltyCard:
-        return QString("\n{C:inactive}状态：%1{}")
+        return QStringLiteral("\n{C:inactive}状态：%1{}")
             .arg((j.counter % 6 == 5)
                      ? QStringLiteral("{X:mult,C:white}X4{} 倍率（本手生效）")
-                     : QString("{C:attention}%1{} 手后生效").arg(5 - (j.counter % 6)));
+                     : QStringLiteral("{C:attention}%1{} 手后生效").arg(5 - (j.counter % 6)));
     case JokerType::Egg:
-        return QString("\n{C:inactive}当前售价：{C:money}$%1").arg(j.sellValue);
+        return QStringLiteral("\n{C:inactive}当前售价：{C:money}$%1").arg(j.sellValue);
     case JokerType::GiftCard:
-        return QString("\n{C:inactive}本牌售价加成：{C:money}$%1{}").arg(qMax(0, j.extraSellValue));
+        return QStringLiteral("\n{C:inactive}本牌售价加成：{C:money}$%1{}").arg(qMax(0, j.extraSellValue));
     case JokerType::Rocket:
-        return QString("\n{C:inactive}当前回合结束获得：{C:money}$%1{}").arg(qMax(0, j.counter));
+        return QStringLiteral("\n{C:inactive}当前回合结束获得：{C:money}$%1{}").arg(qMax(0, j.counter));
     case JokerType::Satellite:
-        return QString("\n{C:inactive}已使用星球牌种类：{C:attention}%1{}，当前 {C:money}$%2{}")
+        return QStringLiteral("\n{C:inactive}已使用星球牌种类：{C:attention}%1{}，当前 {C:money}$%2{}")
             .arg(mGameState->planetsUsedThisRunCount())
             .arg(mGameState->planetsUsedThisRunCount());
     case JokerType::DelayedGratification:
         return mGameState->noDiscardsUsedThisRound()
-                   ? QString("\n{C:inactive}当前回合结束获得：{C:money}$%1{}")
+                   ? QStringLiteral("\n{C:inactive}当前回合结束获得：{C:money}$%1{}")
                          .arg(2 * mGameState->discardLeft())
                    : QStringLiteral("\n{C:inactive}本回合已使用弃牌，未激活");
     case JokerType::ToTheMoon:
-        return QString("\n{C:inactive}当前持有金额按 $5 + $%1{} 利息发放")
+        return QStringLiteral("\n{C:inactive}当前持有金额按 $5 + $%1{} 利息发放")
             .arg(qMin(mGameState->gold() / 5, 5));
 
     // ── 当回合随机花色 / 点数：从 GameState 读取 ─────────────────
     case JokerType::AncientJoker:
-        return QString("\n{C:inactive}本回合花色：%1").arg(suitName(mGameState->ancientSuit()));
+        return QStringLiteral("\n{C:inactive}本回合花色：%1").arg(suitName(mGameState->ancientSuit()));
     case JokerType::TheIdol:
-        return QString("\n{C:inactive}本回合卡牌：{C:attention}%1{} 的 %2")
+        return QStringLiteral("\n{C:inactive}本回合卡牌：{C:attention}%1{} 的 %2")
             .arg(rankName(mGameState->idolRank())).arg(suitName(mGameState->idolSuit()));
     case JokerType::MailInRebate:
-        return QString("\n{C:inactive}本回合点数：{C:attention}%1")
+        return QStringLiteral("\n{C:inactive}本回合点数：{C:attention}%1")
             .arg(rankName(mGameState->mailRank()));
 
     case JokerType::Ramen:
-        return QString("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率，每弃 1 张失去 {X:mult,C:white}X0.01")
+        return QStringLiteral("\n{C:inactive}当前：{X:mult,C:white}X%1{} 倍率，每弃 1 张失去 {X:mult,C:white}X0.01")
             .arg(qMax(100, j.counter) / 100.0, 0, 'f', 2);
     case JokerType::Seltzer:
-        return QString("\n{C:inactive}剩余 {C:attention}%1{} 手牌").arg(c);
+        return QStringLiteral("\n{C:inactive}剩余 {C:attention}%1{} 手牌").arg(c);
     case JokerType::TurtleBean:
-        return QString("\n{C:inactive}当前手牌上限：{C:attention}+%1{}，回合结束 -1").arg(c);
+        return QStringLiteral("\n{C:inactive}当前手牌上限：{C:attention}+%1{}，回合结束 -1").arg(c);
     case JokerType::InvisibleJoker:
         return (j.counter >= 2)
                    ? QStringLiteral("\n{C:attention}已激活：售出时复制 1 张随机小丑")
-                   : QString("\n{C:inactive}进度：{C:attention}%1/2{} 回合").arg(qMax(0, j.counter));
+                   : QStringLiteral("\n{C:inactive}进度：{C:attention}%1/2{} 回合").arg(qMax(0, j.counter));
 
     default:
         return QString();
@@ -7315,8 +7315,8 @@ void MainWindow::onHandPlayed()
     }
 
     mLblHandName ->setText(r.name);
-    mLblHandLevel->setText(QString("等级%1").arg(r.level));
-    mLblHandLevel->setStyleSheet(QString("color:%1; background:transparent;").arg(handLevelColor(r.level)));
+    mLblHandLevel->setText(QStringLiteral("等级%1").arg(r.level));
+    mLblHandLevel->setStyleSheet(QStringLiteral("color:%1; background:transparent;").arg(handLevelColor(r.level)));
 
     resetScoreFlame();
     if (handNameChanged) {
@@ -7692,7 +7692,7 @@ void MainWindow::refreshJokerSlots()
                                && mPendingSlotFlyIn.targetArea == 1
                                && n == oldPositions.size() + 1;
     if (mJokerCountLabel) {
-        mJokerCountLabel->setPlainText(QString("%1/%2").arg(n).arg(mGameState->jokerSlots()));
+        mJokerCountLabel->setPlainText(QStringLiteral("%1/%2").arg(n).arg(mGameState->jokerSlots()));
         mJokerCountLabel->setPos(40, JOKER_Y + TOP_SLOT_H + 40);
     }
     if (mPackOpenWidget && mPackOpenWidget->isVisible())
@@ -7862,8 +7862,8 @@ void MainWindow::showJokerInfo(int idx, bool showSellButton)
     QString editionText = editionName(j.edition);
     if (editionText.isEmpty()) editionText = "普通";
     QString editionEffect = editionDesc(j.edition);
-    QString meta = QString("%1小丑　出售 $%2").arg(editionText).arg(qMax(1, j.sellValue));
-    if (!editionEffect.isEmpty()) meta += QString("　%1").arg(editionEffect);
+    QString meta = QStringLiteral("%1小丑　出售 $%2").arg(editionText).arg(qMax(1, j.sellValue));
+    if (!editionEffect.isEmpty()) meta += QStringLiteral("　%1").arg(editionEffect);
     if (j.eternal) meta += QStringLiteral("　永恒卡：不能出售或被摧毁");
     if (j.perishable) meta += QStringLiteral("　易腐：%1 回合后削弱").arg(qMax(0, j.perishableRounds));
     if (j.rental) meta += QStringLiteral("　租用：回合结束 -$3");
@@ -7895,7 +7895,7 @@ void MainWindow::showJokerInfo(int idx, bool showSellButton)
         QFont sf = mCNFont; sf.setPixelSize(uiPx(15)); sf.setBold(true);
         mJokerSellButton->setFont(sf);
         mJokerSellButton->setText(j.eternal ? QStringLiteral("永恒\n不可售")
-                                            : QString("售出\n$%1").arg(qMax(1, j.sellValue)));
+                                            : QStringLiteral("售出\n$%1").arg(qMax(1, j.sellValue)));
         mJokerSellButton->setFixedSize(dp(76), dp(58));
         mJokerSellButton->setEnabled(!j.eternal);
         mJokerSellButton->setStyleSheet(j.eternal
@@ -8360,7 +8360,7 @@ void MainWindow::showConsumableAction(int idx)
 
     mConsumableActionPrice->clear();
     mConsumableActionPrice->setVisible(false);
-    mConsumableSellButton->setText(QString("售出\n$%1").arg(qMax(1, c.sellValue)));
+    mConsumableSellButton->setText(QStringLiteral("售出\n$%1").arg(qMax(1, c.sellValue)));
     QPointF cp = mConsumableItems[idx]->pos();
     // 消耗牌点中后像手牌一样上浮；按钮列贴在卡牌右侧、与卡片纵向中线对齐。
     const int panelW = mConsumableActionPanel->width();
@@ -8409,10 +8409,10 @@ void MainWindow::refreshConsumableUseButtonState()
     QString reason;
     if (c.needsSelection > 0 && sel.size() < c.needsSelection) {
         ok = false;
-        reason = QString("需要选中 %1 张手牌").arg(c.needsSelection);
+        reason = QStringLiteral("需要选中 %1 张手牌").arg(c.needsSelection);
     } else if (c.maxSelection > 0 && sel.size() > c.maxSelection) {
         ok = false;
-        reason = QString("最多选 %1 张手牌").arg(c.maxSelection);
+        reason = QStringLiteral("最多选 %1 张手牌").arg(c.maxSelection);
     } else if (c.type == ConsumableType::Tarot_Fool && !mGameState->canUseFool()) {
         ok = false;
         reason = QStringLiteral("没有可复制的消耗牌");
@@ -8471,7 +8471,7 @@ void MainWindow::refreshConsumableSlots()
     }
     int slotCount = mGameState->consumableSlots();
     if (mConsCountLabel) {
-        mConsCountLabel->setPlainText(QString("%1/%2").arg(cs.size()).arg(slotCount));
+        mConsCountLabel->setPlainText(QStringLiteral("%1/%2").arg(cs.size()).arg(slotCount));
         QRectF br = mConsCountLabel->boundingRect();
         int visualSlots = Constants::MAX_CONSUMABLE_SLOTS;
         int totalW = TOP_SLOT_W + qMax(0, visualSlots - 1) * (TOP_SLOT_W + 14);
@@ -10379,7 +10379,7 @@ void MainWindow::showGameOverOverlay(bool won)
     if (title) title->setText(won ? "胜利" : "游戏结束");
     if (body) body->setText(won
                           ? "你击败了所有盲注。\n可以继续挑战无尽模式。"
-                          : QString("未达到盲注要求\n分数：%1 / %2\n底注：%3")
+                          : QStringLiteral("未达到盲注要求\n分数：%1 / %2\n底注：%3")
                                 .arg(formatScoreNumber(mGameState->score())).arg(formatScoreNumber(mGameState->targetScore())).arg(mGameState->ante()));
     if (auto *cont = mGameOverPanel->findChild<QPushButton*>("gameOverContinue"))
         cont->setVisible(won);
@@ -10496,9 +10496,9 @@ void MainWindow::playHandLevelUpAnimation(HandType t, int prevLevel, int newLeve
     // 第 0 步：先把侧边栏切到"被升级牌型"的旧值，对应原版 card.lua:1265 / tag.lua:193
     // 在 level_up_hand 之前那一次 update_hand_text(handname/chips/mult/level=旧值)。
     mLblHandName ->setText(name);
-    mLblHandLevel->setText(QString("等级%1").arg(prevLevel));
+    mLblHandLevel->setText(QStringLiteral("等级%1").arg(prevLevel));
     mLblHandLevel->setStyleSheet(
-        QString("color:%1; background:transparent;").arg(handLevelColor(prevLevel)));
+        QStringLiteral("color:%1; background:transparent;").arg(handLevelColor(prevLevel)));
     setLabelScaledText(mLblChips, formatScoreNumber(prevChips), uiPx(42));
     setLabelScaledText(mLblMult,  formatScoreNumber(prevMult),  uiPx(42));
 
@@ -10572,9 +10572,9 @@ void MainWindow::playHandLevelUpAnimation(HandType t, int prevLevel, int newLeve
     // 第 3 拍：等级 +N，换 HAND_LEVELS 调色板色 + 字号弹性脉冲（原版只 juice_up，不弹 "+N"）。
     scheduleGame(tBeatLevel, [this, token, newLevel]() {
         if (token != mHandLevelAnimToken) return;
-        mLblHandLevel->setText(QString("等级%1").arg(newLevel));
+        mLblHandLevel->setText(QStringLiteral("等级%1").arg(newLevel));
         mLblHandLevel->setStyleSheet(
-            QString("color:%1; background:transparent;").arg(handLevelColor(newLevel)));
+            QStringLiteral("color:%1; background:transparent;").arg(handLevelColor(newLevel)));
         juiceLabelPulse(mLblHandLevel, 1.40, 360);
     });
 
@@ -10643,7 +10643,7 @@ void MainWindow::playAllHandsLevelUpAnimation()
         if (token != mHandLevelAnimToken) return;
         mLblHandLevel->setText(QStringLiteral("+1"));
         mLblHandLevel->setStyleSheet(
-            QString("color:%1; background:transparent;").arg(handLevelColor(2)));
+            QStringLiteral("color:%1; background:transparent;").arg(handLevelColor(2)));
         juiceLabelPulse(mLblHandLevel, 1.40, 360);
     });
 
@@ -10800,8 +10800,8 @@ void MainWindow::updateHandPreview()
     }
     HandResult r = mGameState->previewSelection(mSelected);
     mLblHandName ->setText(r.name);
-    mLblHandLevel->setText(QString("等级%1").arg(r.level));
-    mLblHandLevel->setStyleSheet(QString("color:%1; background:transparent;").arg(handLevelColor(r.level)));
+    mLblHandLevel->setText(QStringLiteral("等级%1").arg(r.level));
+    mLblHandLevel->setStyleSheet(QStringLiteral("color:%1; background:transparent;").arg(handLevelColor(r.level)));
     setLabelScaledText(mLblChips, formatScoreNumber(r.chips), uiPx(42));
     setLabelScaledText(mLblMult,  formatScoreNumber(r.mult),  uiPx(42));
 }
@@ -10869,7 +10869,7 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev, double percent)
     case ScoreEventKind::ScoringCardChip:
         AudioManager::instance()->play(QStringLiteral("chips1"), statusPitch, 1.0);
         color = QColor("#009dff");
-        text = QString("+%1").arg(formatScoreNumber(ev.intValue));
+        text = QStringLiteral("+%1").arg(formatScoreNumber(ev.intValue));
         mDisplayedChips += ev.intValue;
         setLabelScaledText(mLblChips, formatScoreNumber(mDisplayedChips), uiPx(42));
         break;
@@ -10877,7 +10877,7 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev, double percent)
     case ScoreEventKind::EditionChip:
         AudioManager::instance()->play(QStringLiteral("foil2"), statusPitch, 0.3);
         color = QColor("#009dff");
-        text = QString("+%1").arg(formatScoreNumber(ev.intValue));
+        text = QStringLiteral("+%1").arg(formatScoreNumber(ev.intValue));
         mDisplayedChips += ev.intValue;
         setLabelScaledText(mLblChips, formatScoreNumber(mDisplayedChips), uiPx(42));
         break;
@@ -10885,7 +10885,7 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev, double percent)
     case ScoreEventKind::JokerChip:
         AudioManager::instance()->play(QStringLiteral("generic1"), statusPitch, 1.0);
         color = QColor("#009dff");
-        text = QString("+%1").arg(formatScoreNumber(ev.intValue));
+        text = QStringLiteral("+%1").arg(formatScoreNumber(ev.intValue));
         mDisplayedChips += ev.intValue;
         setLabelScaledText(mLblChips, formatScoreNumber(mDisplayedChips), uiPx(42));
         break;
@@ -10893,7 +10893,7 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev, double percent)
     case ScoreEventKind::EnhancementMult:
         AudioManager::instance()->play(QStringLiteral("multhit1"), statusPitch, 1.0);
         color = QColor("#fe5f55");
-        text = QString("+%1").arg(formatScoreNumber(ev.intValue));
+        text = QStringLiteral("+%1").arg(formatScoreNumber(ev.intValue));
         mDisplayedMult += ev.intValue;
         setLabelScaledText(mLblMult, formatScoreNumber(mDisplayedMult), uiPx(42));
         break;
@@ -10901,7 +10901,7 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev, double percent)
     case ScoreEventKind::EditionMult:
         AudioManager::instance()->play(QStringLiteral("foil2"), statusPitch, 0.3);
         color = QColor("#fe5f55");
-        text = QString("+%1").arg(formatScoreNumber(ev.intValue));
+        text = QStringLiteral("+%1").arg(formatScoreNumber(ev.intValue));
         mDisplayedMult += ev.intValue;
         setLabelScaledText(mLblMult, formatScoreNumber(mDisplayedMult), uiPx(42));
         break;
@@ -10909,7 +10909,7 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev, double percent)
     case ScoreEventKind::JokerMult:
         AudioManager::instance()->play(QStringLiteral("multhit1"), statusPitch, 1.0);
         color = QColor("#fe5f55");
-        text = QString("+%1").arg(formatScoreNumber(ev.intValue));
+        text = QStringLiteral("+%1").arg(formatScoreNumber(ev.intValue));
         mDisplayedMult += ev.intValue;
         setLabelScaledText(mLblMult, formatScoreNumber(mDisplayedMult), uiPx(42));
         break;
@@ -10919,7 +10919,7 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev, double percent)
     case ScoreEventKind::JokerXMult:
         AudioManager::instance()->play(QStringLiteral("multhit2"), statusPitch, 0.7);
         color = QColor("#fe5f55");
-        text = QString("×%1").arg(QString::number(ev.xmultValue, 'g', 3));
+        text = QStringLiteral("×%1").arg(QString::number(ev.xmultValue, 'g', 3));
         isXMult = true;
         mDisplayedMult = std::max(1.0, mDisplayedMult * ev.xmultValue);
         if (!std::isfinite(mDisplayedMult)) mDisplayedMult = std::numeric_limits<double>::infinity();
@@ -10949,7 +10949,7 @@ void MainWindow::playScoreEvent(const ScoreEvent &ev, double percent)
     case ScoreEventKind::DollarGain:
         AudioManager::instance()->play(QStringLiteral("coin3"), statusPitch, 1.0);
         color = QColor("#f3b958");
-        text = QString("+$%1").arg(formatScoreNumber(ev.intValue));
+        text = QStringLiteral("+$%1").arg(formatScoreNumber(ev.intValue));
         refreshGold();
         break;
 

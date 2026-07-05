@@ -1167,7 +1167,7 @@ void GameState::playCards(const QVector<int> &indices) {
         if (j.type != JokerType::ClassTemplate || j.isDebuffed) continue;
         if (j.counter == 0) {
             j.counter = static_cast<int>(result.type) + 1;
-            j.description = QString("{C:attention}template<%1>{} 已实例化\n"
+            j.description = QStringLiteral("{C:attention}template<%1>{} 已实例化\n"
                                     "打出{C:attention}%1{}时 {X:mult,C:white}×%2{}\n"
                                     "{C:inactive}Boss 击败后重置")
                                 .arg(HandEvaluator::handTypeName(result.type))

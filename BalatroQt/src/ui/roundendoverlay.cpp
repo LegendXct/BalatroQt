@@ -24,7 +24,7 @@ static QString formatLargeNumber(double num)
     if (num >= 100000000000.0) {
         int exp = int(std::floor(std::log10(std::max(num, 1.0))));
         double mantissa = num / std::pow(10.0, exp);
-        return QString("%1%2e%3").arg(neg ? "-" : "")
+        return QStringLiteral("%1%2e%3").arg(neg ? "-" : "")
                                   .arg(QString::number(mantissa, 'f', 3))
                                   .arg(exp);
     }
@@ -208,7 +208,7 @@ void RoundEndOverlay::buildUi()
         *leftNumOut = new QLabel("0", row);
         QFont nf = mCNFont; nf.setPixelSize(26); nf.setBold(true);
         (*leftNumOut)->setFont(nf);
-        (*leftNumOut)->setStyleSheet(QString("color:%1; background:transparent;").arg(numColor));
+        (*leftNumOut)->setStyleSheet(QStringLiteral("color:%1; background:transparent;").arg(numColor));
         (*leftNumOut)->setFixedWidth(40);
         (*leftNumOut)->setAlignment(Qt::AlignCenter);
         hbl->addWidget(*leftNumOut);
@@ -328,7 +328,7 @@ void RoundEndOverlay::setData(int blindChipRow, double targetScore, int blindRew
                               int extraBonus, int totalPayout)
 {
     int total = (totalPayout >= 0) ? totalPayout : (blindReward + handBonus + interest + extraBonus);
-    mCashOutBtn->setText(QString("提现: $%1").arg(total));
+    mCashOutBtn->setText(QStringLiteral("提现: $%1").arg(total));
 
     if (mBlindChip) mBlindChip->setBlindRow(blindChipRow);
 

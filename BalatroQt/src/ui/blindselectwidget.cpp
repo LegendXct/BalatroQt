@@ -136,7 +136,7 @@ void BlindSelectWidget::buildUi()
 
         // ===== 卡片本身完全透明 =====
         b.card = new QWidget(this);
-        b.card->setObjectName(QString("blindCard%1").arg(i));
+        b.card->setObjectName(QStringLiteral("blindCard%1").arg(i));
         b.card->setFixedSize(dp(CARD_W), dp(CARD_H));
         b.card->setAttribute(Qt::WA_StyledBackground, true);
         b.card->setStyleSheet(QString(
@@ -153,7 +153,7 @@ void BlindSelectWidget::buildUi()
 
         // ===== 上半部分 upperBox(无边框,深一点的灰) =====
         b.upperBox = new QWidget(b.card);
-        b.upperBox->setObjectName(QString("upperBox%1").arg(i));
+        b.upperBox->setObjectName(QStringLiteral("upperBox%1").arg(i));
         b.upperBox->setAttribute(Qt::WA_StyledBackground, true);
         b.upperBox->setStyleSheet(QString(
                                       "QWidget#%1 {"
@@ -186,7 +186,7 @@ void BlindSelectWidget::buildUi()
         QFont bf = mCNFont; bf.setPixelSize(fontPx(20)); bf.setBold(true);
         b.banner->setFont(bf);
         b.banner->setAlignment(Qt::AlignCenter);
-        b.banner->setObjectName(QString("blindBanner%1").arg(i));   // ← 加
+        b.banner->setObjectName(QStringLiteral("blindBanner%1").arg(i));   // ← 加
         b.banner->setStyleSheet(
             "QLabel#blindBanner0 {"   // 占位,refresh 会动态写
             "  color:white; background:#374244;"
