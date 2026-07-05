@@ -162,7 +162,9 @@ DeckSelectWidget::DeckSelectWidget(const QFont &cnFont, QWidget *parent)
     for (GameDeckId id : selectableDeckOrder()) {
         const QPixmap back = deckBackPixmapFor(id);
         mDeckOptions.append({ id, back });
-        mDeckPreviewPixmaps.append(deckStackPixmap(back));
+        // 预览牌堆图较贵（叠 10 张 + 逐张剪影）。以前在这里一次性把所有牌组都建好，
+        // 从主菜单进入时会明显卡一下。改为按需构建（deckPreviewFor），并跨次打开静态缓存。
+        mDeckPreviewPixmaps.append(QPixmap());
     }
 
     auto makeArrow = [&](const QString &text, QWidget *parentWidget, int hMul) {
@@ -381,12 +383,8 @@ void DeckSelectWidget::refreshSelection()
 {
     const auto deck = createGameDeck(mSelected);
     setUpdatesEnabled(false);
-    if (mPreviewLabel) {
-        if (mSelectedIndex >= 0 && mSelectedIndex < mDeckPreviewPixmaps.size())
-            mPreviewLabel->setPixmap(mDeckPreviewPixmaps[mSelectedIndex]);
-        else
-            mPreviewLabel->setPixmap(deckStackPixmap(mDeckOptions[mSelectedIndex].second));
-    }
+    if (mPreviewLabel)
+        mPreviewLabel->setPixmap(deckPreviewFor(mSelectedIndex));
     if (mNameLabel)
         mNameLabel->setText(deck->name());
     if (mDescLabel)
@@ -475,6 +473,27 @@ QPixmap DeckSelectWidget::deckBackPixmapFor(GameDeckId id)
                       pos.y() * CardItem::SRC_H,
                       CardItem::SRC_W,
                       CardItem::SRC_H);
+}
+
+QPixmap DeckSelectWidget::deckPreviewFor(int index)
+{
+    if (index < 0 || index >= mDeckOptions.size()) return QPixmap();
+    // 本次会话已建好就直接用。
+    if (index < mDeckPreviewPixmaps.size() && !mDeckPreviewPixmaps[index].isNull())
+        return mDeckPreviewPixmaps[index];
+    // 跨次打开的静态缓存：牌堆预览只与牌组 id 和当前尺寸 mUnit 有关，构建一次后
+    // 再次进入牌组选择界面即可秒开。
+    static QHash<QString, QPixmap> sStackCache;
+    const QString key = QString::number(int(mDeckOptions[index].first))
+                      + QLatin1Char('|') + QString::number(mUnit);
+    QPixmap pm = sStackCache.value(key);
+    if (pm.isNull()) {
+        pm = deckStackPixmap(mDeckOptions[index].second);
+        sStackCache.insert(key, pm);
+    }
+    if (index < mDeckPreviewPixmaps.size())
+        mDeckPreviewPixmaps[index] = pm;
+    return pm;
 }
 
 QPixmap DeckSelectWidget::deckStackPixmap(const QPixmap &back) const
