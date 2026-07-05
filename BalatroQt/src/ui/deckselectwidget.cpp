@@ -202,7 +202,7 @@ DeckSelectWidget::DeckSelectWidget(const QFont &cnFont, QWidget *parent)
     mNameLabel->setFont(nf);
     mNameLabel->setAlignment(Qt::AlignCenter);
     mNameLabel->setFixedHeight(int(0.60 * U));
-    mNameLabel->setStyleSheet(QString("color:white; background:#263436; border:0; border-radius:%1px;")
+    mNameLabel->setStyleSheet(QStringLiteral("color:white; background:#263436; border:0; border-radius:%1px;")
                                   .arg(int(0.08 * U)));
     infoV->addWidget(mNameLabel);
 
@@ -211,7 +211,7 @@ DeckSelectWidget::DeckSelectWidget(const QFont &cnFont, QWidget *parent)
     mDescLabel->setFont(df);
     mDescLabel->setAlignment(Qt::AlignCenter);
     mDescLabel->setWordWrap(true);
-    mDescLabel->setStyleSheet(QString("color:#142022; background:#e9f1f1; border:0; border-radius:%1px; padding:%2px;")
+    mDescLabel->setStyleSheet(QStringLiteral("color:#142022; background:#e9f1f1; border:0; border-radius:%1px; padding:%2px;")
                                   .arg(int(0.08 * U)).arg(int(0.05 * U)));
     infoV->addWidget(mDescLabel, 1);
     midH->addWidget(info, 0, Qt::AlignCenter);
@@ -278,7 +278,7 @@ DeckSelectWidget::DeckSelectWidget(const QFont &cnFont, QWidget *parent)
     verticalStake->setFont(vertFont);
     verticalStake->setFixedSize(int(0.50 * U), int(1.25 * U));
     verticalStake->setAlignment(Qt::AlignCenter);
-    verticalStake->setStyleSheet(QString("color:#53676b; background:#111a1c; border:1px solid #202c2f; border-radius:%1px;")
+    verticalStake->setStyleSheet(QStringLiteral("color:#53676b; background:#111a1c; border:1px solid #202c2f; border-radius:%1px;")
                                      .arg(int(0.05 * U)));
     stakeH->addWidget(verticalStake, 0, Qt::AlignCenter);
 
@@ -304,7 +304,7 @@ DeckSelectWidget::DeckSelectWidget(const QFont &cnFont, QWidget *parent)
     mStakeDescLabel->setFont(sdf);
     mStakeDescLabel->setAlignment(Qt::AlignCenter);
     mStakeDescLabel->setWordWrap(true);
-    mStakeDescLabel->setStyleSheet(QString("color:#142022; background:#e9f1f1; border:0; border-radius:%1px; padding:%2px;")
+    mStakeDescLabel->setStyleSheet(QStringLiteral("color:#142022; background:#e9f1f1; border:0; border-radius:%1px; padding:%2px;")
                                       .arg(int(0.08 * U)).arg(int(0.04 * U)));
     stakeInfoV->addWidget(mStakeDescLabel, 1);
     stakeH->addWidget(stakeInfo, 1);
@@ -395,7 +395,7 @@ void DeckSelectWidget::refreshSelection()
         mPageLabel->setText(deck->name());
     for (int i = 0; i < mDeckPips.size(); ++i) {
         const bool on = i == mSelectedIndex;
-        mDeckPips[i]->setStyleSheet(QString("background:%1; border-radius:%2px; border:none;")
+        mDeckPips[i]->setStyleSheet(QStringLiteral("background:%1; border-radius:%2px; border:none;")
                                         .arg(on ? QStringLiteral("#ffffff") : QStringLiteral("#050607"))
                                         .arg(qMax(2, mDeckPips[i]->width() / 2)));
     }
@@ -413,7 +413,7 @@ void DeckSelectWidget::refreshStakeSelection()
         mStakeDescLabel->setText(stakeDescription(mSelectedStake));
     for (int i = 0; i < mStakePips.size(); ++i) {
         const bool on = i == mSelectedStake - 1;
-        mStakePips[i]->setStyleSheet(QString("background:%1; border-radius:%2px; border:none;")
+        mStakePips[i]->setStyleSheet(QStringLiteral("background:%1; border-radius:%2px; border:none;")
                                          .arg(on ? QStringLiteral("#ffffff") : QStringLiteral("#050607"))
                                          .arg(qMax(2, mStakePips[i]->width() / 2)));
     }
