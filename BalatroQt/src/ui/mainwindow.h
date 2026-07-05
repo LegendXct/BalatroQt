@@ -459,6 +459,9 @@ private:
                                           // 用 QPointer 防止 deleteLater 后留下悬空指针被二次访问
     void showOptionsOverlay();
     void hideOptionsOverlay();
+    // 选项面板不进外层布局，位置手动管理：居中，或从底部浮入居中。
+    void centerOptionsPanel();
+    void floatOptionsPanelUp();
     void startNewRunFromOptions();
     // 设置界面：用 in-scene overlay 复用现有覆盖层模式（避免在 QOpenGLWidget 上弹原生 QDialog）。
     void showSettingsOverlay();

@@ -2162,27 +2162,10 @@ void MainWindow::showOptionsOverlay()
     // 不再使用 QDialog::exec()：全屏窗口上叠加/关闭顶层原生对话框时，
     // QOpenGLWidget 可能在部分 Windows 显卡驱动上重建后台缓冲，表现为瞬时黑屏。
     // 这里改为普通子 QWidget 覆盖层，和游戏场景共用同一个窗口，不触发原生窗口切换。
-    auto animateIn = [this]() {
-        if (!mOptionsOverlay) return;
-        QWidget *p = mOptionsOverlay->findChild<QFrame*>("OptionsPanel");
-        if (!p) return;
-        const QPoint endPos = p->pos();
-        const QPoint startPos(endPos.x(), endPos.y() + qMax(160, mOptionsOverlay->height() / 2));
-        p->move(startPos);
-        auto *anim = new QPropertyAnimation(p, "pos", mOptionsOverlay);
-        anim->setDuration(280);
-        anim->setStartValue(startPos);
-        anim->setEndValue(endPos);
-        anim->setEasingCurve(QEasingCurve::OutCubic);
-        anim->start(QAbstractAnimation::DeleteWhenStopped);
-    };
 
     if (mOptionsOverlay) {
-        mOptionsOverlay->setGeometry(centralWidget() ? centralWidget()->rect() : rect());
-        mOptionsOverlay->raise();
-        mOptionsOverlay->show();
-        // 复用覆盖层时也补一次滑入动画。
-        QTimer::singleShot(0, this, animateIn);
+        // 复用覆盖层：从底部浮入居中（floatOptionsPanelUp 内部会先摆好起始位再显示）。
+        floatOptionsPanelUp();
         return;
     }
 
@@ -2203,15 +2186,8 @@ void MainWindow::showOptionsOverlay()
         "QPushButton#back:hover { background:#ffb730; }"
         ).arg(uiPx(14)).arg(uiPx(20)).arg(uiPx(16)));
 
-    auto *root = new QVBoxLayout(mOptionsOverlay);
-    root->setContentsMargins(0, 0, 0, 0);
-    root->setSpacing(0);
-    root->addStretch(1);
-
-    auto *centerRow = new QHBoxLayout;
-    centerRow->setContentsMargins(0, 0, 0, 0);
-    centerRow->addStretch(1);
-
+    // 面板不进外层布局，改为覆盖层的自由子控件、手动定位（居中 / 底部浮入），
+    // 避免布局管理器在动画期间反复把 pos 抢回布局位置，导致画面抖动/闪烁。
     auto *panel = new QFrame(mOptionsOverlay);
     panel->setObjectName("OptionsPanel");
     panel->setFixedSize(dp(460), dp(720));   // 高度跟随 78×7 + 标题/间距/边距
@@ -2277,16 +2253,47 @@ void MainWindow::showOptionsOverlay()
     });
     v->addWidget(back);
 
-    centerRow->addWidget(panel);
-    centerRow->addStretch(1);
-    root->addLayout(centerRow);
-    root->addStretch(1);
-
+    // 覆盖层撑满，面板从底部浮入居中。
     mOptionsOverlay->setGeometry(host->rect());
+    floatOptionsPanelUp();
+}
+
+// 把选项面板摆到覆盖层正中央（无动画），用于 resize 时保持居中。
+void MainWindow::centerOptionsPanel()
+{
+    if (!mOptionsOverlay) return;
+    QWidget *p = mOptionsOverlay->findChild<QFrame*>("OptionsPanel");
+    if (!p) return;
+    const QSize ov = mOptionsOverlay->size();
+    const QSize ps = p->size();
+    p->move((ov.width() - ps.width()) / 2, (ov.height() - ps.height()) / 2);
+}
+
+// 点击“选项”后：二级菜单从屏幕底部浮动到正中央。
+// 关键点：先把面板摆到起始位（屏幕下方）再 show()，让第一帧就在起点，
+// 不会出现“先在中央闪一下再跳到底部”的抖动；面板不在布局里，动画期间无人抢位。
+void MainWindow::floatOptionsPanelUp()
+{
+    if (!mOptionsOverlay) return;
+    // 先撑满父控件，保证下面按当前尺寸计算的起始/终止位是准确的（复用覆盖层时窗口可能已 resize）。
+    if (centralWidget()) mOptionsOverlay->setGeometry(centralWidget()->rect());
+    QWidget *p = mOptionsOverlay->findChild<QFrame*>("OptionsPanel");
+    if (!p) return;
+    const QSize ov = mOptionsOverlay->size();
+    const QSize ps = p->size();
+    const QPoint endPos((ov.width() - ps.width()) / 2, (ov.height() - ps.height()) / 2);
+    const QPoint startPos(endPos.x(), ov.height());   // 完全位于屏幕下方
+    p->move(startPos);
+
     mOptionsOverlay->raise();
     mOptionsOverlay->show();
-    // 等 layout 完成后再触发滑入动画——否则 panel.pos() 还是 (0,0)。
-    QTimer::singleShot(0, this, animateIn);
+
+    auto *anim = new QPropertyAnimation(p, "pos", mOptionsOverlay);
+    anim->setDuration(300);
+    anim->setStartValue(startPos);
+    anim->setEndValue(endPos);
+    anim->setEasingCurve(QEasingCurve::OutCubic);
+    anim->start(QAbstractAnimation::DeleteWhenStopped);
 }
 
 void MainWindow::hideOptionsOverlay()
@@ -7616,6 +7623,8 @@ void MainWindow::resizeEvent(QResizeEvent *event)
     }
     if (mOptionsOverlay && centralWidget()) {
         mOptionsOverlay->setGeometry(centralWidget()->rect());
+        // 面板不在布局里，需手动跟随覆盖层重新居中。
+        centerOptionsPanel();
         if (mOptionsOverlay->isVisible()) mOptionsOverlay->raise();
     }
     // 主菜单 overlay 在构造体里同步创建（防启动闪屏），那时 centralWidget 尺寸还是 0；
@@ -9337,6 +9346,7 @@ bool MainWindow::eventFilter(QObject *obj, QEvent *ev)
             mDeckSelectOverlay->setGeometry(centralWidget()->rect());
         if (mOptionsOverlay && centralWidget()) {
             mOptionsOverlay->setGeometry(centralWidget()->rect());
+            centerOptionsPanel();
             if (mOptionsOverlay->isVisible()) mOptionsOverlay->raise();
         }
     }
