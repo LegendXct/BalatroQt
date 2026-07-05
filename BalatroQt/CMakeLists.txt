@@ -1,0 +1,172 @@
+cmake_minimum_required(VERSION 3.19)
+project(BalatroQt LANGUAGES CXX)
+
+set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD_REQUIRED ON)
+
+find_package(Qt6 6.5 REQUIRED COMPONENTS Core Widgets OpenGL OpenGLWidgets Multimedia)
+
+qt_standard_project_setup()
+
+qt_add_executable(BalatroQt
+    WIN32 MACOSX_BUNDLE
+    main.cpp
+    src/ui/mainwindow.cpp src/ui/mainwindow.h src/ui/mainwindow.ui
+    src/utils/constants.h
+    src/utils/shadereffects.h src/utils/shadereffects.cpp
+    src/utils/gpueffectsrenderer.h src/utils/gpueffectsrenderer.cpp
+    src/utils/balatromotion.h src/utils/balatromotion.cpp
+    src/card/carddata.h src/card/carddata.cpp
+    src/card/joker.h src/card/joker.cpp
+    src/game/deck.h src/game/deck.cpp
+    src/game/handevaluator.h src/game/handevaluator.cpp
+    src/game/gamestate.h src/game/gamestate.cpp
+    src/game/gamedeck.h src/game/gamedeck.cpp
+    src/game/demoscript.h src/game/demoscript.cpp
+    src/card/cardshadow.h src/card/cardshadow.cpp
+    src/card/carditem.h src/card/carditem.cpp
+    src/card/deckskin.h src/card/deckskin.cpp
+    src/ui/roundendoverlay.h src/ui/roundendoverlay.cpp
+    src/card/jokeritem.h src/card/jokeritem.cpp
+    src/game/shop.h src/game/shop.cpp
+    src/game/tag.h src/game/tag.cpp
+    src/ui/shopwidget.h src/ui/shopwidget.cpp
+    src/game/bossblind.h src/game/bossblind.cpp
+    src/card/consumable.h src/card/consumable.cpp
+    src/card/consumableitem.h src/card/consumableitem.cpp
+    src/game/boosterpack.h src/game/boosterpack.cpp
+    src/ui/packopenwidget.h src/ui/packopenwidget.cpp
+    src/ui/blindselectwidget.h src/ui/blindselectwidget.cpp
+    src/ui/floatingscore.h src/ui/floatingscore.cpp
+    src/ui/balatrographicsview.h src/ui/balatrographicsview.cpp
+    src/ui/shopsignwidget.h src/ui/shopsignwidget.cpp
+    src/ui/deckviewwidget.h src/ui/deckviewwidget.cpp
+    src/ui/deckselectwidget.h src/ui/deckselectwidget.cpp
+    src/ui/splashshaderoverlay.h src/ui/splashshaderoverlay.cpp
+    src/ui/animatedblindchip.h src/ui/animatedblindchip.cpp
+    src/ui/balatroinfopanel.h src/ui/balatroinfopanel.cpp
+    src/ui/cardtooltipformat.h
+    src/ui/scoreeffectsoverlays.h src/ui/scoreeffectsoverlays.cpp
+    src/audio/audiomanager.h src/audio/audiomanager.cpp
+)
+
+target_include_directories(BalatroQt
+    PRIVATE
+        src/card
+        src/game
+        src/ui
+        src/utils
+        src/audio
+)
+target_link_libraries(BalatroQt
+    PRIVATE
+        Qt6::Core
+        Qt6::Widgets
+        Qt6::OpenGL
+        Qt6::OpenGLWidgets
+        Qt6::Multimedia
+)
+
+qt_add_resources(BalatroQt "textures"
+    PREFIX "/textures"
+    BASE "resources"
+    FILES
+        resources/images/8BitDeck.png
+        resources/images/Enhancers.png
+        resources/images/Jokers.png
+        resources/images/Tarots.png
+        resources/images/boosters.png
+        resources/images/BlindChips.png
+        resources/images/chips.png
+        resources/images/deck_queue.png
+        resources/images/deck_stack.png
+        resources/images/stickers.png
+        resources/images/tags.png
+        resources/images/ui_assets.png
+        resources/images/icons.png
+        resources/images/balatro.png
+        resources/images/ShopSignAnimation.png
+        resources/images/Vouchers.png
+        resources/images/deckskin_cs_sA.png
+        resources/images/deckskin_cs_sJ.png
+        resources/images/deckskin_cs_sQ.png
+        resources/images/deckskin_cs_sK.png
+        resources/images/deckskin_cs_hA.png
+        resources/images/deckskin_cs_hJ.png
+        resources/images/deckskin_cs_hQ.png
+        resources/images/deckskin_cs_hK.png
+        resources/images/deckskin_cs_cA.png
+        resources/images/deckskin_cs_cJ.png
+        resources/images/deckskin_cs_cQ.png
+        resources/images/deckskin_cs_cK.png
+        resources/images/deckskin_cs_dA.png
+        resources/images/deckskin_cs_dJ.png
+        resources/images/deckskin_cs_dQ.png
+        resources/images/deckskin_cs_dK.png
+        resources/images/joker_cs_overload.png
+        resources/images/joker_cs_template.png
+        resources/images/tarot_cs_iterator.png
+        resources/images/tarot_cs_shallow.png
+        resources/images/enh_cs_iterator.png
+)
+
+
+qt_add_resources(BalatroQt "shader_sources"
+    PREFIX "/shaders"
+    BASE "resources"
+    FILES
+        resources/shaders/CRT.fs
+        resources/shaders/background.fs
+        resources/shaders/booster.fs
+        resources/shaders/debuff.fs
+        resources/shaders/dissolve.fs
+        resources/shaders/flame.fs
+        resources/shaders/flash.fs
+        resources/shaders/foil.fs
+        resources/shaders/gold_seal.fs
+        resources/shaders/holo.fs
+        resources/shaders/hologram.fs
+        resources/shaders/negative.fs
+        resources/shaders/negative_shine.fs
+        resources/shaders/played.fs
+        resources/shaders/polychrome.fs
+        resources/shaders/skew.fs
+        resources/shaders/splash.fs
+        resources/shaders/vortex.fs
+        resources/shaders/voucher.fs
+)
+
+qt_add_resources(BalatroQt "fonts"
+    PREFIX "/fonts"
+    BASE "resources"
+    FILES
+        resources/fonts/m6x11plus.ttf
+        resources/fonts/NotoSansSC-Bold.ttf
+)
+
+file(GLOB BALATRO_AUDIO_FILES CONFIGURE_DEPENDS
+    "${CMAKE_CURRENT_SOURCE_DIR}/resources/*.ogg"
+    "${CMAKE_CURRENT_SOURCE_DIR}/resources/sounds/*.ogg"
+)
+
+qt_add_resources(BalatroQt "audio"
+    PREFIX "/sounds"
+    BASE "${CMAKE_CURRENT_SOURCE_DIR}/resources"
+    FILES
+        ${BALATRO_AUDIO_FILES}
+)
+
+include(GNUInstallDirs)
+
+install(TARGETS BalatroQt
+    BUNDLE  DESTINATION .
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+    LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+)
+
+qt_generate_deploy_app_script(
+    TARGET BalatroQt
+    OUTPUT_SCRIPT deploy_script
+    NO_UNSUPPORTED_PLATFORM_ERROR
+)
+install(SCRIPT ${deploy_script})
