@@ -8653,16 +8653,8 @@ void MainWindow::animateConsumableUseThen(int idx, std::function<void()> after)
     }
     const bool shopShouldSlide = isPlanetLike && mShopWidget && mShopWidget->isVisible();
     const QPoint shopHome = shopShouldSlide ? mShopWidget->pos() : QPoint();
-    if (shopShouldSlide) {
-        if (mView) mView->raise();
-        item->setZValue(2400);
-        auto *shopDown = new QPropertyAnimation(mShopWidget, "pos", this);
-        shopDown->setDuration(scaledDelay(150));
-        shopDown->setStartValue(mShopWidget->pos());
-        shopDown->setEndValue(QPoint(mShopWidget->x(), mPlayPage ? mPlayPage->height() + 20 : mShopWidget->y() + 500));
-        shopDown->setEasingCurve(QEasingCurve::InCubic);
-        shopDown->start(QAbstractAnimation::DeleteWhenStopped);
-    }
+    // 商店内使用星球牌:不再立刻抬起视图(那会瞬间盖住商店,下移动画看不见)。
+    // 改为商店先向下滑出屏幕,结束后再抬起视图 + 抬升卡牌(见下方 startRise 门控)。
 
     auto *group = new QParallelAnimationGroup(this);
     auto *posAnim = new QPropertyAnimation(item, "pos", group);
@@ -8764,7 +8756,26 @@ void MainWindow::animateConsumableUseThen(int idx, std::function<void()> after)
         });
         group->deleteLater();
     });
-    group->start();
+
+    // 抬升卡牌 + 抬起视图。商店在场时先让商店滑出屏幕，结束后再开演；否则立即开演。
+    auto startRise = [this, group, guard, shopShouldSlide]() {
+        if (shopShouldSlide) {
+            if (mView) mView->raise();
+            if (guard) guard->setZValue(2400);
+        }
+        group->start();
+    };
+    if (shopShouldSlide) {
+        auto *shopDown = new QPropertyAnimation(mShopWidget, "pos", this);
+        shopDown->setDuration(scaledDelay(220));
+        shopDown->setStartValue(mShopWidget->pos());
+        shopDown->setEndValue(QPoint(mShopWidget->x(), mPlayPage ? mPlayPage->height() + 20 : mShopWidget->y() + 500));
+        shopDown->setEasingCurve(QEasingCurve::InCubic);
+        connect(shopDown, &QPropertyAnimation::finished, this, startRise);
+        shopDown->start(QAbstractAnimation::DeleteWhenStopped);
+    } else {
+        startRise();
+    }
 }
 
 void MainWindow::spawnShopPlanetUseFloater(int consumableType, const QPoint &globalCenter)
@@ -8795,48 +8806,44 @@ void MainWindow::spawnShopPlanetUseFloater(int consumableType, const QPoint &glo
 
     const bool shopShouldSlide = mShopWidget && mShopWidget->isVisible();
     const QPoint shopHome = shopShouldSlide ? mShopWidget->pos() : QPoint();
-    if (shopShouldSlide) {
-        if (mView) mView->raise();
-        auto *shopDown = new QPropertyAnimation(mShopWidget, "pos", this);
-        shopDown->setDuration(scaledDelay(150));
-        shopDown->setStartValue(mShopWidget->pos());
-        shopDown->setEndValue(QPoint(mShopWidget->x(), mPlayPage ? mPlayPage->height() + 20 : mShopWidget->y() + 500));
-        shopDown->setEasingCurve(QEasingCurve::InCubic);
-        shopDown->start(QAbstractAnimation::DeleteWhenStopped);
-    }
-
-    // 抬升:与消耗牌槽内 animateConsumableUseThen 同样 170ms / 上移 42px / scale 1.13。
     QPointer<ConsumableItem> guard(floater);
-    auto *group = new QParallelAnimationGroup(this);
-    auto *posAnim = new QPropertyAnimation(floater, "pos", group);
-    posAnim->setDuration(scaledDelay(260));
-    posAnim->setStartValue(floater->pos());
-    posAnim->setEndValue(QPointF((mSceneW - TOP_SLOT_W) / 2.0, (mSceneH - TOP_SLOT_H) / 2.0));
-    posAnim->setEasingCurve(QEasingCurve::OutCubic);
-    auto *scaleAnim = new QPropertyAnimation(floater, "scale", group);
-    scaleAnim->setDuration(scaledDelay(170));
-    scaleAnim->setStartValue(1.0);
-    scaleAnim->setEndValue(1.13);
-    scaleAnim->setEasingCurve(QEasingCurve::OutCubic);
-    group->addAnimation(posAnim);
-    group->addAnimation(scaleAnim);
-    connect(group, &QParallelAnimationGroup::finished, this, [this]() {
-        mDelayHandLevelForConsumableUse = false;
-        if (mPendingHandLevelAnimation) {
-            mPendingHandLevelAnimation = false;
-            QTimer::singleShot(0, this, &MainWindow::onHandLevelsChanged);
-        }
-    });
-    group->start(QAbstractAnimation::DeleteWhenStopped);
 
-    const int beatDelays[3] = { 80, 360, 660 };
-    for (int beat = 0; beat < 3; ++beat) {
-        QPointer<ConsumableItem> g2 = guard;
-        QTimer::singleShot(scaledDelay(260 + beatDelays[beat]), this, [g2]() {
-            if (g2) g2->juiceUp(1.18, 220);
+    // 星球牌整段演出:抬升 + 3 拍 juice + 淡出。改为在商店下移动画结束后才开演——
+    // 之前 mView->raise() 立刻把商店盖住,导致下移过程完全看不见,商店像"直接消失"。
+    // 现在顺序为:商店先向下滑出屏幕，结束后再抬起视图并播放星球牌动画。
+    auto beginPlanet = [this, floater, guard, shopShouldSlide, shopHome]() {
+        if (shopShouldSlide && mView) mView->raise();
+        // 抬升:与消耗牌槽内 animateConsumableUseThen 同样 170ms / 上移 42px / scale 1.13。
+        auto *group = new QParallelAnimationGroup(this);
+        auto *posAnim = new QPropertyAnimation(floater, "pos", group);
+        posAnim->setDuration(scaledDelay(260));
+        posAnim->setStartValue(floater->pos());
+        posAnim->setEndValue(QPointF((mSceneW - TOP_SLOT_W) / 2.0, (mSceneH - TOP_SLOT_H) / 2.0));
+        posAnim->setEasingCurve(QEasingCurve::OutCubic);
+        auto *scaleAnim = new QPropertyAnimation(floater, "scale", group);
+        scaleAnim->setDuration(scaledDelay(170));
+        scaleAnim->setStartValue(1.0);
+        scaleAnim->setEndValue(1.13);
+        scaleAnim->setEasingCurve(QEasingCurve::OutCubic);
+        group->addAnimation(posAnim);
+        group->addAnimation(scaleAnim);
+        connect(group, &QParallelAnimationGroup::finished, this, [this]() {
+            mDelayHandLevelForConsumableUse = false;
+            if (mPendingHandLevelAnimation) {
+                mPendingHandLevelAnimation = false;
+                QTimer::singleShot(0, this, &MainWindow::onHandLevelsChanged);
+            }
         });
-    }
-    QTimer::singleShot(scaledDelay(260 + 1200), this, [this, guard, shopShouldSlide, shopHome]() {
+        group->start(QAbstractAnimation::DeleteWhenStopped);
+
+        const int beatDelays[3] = { 80, 360, 660 };
+        for (int beat = 0; beat < 3; ++beat) {
+            QPointer<ConsumableItem> g2 = guard;
+            QTimer::singleShot(scaledDelay(260 + beatDelays[beat]), this, [g2]() {
+                if (g2) g2->juiceUp(1.18, 220);
+            });
+        }
+        QTimer::singleShot(scaledDelay(260 + 1200), this, [this, guard, shopShouldSlide, shopHome]() {
         if (!guard) {
             if (shopShouldSlide && mShopWidget) {
                 mShopWidget->show();
@@ -8877,6 +8884,20 @@ void MainWindow::spawnShopPlanetUseFloater(int consumableType, const QPoint &glo
         });
         fade->start(QAbstractAnimation::DeleteWhenStopped);
     });
+    };   // end beginPlanet
+
+    if (shopShouldSlide) {
+        // 商店先向下滑出屏幕（此时视图未抬起，能完整看到商店下移），结束后再开演星球牌动画。
+        auto *shopDown = new QPropertyAnimation(mShopWidget, "pos", this);
+        shopDown->setDuration(scaledDelay(220));
+        shopDown->setStartValue(mShopWidget->pos());
+        shopDown->setEndValue(QPoint(mShopWidget->x(), mPlayPage ? mPlayPage->height() + 20 : mShopWidget->y() + 500));
+        shopDown->setEasingCurve(QEasingCurve::InCubic);
+        connect(shopDown, &QPropertyAnimation::finished, this, beginPlanet);
+        shopDown->start(QAbstractAnimation::DeleteWhenStopped);
+    } else {
+        beginPlanet();
+    }
 }
 
 void MainWindow::onConsumableClicked(ConsumableItem *item, Qt::MouseButton btn)
