@@ -363,7 +363,7 @@ void DeckViewWidget::refreshTabs()
     mBtnFull->setStyleSheet(mShowingFull ? active : inactive);
 
     mTitle->setText(mShowingFull ? "完整牌组" : "剩余牌组");
-    mSubtitle->setText(QString("剩余 %1 张 / 完整 %2 张")
+    mSubtitle->setText(QStringLiteral("剩余 %1 张 / 完整 %2 张")
                            .arg(mRemainingCards.size())
                            .arg(mFullDeckCards.size()));
 
